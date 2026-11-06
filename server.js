@@ -45,6 +45,10 @@ create unique index if not exists users_name on users(username) where username i
 `);
 function addCol(t, c, type) { if (!db.prepare(`pragma table_info(${t})`).all().some(x => x.name === c)) db.exec(`alter table ${t} add column ${c} ${type}`); }
 addCol('branches', 'openTime', 'text'); addCol('branches', 'graceMins', 'integer');
+addCol('users', 'pinKey', 'text'); addCol('attendance', 'status', 'text'); addCol('attendance', 'breakStartedAt', 'text'); addCol('attendance', 'breakMins', 'integer');
+addCol('shifts', 'no', 'integer'); addCol('cash_moves', 'by', 'text');
+db.exec("create table if not exists settings(k text primary key, v text)");
+db.exec("create unique index if not exists users_pin on users(pinKey) where pinKey is not null and pinKey<>''");
 
 const COLS = {
   branches: ['name', 'phone', 'address', 'openTime', 'graceMins'],
@@ -91,7 +95,11 @@ function update(kind, id, o) {
   if (keys.length) run(`update ${kind} set ${keys.map(k => k + '=?').join(',')} where id=?`, ...keys.map(k => d[k]), id);
   return get(kind, id);
 }
-const strip = u => { const { passHash, ...r } = u; return { ...r, hasPassword: !!passHash }; };
+const strip = u => { const { passHash, pinKey, ...r } = u; return { ...r, hasPassword: !!passHash, hasPin: !!pinKey }; };
+// PINs are stored as a keyed hash (stable salt kept in the DB, independent of the owner password) so a PIN can identify its user
+let pinSalt = one("select v from settings where k='pinSalt'")?.v;
+if (!pinSalt) { pinSalt = crypto.randomBytes(24).toString('hex'); run("insert into settings(k,v) values('pinSalt',?)", pinSalt); }
+const pinKeyOf = pin => crypto.createHmac('sha256', pinSalt).update('pin:' + pin).digest('base64url');
 const log = (me, action, entity, id, detail) =>
   run('insert into audit(ts,who,action,entity,entityId,detail) values(?,?,?,?,?,?)', nowISO(), me?.name || '?', action, entity, id || '', String(detail || '').slice(0, 300));
 
@@ -142,7 +150,7 @@ function whoami(req) {
   if (!o) return null;
   if (o.u === 'owner') return { id: 'owner', role: 'owner', name: 'Owner' };
   const u = get('users', o.u);
-  if (!u || !u.active || !u.passHash || u.passHash.slice(-8) !== o.v) return null;
+  if (!u || !u.active || ![u.passHash, u.pinKey].some(h => h && h.slice(-8) === o.v)) return null;
   return { id: u.id, role: u.role, name: u.name, branchId: u.role === 'cashier' ? u.branchId : null };
 }
 const isAdmin = me => me.role === 'owner' || me.role === 'admin';
@@ -182,11 +190,22 @@ function totals(items, disc) {
 const serviceNet = o => { const svc = sum(o.items.filter(i => i.type === 'service'), i => i.price * i.qty); return o.subtotal > 0 ? svc * o.total / o.subtotal : 0; };
 const commissionOf = (o, pct) => r2(serviceNet(o) * (pct || 0) / 100);
 
-function onDuty(staffId, date) { return one('select * from attendance where staffId=? and date=? and timeOut is null', staffId, date); }
+function onDuty(staffId, date) { return one("select * from attendance where staffId=? and date=? and timeOut is null and ifnull(status,'present')='present'", staffId, date); }
+// roster state for one barber today: none | present | late | break | off | out
+function staffState(staffId, date) {
+  const a = one('select * from attendance where staffId=? and date=? order by timeIn desc limit 1', staffId, date);
+  if (!a) return { state: 'none' };
+  if (a.status === 'off') return { state: 'off', timeIn: a.timeIn };
+  if (a.timeOut) return { state: 'out', timeIn: a.timeIn, timeOut: a.timeOut };
+  const first = one('select lateMins from attendance where staffId=? and date=? order by timeIn limit 1', staffId, date);
+  return { state: a.breakStartedAt ? 'break' : (first.lateMins > 0 ? 'late' : 'present'), timeIn: a.timeIn, lateMins: first.lateMins || 0 };
+}
 function checkAssign(order, b, orderId) {
   const barber = get('staff', b.barberId);
   if (!barber || !barber.active || barber.branchId !== order.branchId) bad(409, 'Barber not in this branch');
-  if (!onDuty(barber.id, todayStr())) bad(409, `${barber.name} is not clocked in`);
+  const duty = onDuty(barber.id, todayStr());
+  if (!duty) bad(409, `${barber.name} is not clocked in`);
+  if (duty.breakStartedAt) bad(409, `${barber.name} is on break`);
   if (one("select 1 x from orders where barberId=? and status='in_chair' and id<>?", barber.id, orderId || '')) bad(409, `${barber.name} is already cutting`);
   const chairId = b.chairId || barber.chairId;
   if (chairId) {
@@ -215,7 +234,7 @@ function zData(shift) {
 // daily pay = commission earned that day, topped up to the barber's daily allowance when they showed up
 function dayRows(from, to, br) {
   const att = all(`select a.staffId, a.date, a.branchId, min(a.timeIn) timeIn, max(a.timeOut) timeOut, max(a.lateMins) lateMins, s.name, s.pct, s.allowance, s.chairId
-    from attendance a join staff s on s.id=a.staffId where a.date>=? and a.date<=?${br ? ' and a.branchId=?' : ''} group by a.staffId, a.date`, ...(br ? [from, to, br] : [from, to]));
+    from attendance a join staff s on s.id=a.staffId where a.date>=? and a.date<=? and ifnull(a.status,'present')='present'${br ? ' and a.branchId=?' : ''} group by a.staffId, a.date`, ...(br ? [from, to, br] : [from, to]));
   const ords = all(`select * from orders where status='paid' and date>=? and date<=?${br ? ' and branchId=?' : ''}`, ...(br ? [from, to, br] : [from, to])).map(parseOrder);
   const mv = all(`select * from cash_moves where kind='advance' and date>=? and date<=?${br ? ' and branchId=?' : ''}`, ...(br ? [from, to, br] : [from, to]));
   const paidRows = all('select staffId,date,paidAt from payroll_days where date>=? and date<=?', from, to);
@@ -279,7 +298,7 @@ const REPORTS = {
     const rows = st.map(s => {
       const mine = os.filter(o => o.barberId === s.id), d = days.filter(x => x.staffId === s.id), a = one('select * from attendance where staffId=? and date=? order by timeIn limit 1', s.id, t);
       const comm = sum(mine, o => commissionOf(o, s.pct)), top = sum(d, x => x.topup);
-      return { s, n: sum(mine, o => sum(o.items.filter(i => i.type === 'service'), i => i.qty)), net: sum(mine, o => o.total), comm, top, pay: comm + top, att: a ? (a.lateMins > 0 ? 'Late' : 'Present') : '—' };
+      return { s, n: sum(mine, o => sum(o.items.filter(i => i.type === 'service'), i => i.qty)), net: sum(mine, o => o.total), comm, top, pay: comm + top, att: a ? (a.status === 'off' ? 'Off duty' : a.lateMins > 0 ? 'Late' : 'Present') : '—' };
     }).filter(r => r.s.active || r.n);
     const net = sum(os, o => o.total), pay = sum(rows, r => r.pay);
     return {
@@ -369,7 +388,7 @@ const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
 });
-const STATIC = { '/': 'index.html', '/app.js': 'app.js' };
+const STATIC = { '/': 'index.html', '/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js' };
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8' };
 const REFS = {
   staff: [['orders', 'barberId'], ['attendance', 'staffId']], chairs: [['orders', 'chairId'], ['staff', 'chairId']],
@@ -389,10 +408,19 @@ function checkUser(b, cur) {
   const username = 'username' in b ? String(b.username || '').trim().toLowerCase() : (cur?.username || '');
   if (!/^[a-z0-9._-]{3,30}$/.test(username) || username === 'owner') bad(409, 'Username: 3–30 letters/numbers (. _ - allowed), not "owner"');
   if (one('select id from users where username=? and id<>?', username, cur?.id || '')) bad(409, 'Username already taken');
-  if (!pw && !cur?.passHash) bad(409, 'Set a password');
+  const pin = b.pin ? String(b.pin).trim() : '';
+  if (pin) {
+    if (!/^\d{6}$/.test(pin)) bad(409, 'PIN must be exactly 6 digits');
+    if (one('select id from users where pinKey=? and id<>?', pinKeyOf(pin), cur?.id || '')) bad(409, 'That PIN is already used by someone else');
+  }
+  if (role === 'cashier' && !pin && !cur?.pinKey) bad(409, 'Set a 6-digit PIN for this cashier');
+  if (role === 'admin' && !pw && !cur?.passHash) bad(409, 'Set a password for this admin');
   b.username = username;
 }
-const setPw = (id, b) => { if (b.password) run('update users set passHash=? where id=?', hashPw(String(b.password)), id); };
+const setPw = (id, b) => {
+  if (b.password) run('update users set passHash=? where id=?', hashPw(String(b.password)), id);
+  if (b.pin) run('update users set pinKey=? where id=?', pinKeyOf(String(b.pin).trim()), id);
+};
 
 async function handle(req, res) {
   const url = new URL(req.url, 'http://x'), p = url.pathname, method = req.method, q = Object.fromEntries(url.searchParams);
@@ -405,12 +433,17 @@ async function handle(req, res) {
     await new Promise(r => setTimeout(r, failDelay(ip)));
     const uname = String(b.username || '').trim().toLowerCase(), pw = String(b.password || '');
     let tok = null, who = '';
-    if ((!uname || uname === 'owner') && crypto.timingSafeEqual(sha(pw), sha(PASS))) { tok = makeToken('owner', ''); who = 'Owner'; }
+    const pin = String(b.pin || '').trim();
+    if (pin) {
+      const u = /^\d{6}$/.test(pin) ? one('select * from users where pinKey=? and active=1', pinKeyOf(pin)) : null;
+      if (u) { tok = makeToken(u.id, u.pinKey.slice(-8)); who = u.name; }
+    }
+    else if ((!uname || uname === 'owner') && crypto.timingSafeEqual(sha(pw), sha(PASS))) { tok = makeToken('owner', ''); who = 'Owner'; }
     else if (uname) {
       const u = one('select * from users where username=? and active=1', uname);
       if (u?.passHash && checkPw(pw, u.passHash)) { tok = makeToken(u.id, u.passHash.slice(-8)); who = u.name; }
     }
-    if (!tok) { noteFail(ip); log({ name: uname || 'owner' }, 'login-failed', 'auth', '', ip); return send(res, 401, { error: 'Wrong username or password' }); }
+    if (!tok) { noteFail(ip); log({ name: uname || 'owner' }, 'login-failed', 'auth', '', ip); return send(res, 401, { error: pin ? 'Wrong PIN' : 'Wrong username or password' }); }
     fails.delete(ip); log({ name: who }, 'login', 'auth', '', ip);
     return send(res, 200, { token: tok });
   }
@@ -482,13 +515,14 @@ async function handle(req, res) {
   }
   if (p === '/api/live' && method === 'GET') {
     const br = me.role === 'cashier' ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), t = todayStr();
-    const duty = all(`select a.*, s.name from attendance a join staff s on s.id=a.staffId where a.date=? and a.timeOut is null${br ? ' and a.branchId=?' : ''}`, ...(br ? [t, br] : [t]));
+    const duty = all(`select a.*, s.name from attendance a join staff s on s.id=a.staffId where a.date=? and a.timeOut is null and ifnull(a.status,'present')='present'${br ? ' and a.branchId=?' : ''}`, ...(br ? [t, br] : [t]));
+    const onBreak = duty.filter(d => d.breakStartedAt).length;
     const queue = all(`select o.*, b.name branchName, s.name barberName from orders o left join branches b on b.id=o.branchId left join staff s on s.id=o.barberId
       where o.date=? and o.status in ('waiting','in_chair')${br ? ' and o.branchId=?' : ''} order by o.branchId, o.no`, ...(br ? [t, br] : [t])).map(parseOrder);
     const cutting = queue.filter(o => o.status === 'in_chair'), waiting = queue.filter(o => o.status === 'waiting');
     const wait = waiting.length ? Math.max(...waiting.map(o => Math.round((Date.now() - new Date(o.createdAt)) / 60000))) : 0;
     return send(res, 200, {
-      onDuty: duty.length, cutting: cutting.length, available: Math.max(0, duty.length - cutting.length), waiting: waiting.length, longestWaitMin: wait,
+      onDuty: duty.length, onBreak, cutting: cutting.length, available: Math.max(0, duty.length - cutting.length - onBreak), waiting: waiting.length, longestWaitMin: wait,
       queue: queue.map(o => ({ id: o.id, no: o.no, branch: o.branchName, customer: o.customerName, services: o.items.map(i => i.name).join(', '), status: o.status, barber: o.barberName || '', since: o.startedAt || o.createdAt }))
     });
   }
@@ -498,11 +532,45 @@ async function handle(req, res) {
     const bid = branchScope(me, q.branch), t = todayStr();
     return send(res, 200, {
       branch: get('branches', bid), chairs: all('select * from chairs where branchId=? and active=1 order by sort', bid),
-      staff: all('select id,name,chairId,pct from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, onDuty: !!onDuty(s.id, t) })),
+      staff: all('select id,name,chairId,pct from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, onDuty: !!onDuty(s.id, t), ...staffState(s.id, t) })),
       categories: all('select * from categories order by name'), items: all('select * from items where active=1 order by name'), discounts: all('select * from discounts where active=1 order by name'),
       shift: openShift(bid) || null,
       queue: all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair') order by no", bid, t).map(parseOrder)
     });
+  }
+  if (p === '/api/pos/dashboard' && method === 'GET') {
+    const bid = branchScope(me, q.branch), t = todayStr();
+    const paid = all("select * from orders where branchId=? and date=? and status='paid'", bid, t);
+    const queue = all("select o.*, s.name barberName from orders o left join staff s on s.id=o.barberId where o.branchId=? and o.date=? and o.status in ('waiting','in_chair') order by o.no", bid, t).map(parseOrder);
+    const st = all('select id from staff where branchId=? and active=1', bid).map(s => staffState(s.id, t).state);
+    return send(res, 200, {
+      gross: r2(sum(paid, o => o.subtotal)), net: r2(sum(paid, o => o.total)), completed: paid.length, waiting: queue.filter(o => o.status === 'waiting').length,
+      cutting: queue.filter(o => o.status === 'in_chair').length, onDuty: st.filter(x => ['present', 'late', 'break'].includes(x)).length, totalBarbers: st.length, queue
+    });
+  }
+  if (p === '/api/pos/queue' && method === 'GET') {
+    const bid = branchScope(me, q.branch), t = todayStr(), f = q.filter || 'active';
+    const sts = f === 'done' ? "('paid')" : f === 'all' ? "('waiting','in_chair','paid','void')" : "('waiting','in_chair')";
+    return send(res, 200, all(`select o.*, s.name barberName from orders o left join staff s on s.id=o.barberId where o.branchId=? and o.date=? and o.status in ${sts} order by o.no`, bid, t).map(parseOrder));
+  }
+  if (p === '/api/pos/shift' && method === 'GET') {
+    const s = openShift(branchScope(me, q.branch)); if (!s) return send(res, 200, { shift: null });
+    return send(res, 200, { shift: s, z: zData(s), moves: all('select * from cash_moves where shiftId=? order by ts desc', s.id) });
+  }
+  if (p === '/api/pos/zreadings' && method === 'GET') {
+    const bid = branchScope(me, q.branch);
+    return send(res, 200, all('select * from zreadings where branchId=? order by generatedAt desc limit 30', bid).map(z => ({ ...z, data: JSON.parse(z.data) })));
+  }
+  if (p === '/api/pos/attendance' && method === 'GET') {
+    const bid = branchScope(me, q.branch), t = todayStr();
+    return send(res, 200, all('select s.id,s.name,s.chairId,c.name chairName from staff s left join chairs c on c.id=s.chairId where s.branchId=? and s.active=1 order by s.name', bid).map(s => ({ ...s, ...staffState(s.id, t) })));
+  }
+  if (p === '/api/expenses' && method === 'GET') {
+    const bid = branchScope(me, q.branch), t = todayStr(), term = '%' + String(q.q || '').toLowerCase() + '%';
+    const range = q.range === 'month' ? [t.slice(0, 8) + '01', t] : q.range === 'all' ? ['2000-01-01', t] : [t, t];
+    const base = all("select m.*, s.name staffName from cash_moves m left join staff s on s.id=m.staffId where m.branchId=? and m.kind='expense' order by m.ts desc", bid);
+    const rows = base.filter(m => m.date >= range[0] && m.date <= range[1] && (m.note + ' ' + m.by + ' ' + (m.staffName || '')).toLowerCase().includes(term.replace(/%/g, '')));
+    return send(res, 200, { rows, today: r2(sum(base.filter(m => m.date === t), m => m.amount)), month: r2(sum(base.filter(m => m.date >= t.slice(0, 8) + '01'), m => m.amount)), count: base.length, filtered: r2(sum(rows, m => m.amount)) });
   }
   if (p === '/api/orders' && method === 'POST') {
     const b = await readBody(req), branchId = branchScope(me, b.branchId), t = todayStr();
@@ -571,19 +639,32 @@ async function handle(req, res) {
     if (b.action === 'in') {
       if (open) bad(409, `${s.name} is already clocked in`);
       const now = new Date(), late = Math.max(0, minsOfDay(now) - (toMin(br.openTime) + (br.graceMins || 0)));
+      run("delete from attendance where staffId=? and date=? and status='off'", s.id, t);
       const prior = one('select 1 x from attendance where staffId=? and date=?', s.id, t);
       run('insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins) values(?,?,?,?,?,?,?)', uid(), s.id, s.branchId, t, nowISO(), null, prior ? 0 : late);
     } else if (b.action === 'out') {
       if (!open) bad(409, `${s.name} is not clocked in`);
       if (one("select 1 x from orders where barberId=? and status='in_chair'", s.id)) bad(409, `${s.name} still has a customer in the chair`);
       run('update attendance set timeOut=? where id=?', nowISO(), open.id);
-    } else bad(400, 'action must be in or out');
+    } else if (b.action === 'break_start') {
+      if (!open) bad(409, `${s.name} is not clocked in`);
+      if (open.breakStartedAt) bad(409, 'Already on break');
+      if (one("select 1 x from orders where barberId=? and status='in_chair'", s.id)) bad(409, `${s.name} still has a customer in the chair`);
+      run('update attendance set breakStartedAt=? where id=?', nowISO(), open.id);
+    } else if (b.action === 'break_end') {
+      if (!open?.breakStartedAt) bad(409, 'Not on break');
+      run('update attendance set breakStartedAt=null, breakMins=ifnull(breakMins,0)+? where id=?', Math.round((Date.now() - new Date(open.breakStartedAt)) / 60000), open.id);
+    } else if (b.action === 'off') {
+      if (one('select 1 x from attendance where staffId=? and date=?', s.id, t)) bad(409, `${s.name} already has attendance today`);
+      run("insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins,status) values(?,?,?,?,?,?,?,'off')", uid(), s.id, s.branchId, t, nowISO(), null, 0);
+    } else bad(400, 'action must be in, out, break_start, break_end or off');
     log(me, 'clock-' + b.action, 'attendance', s.id, s.name); return send(res, 200, { ok: true });
   }
   if (p === '/api/shifts/open' && method === 'POST') {
     const b = await readBody(req), bid = branchScope(me, b.branchId), terminal = String(b.terminal || 'Terminal 1').slice(0, 40);
     if (one("select 1 x from shifts where branchId=? and terminal=? and status='open'", bid, terminal)) bad(409, 'A shift is already open on this terminal');
-    const id = uid(); run("insert into shifts(id,branchId,terminal,cashierId,cashierName,businessDate,openedAt,openingFloat,status) values(?,?,?,?,?,?,?,?,'open')", id, bid, terminal, me.id, me.name, todayStr(), nowISO(), Math.max(0, r2(b.openingFloat)));
+    const id = uid(), sno = (one('select max(no) m from shifts where branchId=?', bid).m || 0) + 1;
+    run("insert into shifts(id,no,branchId,terminal,cashierId,cashierName,businessDate,openedAt,openingFloat,status) values(?,?,?,?,?,?,?,?,?,'open')", id, sno, bid, terminal, me.id, me.name, todayStr(), nowISO(), Math.max(0, r2(b.openingFloat)));
     log(me, 'shift-open', 'shifts', id, terminal); return send(res, 201, get('shifts', id));
   }
   const sm = p.match(/^\/api\/shifts\/(\w+)\/close$/);
@@ -591,7 +672,13 @@ async function handle(req, res) {
     const s = get('shifts', sm[1]); if (!s || s.status !== 'open') bad(404, 'No such open shift');
     if (me.role === 'cashier' && s.branchId !== me.branchId) bad(403, 'Not your branch');
     if (one("select 1 x from orders where branchId=? and status='in_chair'", s.branchId)) bad(409, 'Finish all customers in the chair before closing');
-    const b = await readBody(req), counted = r2(b.counted), z = zData(s); z.counted = counted; z.variance = r2(counted - z.expected);
+    const b = await readBody(req), z = zData(s); let counted;
+    if (b.denoms && typeof b.denoms === 'object') {   // cash denomination counter: { "1000": 2, "50": 3, ... }
+      counted = 0; z.denoms = {};
+      for (const d of [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25]) { const n = Math.max(0, Math.floor(+b.denoms[d] || 0)); if (n) { z.denoms[d] = n; counted += n * d; } }
+      counted = r2(counted);
+    } else counted = r2(b.counted);
+    z.counted = counted; z.remarks = String(b.remarks || '').slice(0, 300); z.shiftNo = s.no; z.variance = r2(counted - z.expected);
     const no = (one('select max(no) m from zreadings where branchId=?', s.branchId).m || 0) + 1;
     run("update shifts set status='closed', closedAt=?, counted=? where id=?", nowISO(), counted, s.id);
     run('insert into zreadings(id,no,branchId,shiftId,businessDate,generatedAt,data) values(?,?,?,?,?,?,?)', uid(), no, s.branchId, s.id, s.businessDate, nowISO(), JSON.stringify(z));
@@ -603,7 +690,8 @@ async function handle(req, res) {
     if (!['in', 'out', 'expense', 'advance'].includes(b.kind)) bad(400, 'Bad type');
     const amount = r2(b.amount); if (!(amount > 0)) bad(400, 'Amount must be more than 0');
     if (b.kind === 'advance' && !get('staff', b.staffId)) bad(400, 'Pick the barber');
-    run('insert into cash_moves(id,shiftId,branchId,date,kind,amount,note,staffId,ts) values(?,?,?,?,?,?,?,?,?)', uid(), s.id, s.branchId, todayStr(), b.kind, amount, String(b.note || '').slice(0, 200), b.kind === 'advance' ? b.staffId : '', nowISO());
+    const who = ['advance', 'expense'].includes(b.kind) && get('staff', b.staffId) ? b.staffId : '';
+    run('insert into cash_moves(id,shiftId,branchId,date,kind,amount,note,staffId,ts,by) values(?,?,?,?,?,?,?,?,?,?)', uid(), s.id, s.branchId, todayStr(), b.kind, amount, String(b.note || '').slice(0, 200), who, nowISO(), me.name);
     log(me, 'cash-' + b.kind, 'cash', s.id, '₱' + amount); return send(res, 201, { ok: true });
   }
 
@@ -628,7 +716,7 @@ async function handle(req, res) {
     if ('name' in b && !String(b.name).trim()) bad(400, 'Name required');
     let row;
     if (kind === 'users') { checkUser(b, cur); update('users', id, b); setPw(id, b); row = strip(get('users', id)); } else row = update(kind, id, b);
-    log(me, 'update', kind, id, JSON.stringify({ ...b, password: b.password ? '***' : undefined })); return send(res, 200, row);
+    log(me, 'update', kind, id, JSON.stringify({ ...b, password: b.password ? '***' : undefined, pin: b.pin ? '***' : undefined })); return send(res, 200, row);
   }
   if (method === 'DELETE' && id) {
     if (kind === 'users' && id === me.id) bad(409, 'You cannot delete yourself');
