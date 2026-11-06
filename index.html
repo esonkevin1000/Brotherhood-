@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#ffffff">
-<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="icon" type="image/png" href="/icon-192.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
@@ -19,7 +19,7 @@ svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 
 nav{width:248px;flex:none;background:#fff;border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow-y:auto}
 nav .brand{display:flex;align-items:center;gap:12px;padding:2px 8px 16px}
-nav .brand img{width:42px;height:42px;border-radius:12px;box-shadow:0 8px 22px -8px rgba(0,0,0,.35)}
+nav .brand img{width:44px;height:44px;border-radius:50%;box-shadow:0 8px 22px -8px rgba(0,0,0,.35)}
 nav .brand h1{margin:0;font-size:19px;text-transform:uppercase;letter-spacing:1.6px;line-height:1.1}nav .brand small{color:var(--mute);font-size:11px}
 nav button{display:flex;align-items:center;gap:12px;background:none;border:0;color:var(--mute);text-align:left;padding:9px 12px;border-radius:11px;font:inherit;font-weight:500;cursor:pointer;transition:background .15s,color .15s}
 nav button:hover{background:var(--s2);color:var(--text)}
@@ -61,7 +61,7 @@ dialog{background:var(--s1);color:var(--text);border:1px solid var(--line);borde
 dialog::backdrop{background:rgba(0,0,0,.66);backdrop-filter:blur(3px)}
 dialog h2{font-size:22px}
 .online{max-width:420px;margin:8vh auto 0;width:100%;padding:30px}
-.online .logo{width:76px;height:76px;border-radius:22px;display:block;margin:0 auto 12px;box-shadow:0 14px 40px -10px rgba(0,0,0,.35)}
+.online .logo{width:96px;height:96px;border-radius:50%;display:block;margin:0 auto 12px;box-shadow:0 14px 40px -10px rgba(0,0,0,.35)}
 .th{width:38px;height:38px;border-radius:50%;object-fit:cover;display:inline-grid;place-items:center;vertical-align:middle;background:var(--s3);color:var(--mute);font:600 13px 'Oswald',system-ui;flex:none}
 .th.sq{border-radius:10px}
 .bgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
@@ -90,5 +90,6 @@ nav{overflow-y:auto}button:disabled{opacity:.4;cursor:default}
 <main id="view"></main>
 <dialog id="modal"></dialog>
 <script src="app.js"></script>
+<script src="/update.js"></script>
 </body>
 </html>

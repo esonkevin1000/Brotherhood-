@@ -1,7 +1,9 @@
-// Minimal service worker: makes the cashier app installable and keeps the app shell available if the network blips.
-// Network-first, so a new deploy is picked up immediately. API calls are never cached (sales data must always be live).
-const CACHE = 'brotherhood-pos-v1', SHELL = ['/pos', '/pos.js', '/icon-192.png'];
-self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
+// Brotherhood service worker. `VERSION` is injected by the server and changes on every deploy,
+// so the browser sees a new worker, the app shows an "Update app" button, and one tap loads the new version.
+// Network-first: pages and scripts are always fetched fresh; the cache is only an offline fallback. API calls are never cached.
+const CACHE = 'brotherhood-' + (typeof VERSION === 'string' ? VERSION : 'dev'), SHELL = ['/pos', '/pos.js', '/logo.png', '/icon-192.png'];
+self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => { })); });   // no skipWaiting: the user decides when to update
+self.addEventListener('message', e => { if (e.data === 'SKIP_WAITING') self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });

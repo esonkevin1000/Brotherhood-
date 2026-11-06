@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Brotherhood">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/png" href="/icon-192.png">
-<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
@@ -103,7 +103,7 @@ dialog::before{content:"";display:block;width:42px;height:4px;border-radius:9px;
 dialog::backdrop{background:rgba(0,0,0,.66);backdrop-filter:blur(3px)}
 @keyframes up{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 main.enter>*{animation:fade .25s ease-out both}@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.login{text-align:center;padding:36px 22px 30px}.login .logo{width:84px;height:84px;margin:0 auto 14px;border-radius:24px;box-shadow:0 14px 40px -10px rgba(0,0,0,.35)}
+.login{text-align:center;padding:36px 22px 30px}.login .logo{width:96px;height:96px;margin:0 auto 14px;border-radius:50%;box-shadow:0 10px 30px -10px rgba(0,0,0,.35)}
 .login h1{font-size:30px;margin:0;text-transform:uppercase;letter-spacing:2px}.login p{margin:4px 0 0}
 .pin{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:10px auto 6px;max-width:320px}
 .pin button{background:var(--s2);border:1px solid var(--line);color:var(--text);font-family:'Oswald',system-ui;font-size:26px;font-weight:500;padding:16px 0;border-radius:20px}
@@ -153,5 +153,6 @@ label.consent input{width:22px;height:22px;flex:none;margin-top:1px;accent-color
 <dialog id="sheet"></dialog>
 <div id="print"></div>
 <script src="/pos.js"></script>
+<script src="/update.js"></script>
 </body>
 </html>

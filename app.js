@@ -82,7 +82,7 @@ function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
   if (!loggedIn) {
     nav.style.display = 'none';
-    view.innerHTML = `<div class="online card"><img class="logo" src="/icon-192.png" alt=""><h2>${esc(S.shop)}</h2><p class="mute" style="text-align:center;margin:-6px 0 6px">Back office login</p><form data-form="login">
+    view.innerHTML = `<div class="online card"><img class="logo" src="/logo.png" alt=""><h2>${esc(S.shop)}</h2><p class="mute" style="text-align:center;margin:-6px 0 6px">Back office login</p><form data-form="login">
       <label>Username <span class="mute">(owner: iwanang blangko)</span></label><input name="username" autocapitalize="none" autocomplete="username">
       <label>Password</label><input type="password" name="password" autocomplete="current-password" required>
       <p id="err" style="color:var(--bad);min-height:20px">${esc(loadErr === 'Login required' ? '' : loadErr)}</p><button class="btn" style="width:100%;justify-content:center;padding:12px">Login</button></form></div>`;
@@ -95,7 +95,7 @@ function render() {
   }
   nav.style.display = '';
   const on = k => ui.view === k ? 'on' : '';
-  nav.innerHTML = `<div class="brand"><img src="/icon-192.png" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
+  nav.innerHTML = `<div class="brand"><img src="/logo.png" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
     <select id="branchsel"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
     <button class="${on('dashboard')}" data-view="dashboard">${ic('grid')}Dashboard</button>
     <button class="${on('bookings')}" data-view="bookings">${ic('calendar')}Bookings</button>
