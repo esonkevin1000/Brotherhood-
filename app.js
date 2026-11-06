@@ -1,4 +1,4 @@
-﻿// Brotherhood — admin back office (reports + management). The cashier/barber POS talks to the same API.
+// Brotherhood — admin back office (reports + management). The cashier/barber POS talks to the same API.
 const peso = n => '₱' + Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pad = n => String(n).padStart(2, '0');
 const dstr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -58,18 +58,28 @@ const catName = id => S.categories.find(c => c.id === id)?.name || '';
 const fmtVal = (v, t) => t === 'peso' ? peso(v) : t === 'num' ? Number(v).toLocaleString('en-PH') : esc(v);
 
 // ---------- navigation ----------
-const REPORTS = [['sales', 'Sales Reports'], ['items', 'Item Ranking'], ['commissions', 'Commissions'], ['payroll', 'Payroll'], ['attendance', 'Barber Attendance'], ['tender', 'Tender Summary'], ['discounts', 'Discount Reports'], ['cash', 'Cash Management'], ['readings', 'Sales Readings']];
-const MGMT = [['staff', 'Barbers / Staff'], ['chairs', 'Chairs'], ['categories', 'Categories'], ['items', 'Services & Products'], ['discounts', 'Discounts'], ['customers', 'Customers'], ['users', 'Users'], ['branches', 'Branches']];
-const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'activity' ? 'Activity' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const ICONS = {
+  grid: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+  coin: '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>', chart: '<path d="M3 3v18h18M7 15l4-4 3 3 6-7"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', wallet: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="17" cy="14" r="1"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>', doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  building: '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M9 17h6"/>', key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M14 9l2 2"/>', activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  bottle: '<path d="M10 2h4M10 2v4l-2 3v11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V9l-2-3V2"/>', armchair: '<path d="M5 11V7a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v4M3 13a2 2 0 0 1 4 0v3h10v-3a2 2 0 0 1 4 0v5H3zM6 21v-3M18 21v-3"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
+};
+const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
+const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'activity' ? 'Activity' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
   if (!loggedIn) {
     nav.style.display = 'none';
-    view.innerHTML = `<div class="online card"><h2>✂ ${esc(S.shop)} login</h2><form data-form="login">
+    view.innerHTML = `<div class="online card"><img class="logo" src="/icon-192.png" alt=""><h2>${esc(S.shop)}</h2><p class="mute" style="text-align:center;margin:-6px 0 6px">Back office login</p><form data-form="login">
       <label>Username <span class="mute">(owner: iwanang blangko)</span></label><input name="username" autocapitalize="none" autocomplete="username">
       <label>Password</label><input type="password" name="password" autocomplete="current-password" required>
-      <p id="err" style="color:var(--bad)">${esc(loadErr === 'Login required' ? '' : loadErr)}</p><button class="btn">Login</button></form></div>`;
+      <p id="err" style="color:var(--bad);min-height:20px">${esc(loadErr === 'Login required' ? '' : loadErr)}</p><button class="btn" style="width:100%;justify-content:center;padding:12px">Login</button></form></div>`;
     return;
   }
   if (S.me.role === 'cashier') {
@@ -79,14 +89,13 @@ function render() {
   }
   nav.style.display = '';
   const on = k => ui.view === k ? 'on' : '';
-  nav.innerHTML = `<h1>✂ ${esc(S.shop)}</h1>
-    <select id="branchsel" style="margin:0 0 8px"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
-    <button class="${on('dashboard')}" data-view="dashboard">Dashboard</button>
-    <div class="navh">Reports</div>${REPORTS.map(([k, l]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${l}</button>`).join('')}
-    <div class="navh">Management</div>${MGMT.map(([k, l]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${l}</button>`).join('')}
-    <div class="navh"></div><button class="${on('activity')}" data-view="activity">Activity</button>
-    <button data-act="logout" style="margin-top:auto">Logout</button>`;
-  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+  nav.innerHTML = `<div class="brand"><img src="/icon-192.png" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
+    <select id="branchsel"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
+    <button class="${on('dashboard')}" data-view="dashboard">${ic('grid')}Dashboard</button>
+    <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
+    <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
+    <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
+    <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------

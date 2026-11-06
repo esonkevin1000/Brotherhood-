@@ -4,6 +4,22 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const hm = iso => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' }) : '';
 const mins = iso => Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
 const sheet = document.getElementById('sheet'), app = document.getElementById('app');
+const ICONS = {
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>',
+  grid: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+  pos: '<path d="M4 2v20l3-2 3 2 3-2 3 2 3-2V2l-3 2-3-2-3 2-3-2z"/><path d="M8 8h8M8 12h8"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  wallet: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="17" cy="14" r="1"/>',
+  doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+  hourglass: '<path d="M6 2h12M6 22h12M7 2v4a5 5 0 0 0 2 4l3 2-3 2a5 5 0 0 0-2 4v4M17 2v4a5 5 0 0 1-2 4l-3 2 3 2a5 5 0 0 1 2 4v4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  printer: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+  bottle: '<path d="M10 2h4M10 2v4l-2 3v11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V9l-2-3V2"/>', coin: '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>',
+  cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>', lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+};
+const ic = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
+const initials = s => String(s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 const openSheet = h => { sheet.innerHTML = h; if (!sheet.open) sheet.showModal(); };
 const closeSheet = () => { if (sheet.open) sheet.close(); };
 function toast(msg, err) { const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2600); }
@@ -48,17 +64,17 @@ async function afterLogin(j) {
 const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading' };
 function render() {
   if (!P.me) {
-    app.innerHTML = `<main style="text-align:center;padding-top:40px"><h1 style="color:var(--gold)">✂ Brotherhood</h1><p class="mute">Enter your PIN</p>
-      <div class="dots">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i < P.pin.length ? 'on' : ''}"></i>`).join('')}</div><p style="color:var(--bad);min-height:20px">${esc(P.err)}</p>
-      <div class="pin">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-a="pin" data-n="${n}">${n}</button>`).join('')}<button data-a="pinclr" class="ghost">✕</button><button data-a="pin" data-n="0">0</button><button data-a="pinbk" class="ghost">⌫</button></div></main>`;
-    return;
+    app.innerHTML = `<main class="login"><img class="logo" src="/icon-192.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
+      <div class="dots">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i < P.pin.length ? 'on' : ''}"></i>`).join('')}</div><p style="color:var(--bad);min-height:22px;font-size:13px">${esc(P.err) || 'Ilagay ang iyong 6-digit PIN'}</p>
+      <div class="pin">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-a="pin" data-n="${n}">${n}</button>`).join('')}<button data-a="pinclr" class="ghost">CLR</button><button data-a="pin" data-n="0">0</button><button data-a="pinbk" class="ghost">⌫</button></div></main>`;    return;
   }
   const b = P.boot;
-  const nav = [['dashboard', '▦', 'Dashboard'], ['pos', '🧾', 'Point of Sale'], ['queue', '👥', 'Walk-in Queue'], ['more', '☰', 'More']];
-  app.innerHTML = `<header><button class="burger" data-a="more">☰</button><div><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div></header>
-    <main>${P.me.role !== 'cashier' ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
-    ${P.view === 'pos' && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">🛒 ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
-    <nav class="bottom"><div>${nav.map(([k, ic, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="${k === 'more' ? 'more' : 'go'}" data-v="${k}"><span>${ic}</span>${l}</button>`).join('')}</div></nav>`;
+  const nav = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['queue', 'users', 'Queue'], ['more', 'menu', 'More']];
+  const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
+  app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div><span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
+    <main class="${enter}">${P.me.role !== 'cashier' ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
+    ${P.view === 'pos' && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
+    <nav class="bottom"><div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="${k === 'more' ? 'more' : 'go'}" data-v="${k}">${ic(icn)}${l}</button>`).join('')}</div></nav>`;
 }
 const cartTotal = () => P.cart.items.reduce((s, i) => s + i.price * i.qty, 0);
 const staffById = id => P.boot?.staff.find(s => s.id === id);
@@ -69,28 +85,23 @@ const stateLabel = { present: 'Present', late: 'Late', break: 'On break', off: '
 const VIEWS = {
   dashboard() {
     const d = P.dash; if (!d) return '<p class="mute">Loading…</p>';
-    return `<div class="card stat"><div class="ic">💵</div><div><small>Today's gross sales</small><b>${peso(d.gross)}</b><small>${d.completed} completed orders</small></div></div>
-    <div class="card stat"><div class="ic">⏳</div><div><small>Waiting in queue</small><b>${d.waiting} guests</b><small>${d.cutting} currently in chair</small></div></div>
-    <div class="card stat"><div class="ic">✂</div><div><small>Active barbers on duty</small><b>${d.onDuty} / ${d.totalBarbers}</b><small>Available for walk-ins</small></div></div>
-    <div class="card"><div class="row between"><b>Live walk-in floor queue</b><span class="mute">${d.queue.length} active</span></div>${d.queue.map(ticketHtml).join('') || '<p class="mute">No guests currently in queue or chair.</p>'}</div>`;
-  },
-  pos() {
+    return `<div class="card hero"><small>Today's gross sales</small><div class="num">${peso(d.gross)}</div><span class="mute">${d.completed} completed order${d.completed === 1 ? '' : 's'} · net ${peso(d.net)}</span></div>
+    <div class="kpis"><div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in queue</small><div class="num">${d.waiting}</div><small>${d.cutting} in chair</small></div>
+      <div class="card kpi g"><div class="ic">${ic('scissors')}</div><small>Barbers on duty</small><div class="num">${d.onDuty}<span class="mute" style="font-size:18px"> / ${d.totalBarbers}</span></div><small>available for walk-ins</small></div></div>
+    <div class="sect"><h3>Live walk-in floor</h3><span class="mute">${d.queue.length} active</span></div>${d.queue.map(o => ticketHtml(o)).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">Walang customer sa floor ngayon.</p></div>'}`;
+  },  pos() {
     const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat);
-    return `${s ? `<div class="card" style="border-color:var(--ok)"><b style="color:var(--ok)">● Shift #${s.no} Active</b> <span class="mute">(Float: ${peso(s.openingFloat)})</span></div>`
-      : `<div class="card" style="border-color:var(--bad)"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 10px">Buksan muna ang shift para makapag-checkout.</p><button class="sm" data-a="openshift">Open shift</button></div>`}
-    ${P.cart.editing ? `<div class="card">Editing ticket — <button class="sm ghost" data-a="canceledit">cancel</button></div>` : `<div class="seg"><button class="${P.cart.mode === 'now' ? 'on' : ''}" data-a="mode" data-m="now">Pay as you order</button><button class="${P.cart.mode === 'later' ? 'on' : ''}" data-a="mode" data-m="later">Pay later</button></div>`}
+    return `${s ? '' : `<div class="card" style="border-color:#5c2a30;background:linear-gradient(180deg,#25161a,#17100f)"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Buksan muna ang shift para makapag-checkout.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}    ${P.cart.editing ? `<div class="card">Editing ticket — <button class="sm ghost" data-a="canceledit">cancel</button></div>` : `<div class="seg"><button class="${P.cart.mode === 'now' ? 'on' : ''}" data-a="mode" data-m="now">Pay as you order</button><button class="${P.cart.mode === 'later' ? 'on' : ''}" data-a="mode" data-m="later">Pay later</button></div>`}
     <div class="chips"><button class="chip ${P.cat === 'all' ? 'on' : ''}" data-a="cat" data-c="all">All</button>${cats.map(c => `<button class="chip ${P.cat === c.id ? 'on' : ''}" data-a="cat" data-c="${c.id}">${esc(c.name)}</button>`).join('')}</div>
-    <div class="grid">${items.map(i => `<button class="item" data-a="add" data-id="${i.id}"><span>${esc(i.name)}<br><small>${i.type === 'service' ? i.mins + ' min' : 'Product'}</small></span><b>${peso(i.price)}</b></button>`).join('')}</div>`;
-  },
-  queue() {
+    <div class="grid">${items.map(i => `<button class="item ${i.type}" data-a="add" data-id="${i.id}"><span class="mono">${ic(i.type === 'service' ? 'scissors' : 'bottle')}</span><span class="nm">${esc(i.name)}</span><small>${i.type === 'service' ? i.mins + ' min' : 'Product'}</small><b>${peso(i.price)}</b><span class="plus">${ic('plus', 'sm')}</span></button>`).join('')}</div>`;
+  },  queue() {
     const f = P.qf, list = P.queue.filter(o => (f.status === 'waiting' ? o.status === 'waiting' : f.status === 'chair' ? o.status === 'in_chair' : true) && (!f.barber || o.barberId === f.barber));
     const waiting = P.queue.filter(o => o.status === 'waiting'), chair = P.queue.filter(o => o.status === 'in_chair');
     const avail = (P.boot.staff.filter(s => ['present', 'late'].includes(s.state)).length - chair.length) || 1;
     const est = Math.round(waiting.reduce((t, o) => t + o.items.filter(i => i.type === 'service').reduce((m, i) => m + 30 * i.qty, 0), 0) / Math.max(1, avail));
-    return `<button class="block" data-a="newticket" style="margin-bottom:12px">＋ Add Walk-in Ticket</button>
-    <div class="card stat"><div class="ic">✂</div><div><small>Now in chair (cutting)</small><b>${chair.length}</b></div></div>
-    <div class="card stat"><div class="ic">⏳</div><div><small>Waiting in line</small><b>${waiting.length} guests</b><small>Est. total wait: ~${est} m</small></div></div>
-    <div class="row" style="margin-bottom:12px"><div style="flex:1"><label>Ticket status</label><select data-a="qstatus">${[['active', 'Active queue'], ['waiting', 'Waiting'], ['chair', 'In chair'], ['done', 'Completed today'], ['all', 'All today']].map(([v, l]) => `<option value="${v}" ${f.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    return `<button class="block" data-a="newticket" style="margin-bottom:14px;padding:16px">${ic('plus')} Add Walk-in Ticket</button>
+    <div class="kpis"><div class="card kpi g"><div class="ic">${ic('scissors')}</div><small>Now in chair</small><div class="num">${chair.length}</div></div>
+      <div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in line</small><div class="num">${waiting.length}</div><small>Est. wait ~${est} min</small></div></div>    <div class="row" style="margin-bottom:12px"><div style="flex:1"><label>Ticket status</label><select data-a="qstatus">${[['active', 'Active queue'], ['waiting', 'Waiting'], ['chair', 'In chair'], ['done', 'Completed today'], ['all', 'All today']].map(([v, l]) => `<option value="${v}" ${f.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div style="flex:1"><label>Filter by barber</label><select data-a="qbarber"><option value="">All barbers</option>${P.boot.staff.map(s => `<option value="${s.id}" ${f.barber === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div></div>
     ${list.map(o => ticketHtml(o, true)).join('') || '<p class="mute" style="text-align:center">No tickets found in this queue view.</p>'}`;
   },
@@ -100,14 +111,14 @@ const VIEWS = {
     <input id="expq" placeholder="Search description, cashier, barber" value="${esc(P.expQ)}"><select data-a="exprange" style="margin:8px 0 12px">${[['today', 'Today'], ['month', 'This month'], ['all', 'All time']].map(([v, l]) => `<option value="${v}" ${P.expRange === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
     <p class="mute">Filtered total: <b>${peso(e.filtered)}</b> · ${e.rows.length} entries</p>
     ${e.rows.map(m => `<div class="card"><div class="row between"><b>${esc(m.note || 'Expense')}</b><b>${peso(m.amount)}</b></div><small class="mute">${hm(m.ts)} · ${esc(m.by)}${m.staffName ? ' · ' + esc(m.staffName) : ''}</small></div>`).join('') || '<p class="mute" style="text-align:center">No expenses match the selected filters.</p>'}
-    <div style="position:fixed;right:14px;bottom:80px"><button data-a="addexp">＋ Add Expense</button></div>`;
+    <div class="fab"><button data-a="addexp">${ic('plus')} Add Expense</button></div>`;
   },
   attendance() {
     const cnt = k => P.att.filter(s => s.state === k).length;
     return `<div class="grid"><div class="card"><small class="mute">Present (on time)</small><b style="font-size:22px;display:block">${cnt('present')}</b></div><div class="card"><small class="mute">Late</small><b style="font-size:22px;display:block">${cnt('late')}</b></div>
     <div class="card"><small class="mute">On break</small><b style="font-size:22px;display:block">${cnt('break')}</b></div><div class="card"><small class="mute">Not timed in</small><b style="font-size:22px;display:block">${cnt('none')}</b></div></div>
     <div class="card"><b>Barber attendance roster</b> <span class="mute">· ${P.att.length} barbers</span>
-    ${P.att.map(s => `<hr><div class="row between"><div><b>${esc(s.name)}</b><br><small class="mute">${esc(s.chairName || 'No chair assigned')}${s.timeIn ? ' · in ' + hm(s.timeIn) : ''}</small></div><span class="tag ${s.state}">${stateLabel[s.state]}</span></div>
+    ${P.att.map(s => `<hr><div class="row between"><div class="row" style="flex-wrap:nowrap"><span class="av">${initials(s.name)}</span><div><b>${esc(s.name)}</b><br><small class="mute">${esc(s.chairName || 'No chair assigned')}${s.timeIn ? ' · in ' + hm(s.timeIn) : ''}</small></div></div><span class="tag ${s.state}">${stateLabel[s.state]}</span></div>
       <div class="row" style="margin-top:8px">${s.state === 'none' || s.state === 'off' ? `<button class="sm" data-a="att" data-id="${s.id}" data-x="in">Time in</button>` + (s.state === 'none' ? `<button class="sm ghost" data-a="att" data-id="${s.id}" data-x="off">Off duty</button>` : '') : ''}
       ${s.state === 'present' || s.state === 'late' ? `<button class="sm ghost" data-a="att" data-id="${s.id}" data-x="break_start">Start break</button><button class="sm bad" data-a="att" data-id="${s.id}" data-x="out">Time out</button>` : ''}
       ${s.state === 'break' ? `<button class="sm ok" data-a="att" data-id="${s.id}" data-x="break_end">End break</button>` : ''}</div>`).join('')}</div>`;
@@ -128,16 +139,16 @@ const VIEWS = {
       <div class="row between"><b>Expected cash in drawer</b><b>${peso(z.expected)}</b></div><div class="row between"><span>Declared physical cash</span><span>${peso(counted)}</span></div>
       <div class="row between"><b>Cash variance (over / short)</b><b id="var" style="color:${variance < 0 ? 'var(--bad)' : variance > 0 ? 'var(--info)' : 'var(--ok)'}">${peso(variance)}</b></div>
       <div class="row" style="margin:10px 0"><button class="sm ghost" data-a="cashmove" data-k="in">＋ Cash in</button><button class="sm ghost" data-a="cashmove" data-k="out">− Cash out</button></div>
-      <label>Closing remarks (optional)</label><textarea id="remarks">${esc(P.remarks)}</textarea><br><br><button class="block" data-a="closeshift">🔒 Submit & Close Shift</button></div>`;
+      <label>Closing remarks (optional)</label><textarea id="remarks">${esc(P.remarks)}</textarea><br><br><button class="block" data-a="closeshift">${ic('lock')} Submit & Close Shift</button></div>`;
   }
 };
 function ticketHtml(o, actions) {
   const names = o.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ');
-  return `<div class="card" style="margin:10px 0 0"><div class="row between"><b>#${String(o.no).padStart(3, '0')} · ${esc(o.customerName)}</b><span class="tag ${o.status}">${o.status === 'in_chair' ? 'In Chair' : o.status === 'paid' ? 'Paid' : o.status === 'void' ? 'Void' : 'Waiting'}</span></div>
-    <small class="mute">${names || 'No items yet'}${o.barberName ? ' · ' + esc(o.barberName) : ''}${o.status === 'waiting' || o.status === 'in_chair' ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>
-    ${actions && (o.status === 'waiting' || o.status === 'in_chair') ? `<div class="row" style="margin-top:8px">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">Seat</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div>`;
+  const live = o.status === 'waiting' || o.status === 'in_chair';
+  return `<div class="ticket ${o.status}"><div class="no">#${String(o.no).padStart(3, '0')}</div><div class="bd"><div class="row between" style="flex-wrap:nowrap"><b>${esc(o.customerName)}</b><span class="tag ${o.status}">${o.status === 'in_chair' ? 'In Chair' : o.status === 'paid' ? 'Paid' : o.status === 'void' ? 'Void' : 'Waiting'}</span></div>
+    <small>${names || 'No items yet'}</small><br><small>${o.barberName ? ic('scissors', 'sm') + ' ' + esc(o.barberName) : 'No barber yet'}${live ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>
+    ${actions && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">Seat</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div></div>`;
 }
-
 // ---------- cart / ticket / payment ----------
 function addItem(id) {
   const it = P.boot.items.find(i => i.id === id), c = P.cart.items.find(x => x.itemId === id);
@@ -197,7 +208,7 @@ function receiptSheet(o) {
   openSheet(`<h2 style="margin:0 0 6px;color:var(--ok)">✔ Paid</h2><p class="mute">SI-${String(o.si).padStart(6, '0')} · #${String(o.no).padStart(3, '0')} · ${esc(o.customerName)}</p>
     ${o.items.map(i => `<div class="row between"><span>${esc(i.name)} ×${i.qty}</span><span>${peso(i.price * i.qty)}</span></div>`).join('')}<hr>
     ${o.discountAmt ? `<div class="row between"><span>${esc(o.discountName)}</span><span>−${peso(o.discountAmt)}</span></div>` : ''}<div class="row between"><b>Total</b><b>${peso(o.total)}</b></div>
-    ${o.change ? `<div class="row between"><span>Change</span><b style="color:var(--gold);font-size:20px">${peso(o.change)}</b></div>` : ''}<br><div class="row"><button style="flex:1" data-a="printsale">🖨 Print</button><button class="ghost" style="flex:1" data-a="closesheet">Done</button></div>`);
+    ${o.change ? `<div class="row between"><span>Change</span><b style="color:var(--gold);font-size:20px">${peso(o.change)}</b></div>` : ''}<br><div class="row"><button style="flex:1" data-a="printsale">${ic('printer')} Print</button><button class="ghost" style="flex:1" data-a="closesheet">Done</button></div>`);
 }
 
 // ---------- printable receipts ----------
@@ -224,7 +235,7 @@ function saleHtml(o) {
 }
 function printHtml(html) { document.getElementById('print').innerHTML = `<div class="paper">${html}</div>`; setTimeout(() => window.print(), 50); }
 function showReading(z) {
-  P.lastZ = z; openSheet(`<div class="paper">${readingHtml(z)}</div><div class="row" style="margin-top:12px"><button style="flex:1" data-a="printz">🖨 Print Sales Reading</button><button class="ghost" style="flex:1" data-a="closesheet">Done</button></div>`);
+  P.lastZ = z; openSheet(`<div class="paper">${readingHtml(z)}</div><div class="row" style="margin-top:12px"><button style="flex:1" data-a="printz">${ic('printer')} Print Sales Reading</button><button class="ghost" style="flex:1" data-a="closesheet">Done</button></div>`);
 }
 
 // ---------- events ----------
@@ -237,9 +248,9 @@ document.addEventListener('click', async e => {
   if (a === 'closesheet') { closeSheet(); return render(); }
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
-    return openSheet(`<div class="drawer"><div class="row between"><h2 style="margin:0">✂ Brotherhood</h2><button class="ghost sm" data-a="closesheet">Close</button></div><p class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)} (${P.me.role})</p>
-      ${[['dashboard', '▦ Dashboard'], ['pos', '🧾 Point of Sale'], ['queue', '👥 Walk-in Queue'], ['expenses', '🧮 Expenses'], ['attendance', '⏱ Barber Attendance'], ['reading', '📄 Sales Reading']].map(([v, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${l}</a>`).join('')}
-      <a href="#" data-a="logout" style="color:var(--bad)">⎋ Logout</a></div>`);
+    return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/icon-192.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
   if (a === 'logout') { e.preventDefault(); token = ''; try { localStorage.removeItem('bp.pos'); } catch (x) { } P.me = null; P.boot = null; closeSheet(); return render(); }
