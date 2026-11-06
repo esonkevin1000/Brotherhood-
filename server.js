@@ -239,6 +239,9 @@ const branchScope = (me, requested) => {
   if (!get('branches', id)) bad(400, 'Pick a branch');
   return id;
 };
+// One Z-reading (sales reading) per branch per day. Once it is done the day is locked: no new shift, no new tickets, no payments until tomorrow.
+const dayLocked = (branchId, date) => one('select no from zreadings where branchId=? and businessDate=? order by generatedAt desc', branchId, date);
+const openTickets = (branchId, date) => one("select count(*) n from orders where branchId=? and date=? and status in ('waiting','in_chair')", branchId, date).n;
 const openShift = branchId => one("select * from shifts where branchId=? and status='open' order by openedAt desc", branchId);
 function priceItems(lines) {
   const out = [];
@@ -1564,7 +1567,7 @@ async function handle(req, res) {
       branch: get('branches', bid), chairs: all('select * from chairs where branchId=? and active=1 order by sort', bid),
       staff: all('select id,name,chairId,pct,photo from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, onDuty: !!onDuty(s.id, t), ...staffState(s.id, t) })),
       categories: all('select * from categories order by name'), items: all('select * from items where active=1 order by name'), discounts: all('select * from discounts where active=1 order by name'),
-      shift: openShift(bid) || null, settings: { attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1' },
+      shift: openShift(bid) || null, locked: !!dayLocked(bid, t), zNo: dayLocked(bid, t)?.no || 0, settings: { attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1' },
       queue: all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair') order by no", bid, t).map(parseOrder).map(withCust)
     });
   }
@@ -1606,6 +1609,7 @@ async function handle(req, res) {
   }
   if (p === '/api/orders' && method === 'POST') {
     const b = await readBody(req), branchId = branchScope(me, b.branchId), t = todayStr();
+    { const zl = dayLocked(branchId, t); if (zl) bad(409, `Today's sales reading (Z-${zl.no}) is already done, so new tickets cannot be made until tomorrow.`); }
     const cust = resolveCustomer(b, 'pos', branchId), name = cust.name.slice(0, 200); if (!name) bad(400, 'Customer name required');
     const items = priceItems(b.items), tt = totals(items, null);
     const need = idNeeded(items); if (need.length && !b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is required for ${need.join(', ')}.`);
@@ -1760,6 +1764,7 @@ async function handle(req, res) {
   }
   if (p === '/api/shifts/open' && method === 'POST') {
     const b = await readBody(req), bid = branchScope(me, b.branchId), terminal = String(b.terminal || 'Terminal 1').slice(0, 40);
+    const zl = dayLocked(bid, todayStr()); if (zl) bad(409, `Today's sales reading (Z-${zl.no}) is already done, so the day is locked. You can open a new shift tomorrow.`);
     if (one("select 1 x from shifts where branchId=? and terminal=? and status='open'", bid, terminal)) bad(409, 'A shift is already open on this terminal');
     const id = uid(), sno = (one('select max(no) m from shifts where branchId=?', bid).m || 0) + 1;
     run("insert into shifts(id,no,branchId,terminal,cashierId,cashierName,businessDate,openedAt,openingFloat,status) values(?,?,?,?,?,?,?,?,?,'open')", id, sno, bid, terminal, me.id, me.name, todayStr(), nowISO(), Math.max(0, r2(b.openingFloat)));
@@ -1769,7 +1774,8 @@ async function handle(req, res) {
   if (sm && method === 'POST') {
     const s = get('shifts', sm[1]); if (!s || s.status !== 'open') bad(404, 'No such open shift');
     if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
-    if (one("select 1 x from orders where branchId=? and status='in_chair'", s.branchId)) bad(409, 'Finish all customers in the chair before closing');
+    const zl = dayLocked(s.branchId, s.businessDate); if (zl) bad(409, `The sales reading for ${s.businessDate} (Z-${zl.no}) is already done. Only one per day.`);
+    const ot = openTickets(s.branchId, s.businessDate); if (ot) bad(409, `Cannot do the sales reading yet: ${ot} ticket${ot === 1 ? ' is' : 's are'} still open (pay later or in the chair). Pay or cancel ${ot === 1 ? 'it' : 'them'} first.`);
     const b = await readBody(req), z = zData(s); let counted;
     if (b.denoms && typeof b.denoms === 'object') {   // cash denomination counter: { "1000": 2, "50": 3, ... }
       counted = 0; z.denoms = {};

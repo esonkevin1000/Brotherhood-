@@ -225,7 +225,7 @@ const VIEWS = {
   },  pos() {
     const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat), later = P.cart.mode !== 'now';
     const top = `<div class="posh">Fast checkout, discount vouchers, and cash change calculator.</div>
-    ${s ? `<div class="shiftbn">✓ Shift #${s.no} Active (Float: ${peso(s.openingFloat || 0)})</div>` : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Open a shift first so you can take payments.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}
+    ${s ? `<div class="shiftbn">✓ Shift #${s.no} Active (Float: ${peso(s.openingFloat || 0)})</div>` : P.boot.locked ? `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">🔒 Today is locked</b><p class="mute" style="margin:4px 0 0">The sales reading (Z-${P.boot.zNo}) is done. No more sales today. Open a new shift tomorrow.</p></div>` : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Open a shift first so you can take payments.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}
     <div class="seg"><button class="${later ? 'on' : ''}" data-a="mode" data-m="later">${ic('cart', 'sm')} Pay As You Order</button><button class="${!later ? 'on' : ''}" data-a="mode" data-m="now">${ic('hourglass', 'sm')} Pay Later</button></div>`;
     if (!later) return top + sessionsBoard();
     const menu = `<div class="chips"><button class="chip ${P.cat === 'all' ? 'on' : ''}" data-a="cat" data-c="all">All</button>${cats.map(c => `<button class="chip ${P.cat === c.id ? 'on' : ''}" data-a="cat" data-c="${c.id}">${esc(c.name)}</button>`).join('')}</div>
@@ -365,7 +365,8 @@ const VIEWS = {
     if (P.tab === 'z') return tabs + (P.zs.map((z, idx) => `<div class="card" data-a="viewz" data-i="${idx}" style="cursor:pointer"><div class="row between"><b>Z-${z.no}</b><span class="mute">${z.businessDate}</span></div><small class="mute">Shift #${z.data.shiftNo || ''} · ${hm(z.generatedAt)}</small><hr>
       <div class="row between"><span>Net sales</span><b>${peso(z.data.net)}</b></div><div class="row between"><span>Expected cash</span><span>${peso(z.data.expected)}</span></div><div class="row between"><span>Counted</span><span>${peso(z.data.counted)}</span></div>
       <div class="row between"><span>Variance</span><b style="color:${z.data.variance < 0 ? 'var(--bad)' : z.data.variance > 0 ? 'var(--info)' : 'var(--ok)'}">${peso(z.data.variance)}</b></div></div>`).join('') || '<p class="mute">No Z-readings yet.</p>');
-    const c = P.cur; if (!c?.shift) return tabs + `<div class="card"><p>There is no open shift.</p><button data-a="openshift">Open shift</button></div>`;
+    const c = P.cur; if (!c?.shift && P.boot?.locked) return tabs + `<div class="card" style="text-align:center"><div style="font-size:34px">🔒</div><b>Today is locked</b><p class="mute">The sales reading (Z-${P.boot.zNo}) for today is already done. Only one per day. You can open a new shift tomorrow.</p><button class="ghost" data-a="tab" data-t="z">View Z-readings</button></div>`;
+    if (!c?.shift) return tabs + `<div class="card"><p>There is no open shift.</p><button data-a="openshift">Open shift</button></div>`;
     const z = c.z, counted = DENOMS.reduce((t, d) => t + d * (P.denoms[d] || 0), 0), nonCash = Object.entries(z.tender).filter(([k]) => k !== 'Cash'), variance = counted - z.expected;
     return `${tabs}<div class="card"><b>Cash denomination counter</b><p class="mute" style="margin:2px 0 6px">Count the bills and coins in the drawer</p>
       ${DENOMS.map(d => `<div class="row between" style="padding:6px 0"><b style="width:70px">₱${d}</b><div class="qty"><button class="ghost sm" data-a="den" data-d="${d}" data-n="-1">−</button><input type="number" min="0" inputmode="numeric" data-den="${d}" value="${P.denoms[d] || 0}" style="width:70px;text-align:center"><button class="ghost sm" data-a="den" data-d="${d}" data-n="1">＋</button></div><span style="width:90px;text-align:right">${peso(d * (P.denoms[d] || 0))}</span></div>`).join('')}</div>
@@ -376,6 +377,7 @@ const VIEWS = {
       <div class="row between"><b>Expected cash in drawer</b><b>${peso(z.expected)}</b></div><div class="row between"><span>Declared physical cash</span><span>${peso(counted)}</span></div>
       <div class="row between"><b>Cash variance (over / short)</b><b id="var" style="color:${variance < 0 ? 'var(--bad)' : variance > 0 ? 'var(--info)' : 'var(--ok)'}">${peso(variance)}</b></div>
       <div class="row" style="margin:10px 0"><button class="sm ghost" data-a="cashmove" data-k="in">＋ Cash in</button><button class="sm ghost" data-a="cashmove" data-k="out">− Cash out</button></div>
+      ${(() => { const q = (P.boot?.queue || []).length, ci = P.cart.items.length; return q || ci ? `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">Cannot do the sales reading yet</b><p style="margin:6px 0 0">${q ? q + ' ticket' + (q === 1 ? '' : 's') + ' still open (pay later or in the chair). Pay or cancel ' + (q === 1 ? 'it' : 'them') + '.' : ''} ${ci ? 'Your cart still has ' + ci + ' item' + (ci === 1 ? '' : 's') + '. Check it out or clear it.' : ''}</p></div>` : ''; })()}
       <label>Closing remarks (optional)</label><textarea id="remarks">${esc(P.remarks)}</textarea><br><br><button class="block" data-a="closeshift">${ic('lock')} Submit & Close Shift</button></div>`;
   }
 };
@@ -442,6 +444,7 @@ async function viewIdPhoto(id) {
   } catch (x) { toast(x.message, true); }
 }
 function addItem(id) {
+  if (P.boot && P.boot.locked) return toast('Today is locked: the sales reading is already done.', true);
   const it = P.boot.items.find(i => i.id === id);
   if (it.apptOnly && !P.cart.items.some(x => x.itemId === id)) { toast(it.name + ' is by appointment only. Use the Bookings tab.', true); return; }
   if (!cu().name.trim()) return customerSheet(it);   // first item: ask who the customer is (same as the other POS)
@@ -877,6 +880,8 @@ document.addEventListener('click', async e => {
   if (a === 'cashmove') return openSheet(`<h2 style="margin-top:0">Cash ${d.k === 'in' ? 'in' : 'out'}</h2><label>Amount (₱)</label><input id="camt" type="number" inputmode="decimal"><label>Note</label><input id="cnote"><p id="err" style="color:var(--bad)"></p><div class="row"><button data-a="docash" data-k="${d.k}">Save</button><button class="ghost" data-a="closesheet">Cancel</button></div>`);
   if (a === 'docash') { const r = await (async () => { try { return await api('POST', '/api/cash', { shiftId: P.cur.shift.id, kind: d.k, amount: +document.getElementById('camt').value, note: document.getElementById('cnote').value }); } catch (x) { document.getElementById('err').textContent = x.message; return null; } })(); if (r) { closeSheet(); toast('Saved'); await refresh(); } return; }
   if (a === 'closeshift') {
+    if (P.cart.items.length) return alert('Your cart still has items. Check it out or clear it before the sales reading.');
+    if ((P.boot?.queue || []).length) return alert('There are still open tickets (pay later or in the chair). Pay or cancel them before the sales reading.');
     const counted = DENOMS.reduce((t, x) => t + x * (P.denoms[x] || 0), 0);
     if (!confirm(`Close Shift #${P.cur.shift.no}? Declared cash: ${peso(counted)}`)) return;
     const z = await guard(() => api('POST', `/api/shifts/${P.cur.shift.id}/close`, { denoms: P.denoms, remarks: document.getElementById('remarks')?.value || '' }));
