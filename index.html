@@ -2,15 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#ffffff">
 <link rel="icon" type="image/png" href="/icon-192.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'"><noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet"></noscript>
 <title>Brotherhood</title>
 <style>
 :root{--bg:#f5f5f6;--s1:#ffffff;--s2:#f7f7f8;--s3:#ececef;--line:#e1e1e6;--text:#0d0d0f;--mute:#6b6b76;--gold:#0d0d0f;--gold2:#000000;--grad:linear-gradient(135deg,#2c2c31,#000);--ok:#16a870;--bad:#e5384a;--info:#2b7de9;--vio:#7c4dff;--r:18px}
+html{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+button,a,input,select,textarea,label,summary{touch-action:manipulation}
+@media(pointer:coarse){input,select,textarea{font-size:16px}}   /* 16px stops iPhones zooming in when a field is tapped */
 *{box-sizing:border-box}
 html,body{margin:0}
 body{font:14px/1.5 'Inter',system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
@@ -60,7 +63,7 @@ td.mute,.mute{color:var(--mute)}
 .tag.booked{color:#b26a00;background:rgba(245,166,35,.16)}.tag.done{color:var(--ok);background:rgba(62,207,142,.13)}
 .chips{display:flex;flex-wrap:wrap;gap:8px}.chip{padding:8px 14px;border-radius:99px;background:var(--s2);border:1px solid var(--line);cursor:pointer;font-weight:600}.chip.on{background:var(--grad);color:#fff;border-color:transparent}
 dialog{background:var(--s1);color:var(--text);border:1px solid var(--line);border-radius:20px;padding:24px;width:min(480px,94vw);max-height:90vh;overflow:auto;box-shadow:0 30px 80px -20px rgba(0,0,0,.45)}
-dialog::backdrop{background:rgba(0,0,0,.66);backdrop-filter:blur(3px)}
+dialog::backdrop{background:rgba(0,0,0,.66)}
 dialog h2{font-size:22px}
 .online{max-width:420px;margin:8vh auto 0;width:100%;padding:30px}
 .online .logo{width:96px;height:96px;border-radius:50%;display:block;margin:0 auto 12px;box-shadow:0 14px 40px -10px rgba(0,0,0,.35)}

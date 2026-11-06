@@ -25,6 +25,11 @@ const ymd = (n = 0) => { const d = new Date(Date.now() + n * 864e5); return `${d
 const av = (name, photo, cls = '') => photo ? `<img class="av ${cls}" src="${esc(photo)}" alt="${esc(name)}" loading="lazy">` : `<span class="av ${cls}">${esc(initials(name))}</span>`;
 function beep() { try { const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + 0.18); } catch (e) { } }
 const isWide = () => window.matchMedia('(min-width: 900px)').matches;
+// no double-tap / pinch zoom inside the app (it should behave like an app, not a web page)
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => { if (!/INPUT|TEXTAREA/.test(e.target.tagName)) e.preventDefault(); });
+// only touch the page when the screen really changed (keeps it fast and stops flicker/scroll jumps)
+const setApp = html => { if (html === app._html) return; app._html = html; app.innerHTML = html; };
 const initials = s => String(s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 const openSheet = h => { sheet.innerHTML = h; if (!sheet.open) sheet.showModal(); };
 const closeSheet = () => { if (sheet.open) sheet.close(); };
@@ -181,20 +186,20 @@ async function afterLogin(j) {
 const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay', problems: 'Report a Problem', inbox: 'Inbox', checklist: 'Daily Checklist', leave: 'Leave Requests', myperf: 'My Performance' };
 function render() {
   if (!P.me) {
-    app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
+    app._html = ""; app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
       <div class="dots">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i < P.pin.length ? 'on' : ''}"></i>`).join('')}</div><p style="color:var(--bad);min-height:22px;font-size:13px">${esc(P.err) || 'Enter your 6-digit PIN'}</p>
       <div class="pin">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-a="pin" data-n="${n}">${n}</button>`).join('')}<button data-a="pinclr" class="ghost">CLR</button><button data-a="pin" data-n="0">0</button><button data-a="pinbk" class="ghost">⌫</button></div></main>`;    return;
   }
   const b = P.boot; app.classList.toggle('in', !!P.me);
   if (!canOpen(P.view)) P.view = firstView();
-  if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
+  if (!P.view) { app._html = ""; app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
   const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Problems'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Checklist'], ['leave', 'calendar', 'Leave'], ['myperf', 'star', 'My Performance']];
   const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
-  app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button>${P.me.role === 'barber' ? `<span class="hav" data-a="go" data-v="dashboard">${av(P.me.name, P.me.photo)}</span>` : ''}<div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.inUnread && P.view !== 'inbox' ? `<span class="shiftchip" style="color:#e5384a" data-a="go" data-v="inbox">✉ ${P.inUnread}</span>` : ''}${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
+  setApp(`<header><button class="burger" data-a="more">${ic('menu')}</button>${P.me.role === 'barber' ? `<span class="hav" data-a="go" data-v="dashboard">${av(P.me.name, P.me.photo)}</span>` : ''}<div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.inUnread && P.view !== 'inbox' ? `<span class="shiftchip" style="color:#e5384a" data-a="go" data-v="inbox">✉ ${P.inUnread}</span>` : ''}${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
     <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
     ${P.view === 'pos' && P.cart.mode !== 'now' && !isWide() && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
-    <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`;
+    <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`);
 }
 const _render = render;
 render = function () { _render(); const h = document.getElementById('inbox-host'); if (h && window.Inbox && P.me) Inbox.mount(h, { token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); };
