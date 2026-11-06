@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+<title>Book your cut · Brotherhood</title>
+<style>
+:root{--bg:#f5f5f6;--s1:#fff;--s2:#f7f7f8;--s3:#ececef;--line:#e1e1e6;--text:#0d0d0f;--mute:#6b6b76;--ok:#16a870;--bad:#e5384a;--grad:linear-gradient(135deg,#2c2c31,#000);--r:18px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 'Inter',system-ui,Segoe UI,Roboto,sans-serif}
+h1,h2,h3,.num{font-family:'Oswald','Arial Narrow',system-ui,sans-serif;letter-spacing:.4px;font-weight:600}
+svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+#app{max-width:560px;margin:0 auto;padding-bottom:130px}
+.top{position:relative;background:#000;color:#fff;padding:26px 20px 30px;text-align:center;overflow:hidden}
+.top::after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;background:repeating-linear-gradient(135deg,#d6283a 0 10px,#fff 10px 20px,#2563eb 20px 30px)}
+.top img{width:64px;height:64px;border-radius:18px;margin-bottom:10px}.top h1{margin:0;font-size:28px;text-transform:uppercase;letter-spacing:2px}.top p{margin:4px 0 0;color:#b4b4be}
+main{padding:16px 14px}
+.step{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px;box-shadow:0 6px 22px -16px rgba(0,0,0,.3)}
+.step>h2{margin:0 0 12px;font-size:16px;text-transform:uppercase;letter-spacing:1px;display:flex;align-items:center;gap:10px}
+.step>h2 b{width:26px;height:26px;border-radius:50%;background:#000;color:#fff;display:grid;place-items:center;font-size:13px;font-family:'Inter';font-weight:700}
+.step.off{opacity:.45;pointer-events:none}
+.opt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px;margin-bottom:8px;border-radius:14px;background:var(--s2);border:2px solid transparent;color:var(--text);font:inherit;cursor:pointer}
+.opt.on{border-color:#000;background:#fff}
+.opt .pic{width:58px;height:58px;border-radius:12px;object-fit:cover;background:var(--s3);flex:none;display:grid;place-items:center;color:var(--mute)}
+.opt .nm{font-weight:600}.opt small{display:block;color:var(--mute)}.opt .pr{margin-left:auto;font-family:'Oswald';font-size:18px;font-weight:600;white-space:nowrap}
+.opt .ck{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;flex:none;color:#fff}.opt.on .ck{background:#000;border-color:#000}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10.5px;font-weight:700;background:#fff3dc;color:#b26a00;margin-left:6px;vertical-align:middle}
+.team{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:none}.team::-webkit-scrollbar{display:none}
+.mate{flex:none;width:96px;text-align:center;padding:10px 6px;border-radius:16px;background:var(--s2);border:2px solid transparent;font:inherit;color:var(--text);cursor:pointer}
+.mate.on{border-color:#000;background:#fff}
+.mate .av{width:64px;height:64px;border-radius:50%;margin:0 auto 6px;object-fit:cover;background:var(--s3);display:grid;place-items:center;font-family:'Oswald';font-size:22px;color:var(--mute)}
+.mate b{display:block;font-size:13px;line-height:1.2}.mate small{color:var(--mute);font-size:11px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:9px 14px;border-radius:14px;background:var(--s2);border:2px solid transparent;font:inherit;font-weight:600;color:var(--text);cursor:pointer;text-align:center;min-width:64px}
+.chip.on{background:#000;color:#fff}.chip small{display:block;font-weight:500;font-size:11px;opacity:.7}
+.slots{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px}.slots .chip{min-width:0;padding:10px 4px}
+label{display:block;color:var(--mute);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;margin:12px 0 5px}
+input,textarea{width:100%;background:var(--s2);border:1px solid var(--line);color:var(--text);padding:13px 14px;border-radius:13px;font:inherit;outline:none}
+input:focus,textarea:focus{border-color:#000;box-shadow:0 0 0 3px rgba(0,0,0,.08)}
+.mute{color:var(--mute)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.95);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:12px 14px calc(12px + env(safe-area-inset-bottom));z-index:5}
+.bar>div{max-width:532px;margin:0 auto}
+.sum{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-size:13px;color:var(--mute)}.sum b{font-family:'Oswald';font-size:22px;color:var(--text)}
+.go{width:100%;border:0;border-radius:14px;padding:15px;background:var(--grad);color:#fff;font:inherit;font-weight:700;font-size:16px;cursor:pointer}.go:disabled{opacity:.35}
+.err{color:var(--bad);font-size:13px;min-height:18px;margin:6px 0 0}
+.done{text-align:center;padding:30px 20px}.done .tick{width:72px;height:72px;border-radius:50%;background:var(--ok);color:#fff;display:grid;place-items:center;margin:0 auto 12px}.done .tick svg{width:38px;height:38px;stroke-width:2.6}
+.done h2{margin:0;font-size:26px;text-transform:uppercase}.recap{text-align:left;margin:18px 0;background:var(--s2);border-radius:16px;padding:14px}.recap .r{display:flex;justify-content:space-between;gap:10px;padding:5px 0}
+.recap .who{display:flex;align-items:center;gap:12px;margin-bottom:8px}.recap .who img,.recap .who span{width:52px;height:52px;border-radius:50%;object-fit:cover;background:var(--s3);display:grid;place-items:center;font-family:'Oswald'}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/book.js"></script>
+</body>
+</html>

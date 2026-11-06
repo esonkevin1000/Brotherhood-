@@ -10,6 +10,7 @@ const ICONS = {
   pos: '<path d="M4 2v20l3-2 3 2 3-2 3 2 3-2V2l-3 2-3-2-3 2-3-2z"/><path d="M8 8h8M8 12h8"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>', phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
   wallet: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="17" cy="14" r="1"/>',
   doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
   hourglass: '<path d="M6 2h12M6 22h12M7 2v4a5 5 0 0 0 2 4l3 2-3 2a5 5 0 0 0-2 4v4M17 2v4a5 5 0 0 1-2 4l-3 2 3 2a5 5 0 0 1 2 4v4"/>',
@@ -19,13 +20,17 @@ const ICONS = {
   cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>', lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
 };
 const ic = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
+const t12 = t => { const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
+const ymd = (n = 0) => { const d = new Date(Date.now() + n * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const av = (name, photo, cls = '') => photo ? `<img class="av ${cls}" src="${esc(photo)}" alt="${esc(name)}" loading="lazy">` : `<span class="av ${cls}">${esc(initials(name))}</span>`;
+function beep() { try { const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + 0.18); } catch (e) { } }
 const initials = s => String(s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 const openSheet = h => { sheet.innerHTML = h; if (!sheet.open) sheet.showModal(); };
 const closeSheet = () => { if (sheet.open) sheet.close(); };
 function toast(msg, err) { const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2600); }
 
 let token = ''; try { token = localStorage.getItem('bp.pos') || ''; } catch (e) { }
-const P = { me: null, branch: '', branches: [], boot: null, dash: null, queue: [], att: [], exp: null, shift: null, z: [], zs: [], view: 'dashboard', pin: '', err: '',
+const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: [], boot: null, dash: null, queue: [], att: [], exp: null, shift: null, z: [], zs: [], view: 'dashboard', pin: '', err: '',
   cart: { items: [], cust: null, name: '', barberId: '', mode: 'later', editing: null }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 const br = () => P.me && P.me.role !== 'cashier' ? `branch=${P.branch}` : '';
@@ -45,6 +50,7 @@ async function refresh() {
   if (!P.me) return;
   try {
     P.boot = await api('GET', withBr('/api/pos/bootstrap')); P.shift = P.boot.shift;
+    P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings();
     if (P.view === 'dashboard') P.dash = await api('GET', withBr('/api/pos/dashboard'));
     if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
@@ -52,6 +58,14 @@ async function refresh() {
     if (P.view === 'reading') { const s = await api('GET', withBr('/api/pos/shift')); P.cur = s; P.zs = await api('GET', withBr('/api/pos/zreadings')); }
   } catch (e) { if (P.me) toast(e.message, true); }
   if (!sheet.open) render();
+}
+function notifyBookings() {
+  const ids = new Set(P.bk.map(b => b.id));
+  if (P._seen) {
+    const fresh = P.bk.filter(b => !P._seen.has(b.id) && b.source === 'online' && b.status === 'booked');
+    if (fresh.length) { toast(`🔔 Bagong booking: ${fresh[0].customerName} · ${t12(fresh[0].time)}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`); beep(); }
+  }
+  P._seen = ids;
 }
 async function afterLogin(j) {
   token = j.token; try { localStorage.setItem('bp.pos', token); } catch (e) { }
@@ -61,7 +75,7 @@ async function afterLogin(j) {
 }
 
 // ---------- shell ----------
-const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading' };
+const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments' };
 function render() {
   if (!P.me) {
     app.innerHTML = `<main class="login"><img class="logo" src="/icon-192.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
@@ -69,7 +83,7 @@ function render() {
       <div class="pin">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-a="pin" data-n="${n}">${n}</button>`).join('')}<button data-a="pinclr" class="ghost">CLR</button><button data-a="pin" data-n="0">0</button><button data-a="pinbk" class="ghost">⌫</button></div></main>`;    return;
   }
   const b = P.boot;
-  const nav = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['queue', 'users', 'Queue'], ['more', 'menu', 'More']];
+  const nav = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue']];
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div><span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
     <main class="${enter}">${P.me.role !== 'cashier' ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
@@ -88,12 +102,25 @@ const VIEWS = {
     return `<div class="card hero"><small>Today's gross sales</small><div class="num">${peso(d.gross)}</div><span class="mute">${d.completed} completed order${d.completed === 1 ? '' : 's'} · net ${peso(d.net)}</span></div>
     <div class="kpis"><div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in queue</small><div class="num">${d.waiting}</div><small>${d.cutting} in chair</small></div>
       <div class="card kpi g"><div class="ic">${ic('scissors')}</div><small>Barbers on duty</small><div class="num">${d.onDuty}<span class="mute" style="font-size:18px"> / ${d.totalBarbers}</span></div><small>available for walk-ins</small></div></div>
+    ${bookingsCard()}
     <div class="sect"><h3>Live walk-in floor</h3><span class="mute">${d.queue.length} active</span></div>${d.queue.map(o => ticketHtml(o)).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">Walang customer sa floor ngayon.</p></div>'}`;
   },  pos() {
     const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat);
     return `${s ? '' : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Buksan muna ang shift para makapag-checkout.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}    ${P.cart.editing ? `<div class="card">Editing ticket — <button class="sm ghost" data-a="canceledit">cancel</button></div>` : `<div class="seg"><button class="${P.cart.mode === 'now' ? 'on' : ''}" data-a="mode" data-m="now">Pay as you order</button><button class="${P.cart.mode === 'later' ? 'on' : ''}" data-a="mode" data-m="later">Pay later</button></div>`}
     <div class="chips"><button class="chip ${P.cat === 'all' ? 'on' : ''}" data-a="cat" data-c="all">All</button>${cats.map(c => `<button class="chip ${P.cat === c.id ? 'on' : ''}" data-a="cat" data-c="${c.id}">${esc(c.name)}</button>`).join('')}</div>
-    <div class="grid">${items.map(i => `<button class="item ${i.type}" data-a="add" data-id="${i.id}"><span class="mono">${ic(i.type === 'service' ? 'scissors' : 'bottle')}</span><span class="nm">${esc(i.name)}</span><small>${i.type === 'service' ? i.mins + ' min' : 'Product'}</small><b>${peso(i.price)}</b><span class="plus">${ic('plus', 'sm')}</span></button>`).join('')}</div>`;
+    <div class="grid">${items.map(i => `<button class="item ${i.type} ${i.photo ? 'hasphoto' : ''}" data-a="add" data-id="${i.id}">${i.photo ? `<img class="pic" src="${esc(i.photo)}" alt="" loading="lazy">` : `<span class="mono">${ic(i.type === 'service' ? 'scissors' : 'bottle')}</span>`}<span class="body"><span class="nm">${esc(i.name)}</span><small>${i.type === 'service' ? i.mins + ' min' : 'Product'}${i.apptOnly ? ' · Appt only' : ''}</small><b>${peso(i.price)}</b></span><span class="plus">${ic('plus', 'sm')}</span></button>`).join('')}</div>`;
+  },
+  appts() {
+    const days = [0, 1, 2, 3, 4, 5, 6].map(n => ({ v: ymd(n), l: n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : new Date(Date.now() + n * 864e5).toLocaleDateString('en-PH', { weekday: 'short', day: 'numeric' }) }));
+    const list = P.bk.filter(b => b.date === P.apptDate), live = list.filter(b => b.status === 'booked').length;
+    return `<button class="block" data-a="newappt" style="margin-bottom:14px;padding:16px">${ic('plus')} New appointment</button>
+    <div class="chips">${days.map(d => `<button class="chip ${P.apptDate === d.v ? 'on' : ''}" data-a="apptdate" data-d="${d.v}">${d.l}${P.bk.filter(b => b.date === d.v && b.status === 'booked').length ? ` · ${P.bk.filter(b => b.date === d.v && b.status === 'booked').length}` : ''}</button>`).join('')}</div>
+    <div class="sect"><h3>${live} upcoming</h3><span class="mute">${list.length} total</span></div>
+    ${list.map(b => `<div class="appt ${b.status}"><div class="tm"><b>${t12(b.time).split(' ')[0]}</b><small>${t12(b.time).split(' ')[1]}</small></div><div class="bd">
+      <div class="row between" style="flex-wrap:nowrap"><b>${esc(b.customerName)}</b><span class="tag ${b.status === 'booked' ? 'waiting' : b.status === 'arrived' ? 'paid' : 'void'}">${b.status === 'noshow' ? 'No-show' : b.status[0].toUpperCase() + b.status.slice(1)}</span></div>
+      <small>${b.items.map(i => esc(i.name)).join(', ')} · ${peso(b.total)}</small>
+      <div class="who">${av(b.staffName, b.staffPhoto, 'xs')}<small>${esc(b.staffName || 'Any barber')} · ${b.source === 'online' ? 'Online' : 'Phone/POS'}</small></div>
+      <div class="acts"><a class="sm ghost callbtn" href="tel:${esc(b.phone)}">${ic('phone', 'sm')} ${esc(b.phone)}</a>${b.status === 'booked' ? `<button class="sm ok" data-a="arrive" data-id="${b.id}">Arrived</button><button class="sm ghost" data-a="bkno" data-id="${b.id}">No-show</button><button class="sm bad" data-a="bkcancel" data-id="${b.id}">Cancel</button>` : ''}</div></div></div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">Walang booking sa araw na ito.</p></div>'}`;
   },  queue() {
     const f = P.qf, list = P.queue.filter(o => (f.status === 'waiting' ? o.status === 'waiting' : f.status === 'chair' ? o.status === 'in_chair' : true) && (!f.barber || o.barberId === f.barber));
     const waiting = P.queue.filter(o => o.status === 'waiting'), chair = P.queue.filter(o => o.status === 'in_chair');
@@ -118,7 +145,7 @@ const VIEWS = {
     return `<div class="grid"><div class="card"><small class="mute">Present (on time)</small><b style="font-size:22px;display:block">${cnt('present')}</b></div><div class="card"><small class="mute">Late</small><b style="font-size:22px;display:block">${cnt('late')}</b></div>
     <div class="card"><small class="mute">On break</small><b style="font-size:22px;display:block">${cnt('break')}</b></div><div class="card"><small class="mute">Not timed in</small><b style="font-size:22px;display:block">${cnt('none')}</b></div></div>
     <div class="card"><b>Barber attendance roster</b> <span class="mute">· ${P.att.length} barbers</span>
-    ${P.att.map(s => `<hr><div class="row between"><div class="row" style="flex-wrap:nowrap"><span class="av">${initials(s.name)}</span><div><b>${esc(s.name)}</b><br><small class="mute">${esc(s.chairName || 'No chair assigned')}${s.timeIn ? ' · in ' + hm(s.timeIn) : ''}</small></div></div><span class="tag ${s.state}">${stateLabel[s.state]}</span></div>
+    ${P.att.map(s => `<hr><div class="row between"><div class="row" style="flex-wrap:nowrap">${av(s.name, s.photo)}<div><b>${esc(s.name)}</b><br><small class="mute">${esc(s.chairName || 'No chair assigned')}${s.timeIn ? ' · in ' + hm(s.timeIn) : ''}</small></div></div><span class="tag ${s.state}">${stateLabel[s.state]}</span></div>
       <div class="row" style="margin-top:8px">${s.state === 'none' || s.state === 'off' ? `<button class="sm" data-a="att" data-id="${s.id}" data-x="in">Time in</button>` + (s.state === 'none' ? `<button class="sm ghost" data-a="att" data-id="${s.id}" data-x="off">Off duty</button>` : '') : ''}
       ${s.state === 'present' || s.state === 'late' ? `<button class="sm ghost" data-a="att" data-id="${s.id}" data-x="break_start">Start break</button><button class="sm bad" data-a="att" data-id="${s.id}" data-x="out">Time out</button>` : ''}
       ${s.state === 'break' ? `<button class="sm ok" data-a="att" data-id="${s.id}" data-x="break_end">End break</button>` : ''}</div>`).join('')}</div>`;
@@ -149,8 +176,30 @@ function ticketHtml(o, actions) {
     <small>${names || 'No items yet'}</small><br><small>${o.barberName ? ic('scissors', 'sm') + ' ' + esc(o.barberName) : 'No barber yet'}${live ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>
     ${actions && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">Seat</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div></div>`;
 }
+function bookingsCard() {
+  const t = ymd(0), list = (P.bk || []).filter(b => b.date === t && b.status === 'booked').sort((a, b) => a.time.localeCompare(b.time)), next = list[0];
+  return `<div class="card kpi" data-a="go" data-v="appts" style="cursor:pointer;display:flex;gap:14px;align-items:center"><div class="ic" style="margin:0">${ic('calendar')}</div><div style="flex:1"><small>Bookings today</small><div class="num" style="font-size:24px">${list.length} upcoming</div>${next ? `<small>Next: ${esc(next.customerName)} · ${t12(next.time)}</small>` : '<small>Walang nakabinbin na booking</small>'}</div></div>`;
+}
+function apptSheet() {
+  const n = P.na, svcs = P.boot.items.filter(i => i.type === 'service');
+  openSheet(`<div class="row between"><h2 style="margin:0">New appointment</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
+    <label>Customer name</label><input data-na="name" value="${esc(n.name)}"><label>Mobile number</label><input data-na="phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(n.phone)}">
+    <label>Services</label><div class="chips" style="flex-wrap:wrap">${svcs.map(i => `<button class="chip ${n.items.includes(i.id) ? 'on' : ''}" data-a="natoggle" data-id="${i.id}">${esc(i.name)} · ${peso(i.price)}</button>`).join('')}</div>
+    <label>Barber</label><select data-na="staff"><option value="any">Any available</option>${P.boot.staff.map(s => `<option value="${s.id}" ${n.staff === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+    <label>Date</label><input data-na="date" type="date" min="${ymd(0)}" value="${n.date}">
+    <label>Time</label>${!n.items.length ? '<p class="mute">Pumili muna ng serbisyo.</p>' : n.slots === null ? '<p class="mute">Hinahanap ang bakanteng oras…</p>' : n.slots.length ? `<div class="chips" style="flex-wrap:wrap">${n.slots.map(t => `<button class="chip ${n.time === t ? 'on' : ''}" data-a="natime" data-t="${t}">${t12(t)}</button>`).join('')}</div>` : '<p class="mute">Walang bakanteng oras.</p>'}
+    <p id="err" style="color:var(--bad)">${esc(n.err)}</p><button class="block" id="nasave" data-a="nasave" ${n.time && n.name.trim() && n.phone.replace(/\D/g, '').length >= 10 ? '' : 'disabled'}>Save appointment</button>`);
+}
+async function naSlots() {
+  const n = P.na; n.time = ''; n.slots = null; apptSheet();
+  if (!n.items.length) return;
+  try { n.slots = (await api('GET', `/api/public/slots?branch=${P.boot.branch.id}&date=${n.date}&staff=${n.staff}&items=${n.items.join(',')}`)).slots; } catch (e) { n.slots = []; }
+  apptSheet();
+}
+
 // ---------- cart / ticket / payment ----------
 function addItem(id) {
+  const pre = P.boot.items.find(i => i.id === id); if (pre?.apptOnly && !P.cart.items.some(x => x.itemId === id)) { toast(pre.name + ' ay appointment lang. Gamitin ang Bookings tab.', true); return; }
   const it = P.boot.items.find(i => i.id === id), c = P.cart.items.find(x => x.itemId === id);
   if (c) c.qty++; else P.cart.items.push({ itemId: id, name: it.name, type: it.type, price: it.price, qty: 1 });
   render();
@@ -162,7 +211,7 @@ function freeBarbers(includeId) {
 function seatSheet(id) {
   const free = freeBarbers(), bs = P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && cuttingIds().has(s.id));
   openSheet(`<div class="row between"><h2 style="margin:0">Available barbers</h2><button class="ghost sm" data-a="closesheet">Close</button></div><p class="mute">Pumili ng barber para sa customer.</p>
-    ${free.map(s => `<button class="block ghost" style="margin-bottom:8px;text-align:left" data-a="doseat" data-id="${id}" data-b="${s.id}"><b>${esc(s.name)}</b> <span class="mute">${esc(P.boot.chairs.find(c => c.id === s.chairId)?.name || '')}</span></button>`).join('') || '<p class="mute">Walang available na barber ngayon. Mag-time in sa Attendance, o hintayin matapos ang iba.</p>'}
+    ${free.map(s => `<button class="block ghost" style="margin-bottom:8px;text-align:left" data-a="doseat" data-id="${id}" data-b="${s.id}"><span class="row" style="flex-wrap:nowrap;gap:12px">${av(s.name, s.photo)}<span><b>${esc(s.name)}</b><br><span class="mute">${esc(P.boot.chairs.find(c => c.id === s.chairId)?.name || '')}</span></span></span></button>`).join('') || '<p class="mute">Walang available na barber ngayon. Mag-time in sa Attendance, o hintayin matapos ang iba.</p>'}
     ${bs.length ? `<p class="mute">Busy: ${bs.map(s => esc(s.name)).join(', ')}</p>` : ''}<button class="block ghost" data-a="closesheet">Wait in queue (assign later)</button>`);
 }
 function cartSheet() {
@@ -249,11 +298,33 @@ document.addEventListener('click', async e => {
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/icon-192.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
-      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
   if (a === 'logout') { e.preventDefault(); token = ''; try { localStorage.removeItem('bp.pos'); } catch (x) { } P.me = null; P.boot = null; closeSheet(); return render(); }
+  if (a === 'apptdate') { P.apptDate = d.d; return render(); }
+  if (a === 'arrive') {
+    const r = await guard(() => api('POST', `/api/bookings/${d.id}/arrive`)); if (!r) return;
+    P.view = 'queue'; await refresh(); render();
+    if (r.seated) toast('Naka-upo na kay ' + (P.boot.staff.find(s => s.id === r.order.barberId)?.name || 'barber')); else seatSheet(r.order.id);
+    return;
+  }
+  if (a === 'bkcancel' || a === 'bkno') {
+    if (!confirm(a === 'bkno' ? 'I-mark na no-show?' : 'I-cancel ang booking?')) return;
+    await guard(() => api('PUT', `/api/bookings/${d.id}`, { status: a === 'bkno' ? 'noshow' : 'cancelled' })); return refresh();
+  }
+  if (a === 'newappt') { P.na = { name: '', phone: '', date: P.apptDate < ymd(0) ? ymd(0) : P.apptDate, items: [], staff: 'any', time: '', slots: null, err: '' }; return apptSheet(); }
+  if (a === 'natoggle') { const n = P.na; n.items = n.items.includes(d.id) ? n.items.filter(x => x !== d.id) : [...n.items, d.id]; return naSlots(); }
+  if (a === 'natime') { P.na.time = d.t; return apptSheet(); }
+  if (a === 'nasave') {
+    const n = P.na;
+    try {
+      const b = await api('POST', '/api/bookings', { branchId: P.boot.branch.id, date: n.date, time: n.time, itemIds: n.items, name: n.name, phone: n.phone, staffId: n.staff });
+      P.apptDate = b.date; closeSheet(); toast('Appointment saved'); P.view = 'appts'; await refresh(); render();
+    } catch (x) { n.err = x.message; if (/no longer/.test(x.message)) return naSlots(); apptSheet(); }
+    return;
+  }
   if (a === 'cat') { P.cat = d.c; return render(); }
   if (a === 'mode') { P.cart.mode = d.m; return render(); }
   if (a === 'add') return addItem(d.id);
@@ -328,6 +399,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target, a = t.dataset.a;
+  if (t.dataset.na === 'staff' || t.dataset.na === 'date') { P.na[t.dataset.na] = t.value; return naSlots(); }
   if (a === 'branchsel') { P.branch = t.value; P.cart.items = []; return refresh(); }
   if (a === 'qstatus') { P.qf.status = t.value; return refresh(); }
   if (a === 'qbarber') { P.qf.barber = t.value; return render(); }
@@ -339,6 +411,7 @@ document.addEventListener('change', async e => {
 let timer;
 document.addEventListener('input', e => {
   const t = e.target;
+  if (t.dataset.na === 'name' || t.dataset.na === 'phone') { P.na[t.dataset.na] = t.value; const n = P.na, b = document.getElementById('nasave'); if (b) b.disabled = !(n.time && n.name.trim() && n.phone.replace(/\D/g, '').length >= 10); return; }
   if (t.id === 'tendered') { P.pay.tendered = t.value; const tt = payTotals(P.pay), ch = (+t.value || 0) - tt.total; const c = document.getElementById('chg'); c.textContent = peso(Math.max(0, ch)); c.style.color = ch < 0 ? 'var(--bad)' : 'var(--ok)'; document.querySelector('[data-a=confirmpay]').disabled = ch < 0; }
   if (t.id === 'custname') {
     P.cart.cust = null; P.cart.name = t.value; clearTimeout(timer);

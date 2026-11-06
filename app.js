@@ -11,7 +11,7 @@ const ago = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso
 let S = { shop: 'Brotherhood', me: null, branches: [], chairs: [], staff: [], categories: [], items: [], discounts: [], users: [] };
 let token = ''; try { token = localStorage.getItem('bp.token') || ''; } catch (e) { }
 let loggedIn = false, loadErr = '';
-const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], cust: { q: '', page: 1, rows: [], total: 0 }, picked: new Set() };
+const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0 }, picked: new Set() };
 const modal = document.getElementById('modal');
 const openModal = h => { modal.innerHTML = h; if (!modal.open) modal.showModal(); };
 const closeModal = () => modal.close();
@@ -31,6 +31,7 @@ async function loadView() {
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}`)); }
     else if (v === 'activity') ui.audit = await api('GET', '/api/audit');
+    else if (v === 'bookings') ui.bk = await api('GET', `/api/bookings?from=${ui.bf}&to=${ui.bt}&branch=${ui.branch}`);
   } catch (e) { if (loggedIn) alert(e.message); }
 }
 async function load(viewToo = true) {
@@ -66,11 +67,12 @@ const ICONS = {
   scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   building: '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M9 17h6"/>', key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M14 9l2 2"/>', activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   bottle: '<path d="M10 2h4M10 2v4l-2 3v11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V9l-2-3V2"/>', armchair: '<path d="M5 11V7a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v4M3 13a2 2 0 0 1 4 0v3h10v-3a2 2 0 0 1 4 0v5H3zM6 21v-3M18 21v-3"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'activity' ? 'Activity' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
@@ -92,10 +94,11 @@ function render() {
   nav.innerHTML = `<div class="brand"><img src="/icon-192.png" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
     <select id="branchsel"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
     <button class="${on('dashboard')}" data-view="dashboard">${ic('grid')}Dashboard</button>
+    <button class="${on('bookings')}" data-view="bookings">${ic('calendar')}Bookings</button>
     <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
-    <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+    <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -137,17 +140,17 @@ const vActivity = () => `<div class="row" style="justify-content:space-between;m
 const yn = v => v === 0 ? 'No' : 'Yes';
 const BR = () => S.branches.map(b => [b.id, b.name]);
 const M = {
-  staff: { cols: [['name', 'Name'], ['branchId', 'Branch', brName], ['chairId', 'Chair', chName], ['pct', 'Commission', v => v + '%'], ['allowance', 'Daily allowance', peso], ['active', 'Active', yn]], rows: () => S.staff,
+  staff: { cols: [['photo', ''], ['name', 'Name'], ['branchId', 'Branch', brName], ['chairId', 'Chair', chName], ['pct', 'Commission', v => v + '%'], ['allowance', 'Daily allowance', peso], ['active', 'Active', yn]], rows: () => S.staff,
     form: () => [['name', 'Name', 'text'], ['branchId', 'Branch', 'select', { opts: BR(), def: ui.branch !== 'all' ? ui.branch : S.branches[0]?.id }],
       ['chairId', 'Chair', 'select', { opts: [['', '— none —'], ...S.chairs.map(c => [c.id, chName(c.id)])], req: false }], ['pct', 'Commission %', 'number', { def: 50 }],
-      ['allowance', 'Daily allowance (₱)', 'number', { def: 0, hint: 'guaranteed minimum per day worked' }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
+      ['allowance', 'Daily allowance (₱)', 'number', { def: 0, hint: 'guaranteed minimum per day worked' }], ['photo', 'Photo', 'photo', { req: false }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   chairs: { cols: [['branchId', 'Branch', brName], ['name', 'Name'], ['sort', 'Order'], ['active', 'Active', yn]], rows: () => S.chairs,
     form: () => [['branchId', 'Branch', 'select', { opts: BR(), def: ui.branch !== 'all' ? ui.branch : S.branches[0]?.id }], ['name', 'Name', 'text'], ['sort', 'Order', 'number', { def: 1 }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   categories: { cols: [['name', 'Name'], ['type', 'Type']], rows: () => S.categories,
     form: () => [['name', 'Name', 'text'], ['type', 'Type', 'select', { opts: [['service', 'Service'], ['product', 'Product']] }]] },
-  items: { cols: [['name', 'Name'], ['categoryId', 'Category', catName], ['type', 'Type'], ['price', 'Price', peso], ['mins', 'Minutes'], ['active', 'Active', yn]], rows: () => S.items,
+  items: { cols: [['photo', ''], ['name', 'Name'], ['categoryId', 'Category', catName], ['type', 'Type'], ['price', 'Price', peso], ['mins', 'Minutes'], ['bookable', 'Online', yn], ['apptOnly', 'Appt only', yn], ['active', 'Active', yn]], rows: () => S.items,
     form: () => [['name', 'Name', 'text'], ['categoryId', 'Category', 'select', { opts: S.categories.map(c => [c.id, `${c.name} (${c.type})`]) }], ['type', 'Type', 'select', { opts: [['service', 'Service'], ['product', 'Product']] }],
-      ['price', 'Price (₱)', 'number'], ['mins', 'Minutes', 'number', { def: 30 }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
+      ['price', 'Price (₱)', 'number'], ['mins', 'Minutes', 'number', { def: 30 }], ['photo', 'Photo', 'photo', { req: false }], ['bookable', 'Show on online booking', 'select', { opts: [[1, 'Yes'], [0, 'No']] }], ['apptOnly', 'Appointment only (not for walk-ins)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   discounts: { cols: [['name', 'Name'], ['kind', 'Kind'], ['value', 'Value'], ['active', 'Active', yn]], rows: () => S.discounts,
     form: () => [['name', 'Name', 'text'], ['kind', 'Kind', 'select', { opts: [['amount', 'Amount off (₱)'], ['percent', 'Percent off (%)']] }], ['value', 'Value', 'number'], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   users: { cols: [['name', 'Name'], ['username', 'Username'], ['role', 'Role'], ['branchId', 'Branch', v => v ? brName(v) : 'All'], ['active', 'Active', yn]], rows: () => S.users,
@@ -155,8 +158,8 @@ const M = {
       ['password', 'Password', 'password', { req: false, hint: 'para sa admin; blangko = hindi babaguhin; min 6' }],
       ['role', 'Role', 'select', { opts: [['cashier', 'Cashier (POS, isang branch)'], ['admin', 'Admin (lahat ng branch)']] }], ['branchId', 'Branch', 'select', { opts: [['', '— all —'], ...BR()], req: false, hint: 'para sa cashier' }],
       ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
-  branches: { cols: [['name', 'Name'], ['phone', 'Phone'], ['address', 'Address'], ['openTime', 'Opens'], ['graceMins', 'Grace (min)']], rows: () => S.branches,
-    form: () => [['name', 'Name', 'text'], ['phone', 'Phone', 'text', { req: false }], ['address', 'Address', 'text', { req: false }], ['openTime', 'Opening time (late after this)', 'time', { def: '09:00' }], ['graceMins', 'Grace minutes', 'number', { def: 10 }]] }
+  branches: { cols: [['name', 'Name'], ['phone', 'Phone'], ['address', 'Address'], ['openTime', 'Opens'], ['closeTime', 'Closes'], ['graceMins', 'Grace (min)']], rows: () => S.branches,
+    form: () => [['name', 'Name', 'text'], ['phone', 'Phone', 'text', { req: false }], ['address', 'Address', 'text', { req: false }], ['openTime', 'Opening time (late after this)', 'time', { def: '09:00' }], ['closeTime', 'Closing time (last booking ends by this)', 'time', { def: '21:00' }], ['graceMins', 'Grace minutes', 'number', { def: 10 }]] }
 };
 function vMgmt(kind) {
   if (kind === 'customers') return vCustomers();
@@ -164,7 +167,7 @@ function vMgmt(kind) {
   const rows = m.rows().filter(r => ui.branch === 'all' || !('branchId' in r) || r.branchId === ui.branch || kind === 'users' || kind === 'branches');
   return `<div class="row" style="justify-content:space-between;margin-bottom:14px"><h2 style="margin:0">${title()}</h2><button class="btn" data-act="edit" data-kind="${kind}">+ Add</button></div>
   <div class="card overflow"><table><tr>${m.cols.map(c => `<th>${c[1]}</th>`).join('')}<th></th></tr>
-  ${rows.map(r => `<tr style="${r.active === 0 ? 'opacity:.5' : ''}">${m.cols.map(([k, , f]) => `<td>${esc(f ? f(r[k]) : r[k])}</td>`).join('')}<td><button class="btn ghost sm" data-act="edit" data-kind="${kind}" data-id="${r.id}">Edit</button> <button class="btn bad sm" data-act="del" data-kind="${kind}" data-id="${r.id}">Delete</button></td></tr>`).join('') || `<tr><td colspan="${m.cols.length + 1}" class="mute">Wala pa.</td></tr>`}</table></div>`;
+  ${rows.map(r => `<tr style="${r.active === 0 ? 'opacity:.5' : ''}">${m.cols.map(([k, , f]) => k === 'photo' ? `<td>${thumb(r)}</td>` : `<td>${esc(f ? f(r[k]) : r[k])}</td>`).join('')}<td><button class="btn ghost sm" data-act="edit" data-kind="${kind}" data-id="${r.id}">Edit</button> <button class="btn bad sm" data-act="del" data-kind="${kind}" data-id="${r.id}">Delete</button></td></tr>`).join('') || `<tr><td colspan="${m.cols.length + 1}" class="mute">Wala pa.</td></tr>`}</table></div>`;
 }
 function vCustomers() {
   const c = ui.cust, pages = Math.max(1, Math.ceil(c.total / 20));
@@ -181,13 +184,31 @@ function form(kind, id) {
   const input = ([n, l, t, x = {}]) => {
     const val = n === 'password' ? '' : (o[n] ?? x.def ?? '');
     const req = x.req === false ? '' : 'required';
-    const ctl = t === 'textarea' ? `<textarea name="${n}">${esc(val)}</textarea>`
+    const ctl = t === 'photo' ? `<div class="photo"><div class="pv" id="pv">${val ? `<img src="${esc(val)}" alt="">` : 'No photo'}</div><div style="flex:1"><input type="file" accept="image/*" data-photo="${n}" style="padding:8px"><input type="hidden" name="${n}" value="${esc(val)}"><p class="mute" id="phmsg" style="margin:6px 0 0;font-size:12px">JPG o PNG. Awtomatikong liliitan.</p></div></div>`
+      : t === 'textarea' ? `<textarea name="${n}">${esc(val)}</textarea>`
       : t === 'select' ? `<select name="${n}">${x.opts.map(([v, lab]) => `<option value="${esc(v)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select>`
         : `<input name="${n}" type="${t}" value="${esc(val)}" ${req} ${t === 'number' ? 'step="any"' : ''} ${t === 'password' ? 'autocomplete="new-password"' : ''}>`;
     return `<label>${l}${x.hint ? ` <span class="mute">(${x.hint})</span>` : ''}</label>${ctl}`;
   };
   openModal(`<h2>${id ? 'Edit' : 'New'}</h2><form data-form="${kind}" data-id="${id || ''}">${m.form().map(input).join('')}<p id="err" style="color:var(--bad)"></p><div class="row"><button class="btn">Save</button><button type="button" class="btn ghost" data-act="close">Cancel</button></div></form>`);
 }
+const thumb = r => r.photo ? `<img class="th ${r.type ? 'sq' : ''}" src="${esc(r.photo)}" alt="" loading="lazy">` : `<span class="th ${r.type ? 'sq' : ''}">${esc(String(r.name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase())}</span>`;
+async function resizeToJpeg(file, max = 640) {
+  const bmp = await createImageBitmap(file), s = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.82);
+}
+function vBookings() {
+  const link = location.origin + '/book';
+  const rows = ui.bk;
+  return `<div class="card" style="margin-bottom:14px"><div class="row between"><div><h3 style="margin:0 0 4px">Online booking link</h3><b style="font-size:16px">${esc(link)}</b><div class="mute" style="font-size:12px">Ibigay sa customers (Facebook, Messenger, QR). Papasok ang booking sa POS ng branch.</div></div>
+    <div class="row"><button class="btn" data-act="copylink">Copy link</button><a class="btn ghost" href="/book" target="_blank" style="text-decoration:none">Open</a></div></div></div>
+  <div class="row" style="margin-bottom:14px;align-items:flex-end"><div><label>From</label><input type="date" id="bfrom" value="${ui.bf}"></div><div><label>To</label><input type="date" id="bto" value="${ui.bt}"></div></div>
+  <div class="card overflow"><table><tr><th>Date</th><th>Time</th><th>Customer</th><th>Phone</th><th>Services</th><th>Barber</th><th>Branch</th><th>Source</th><th>Status</th><th></th></tr>
+  ${rows.map(b => `<tr><td>${esc(b.date)}</td><td>${esc(b.time)}</td><td>${esc(b.customerName)}</td><td>${esc(b.phone)}</td><td>${b.items.map(i => esc(i.name)).join(', ')}</td><td>${thumb({ photo: b.staffPhoto, name: b.staffName })} ${esc(b.staffName)}</td><td>${esc(b.branchName)}</td><td>${b.source === 'online' ? 'Online' : 'Phone/POS'}</td>
+    <td><span class="tag ${b.status === 'booked' ? 'booked' : b.status === 'arrived' ? 'done' : ''}">${esc(b.status)}</span></td><td>${b.status === 'booked' ? `<button class="btn bad sm" data-act="bkcancel" data-id="${b.id}">Cancel</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="mute">Walang booking sa panahong ito.</td></tr>'}</table></div>`;
+}
+
 function parseCSV(text) {
   const rows = []; let row = [], cur = '', q = false;
   for (let i = 0; i < text.length; i++) {
@@ -213,6 +234,8 @@ document.addEventListener('click', async e => {
   if (act === 'del') { if (confirm('Sigurado ka?')) mut(async () => { const r = await api('DELETE', `/api/${d.kind}/${d.id}`); if (r.deactivated) alert('May history na ito kaya na-deactivate na lang (hindi nabura).'); }); return; }
   if (act === 'range') { const t = today(); ui.to = t; ui.from = d.r === 'today' ? t : d.r === '7' ? addDays(t, -6) : t.slice(0, 8) + '01'; await loadView(); return render(); }
   if (act === 'export') return download(`/api/reports/${d.name}?${qs()}&format=csv`, `${d.name}-${ui.from}_${ui.to}.csv`);
+  if (act === 'copylink') { try { await navigator.clipboard.writeText(location.origin + '/book'); alert('Na-copy ang link!'); } catch (x) { prompt('Copy this link:', location.origin + '/book'); } return; }
+  if (act === 'bkcancel') { if (confirm('I-cancel ang booking na ito?')) mut(() => api('PUT', `/api/bookings/${d.id}`, { status: 'cancelled' })); return; }
   if (act === 'backup') return download('/api/backup', `brotherhood-${today()}.db`);
   if (act === 'page') { ui.cust.page += +d.n; await loadView(); return render(); }
   if (act === 'paid') {
@@ -223,6 +246,15 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'branchsel') { ui.branch = t.value; render(); await loadView(); return render(); }
+  if (t.id === 'bfrom' || t.id === 'bto') { if (t.id === 'bfrom') ui.bf = t.value || today(); else ui.bt = t.value || today(); await loadView(); return render(); }
+  if (t.dataset.photo) {
+    const file = t.files[0]; if (!file) return; const msg = document.getElementById('phmsg'); msg.textContent = 'Ina-upload…';
+    try {
+      const r = await api('POST', '/api/upload', { data: await resizeToJpeg(file) });
+      t.parentElement.querySelector('input[type=hidden]').value = r.url; document.getElementById('pv').innerHTML = `<img src="${r.url}" alt="">`; msg.textContent = 'Na-upload na. I-click ang Save.';
+    } catch (x) { msg.textContent = x.message; }
+    return;
+  }
   if (t.id === 'rfrom' || t.id === 'rto') { if (t.id === 'rfrom') ui.from = t.value || today(); else ui.to = t.value || today(); await loadView(); return render(); }
   if (t.dataset.pick) { t.checked ? ui.picked.add(t.dataset.pick) : ui.picked.delete(t.dataset.pick); return render(); }
   if (t.id === 'csvfile' && t.files[0]) {
@@ -248,7 +280,7 @@ document.addEventListener('submit', e => {
     return;
   }
   const o = {};
-  for (const [k, v] of fd.entries()) { if (k === 'password' && !v) continue; o[k] = ['price', 'mins', 'pct', 'allowance', 'active', 'value', 'sort', 'graceMins'].includes(k) ? +v : v; }
+  for (const [k, v] of fd.entries()) { if (k === 'password' && !v) continue; o[k] = ['price', 'mins', 'pct', 'allowance', 'active', 'value', 'sort', 'graceMins', 'bookable', 'apptOnly'].includes(k) ? +v : v; }
   run(() => id ? api('PUT', `/api/${kind}/${id}`, o) : api('POST', `/api/${kind}`, o), err);
 });
 

@@ -1,4 +1,4 @@
-﻿// Brotherhood — barbershop operating system backend (zero dependencies, Node 22.5+ built-in SQLite).
+// Brotherhood — barbershop operating system backend (zero dependencies, Node 22.5+ built-in SQLite).
 // Walk-in queue + POS API, shifts/cash drawer/Z-readings, attendance, payroll, reports, audit log, backups.
 // Run:  ADMIN_PASSWORD=yourpass node server.js     (PowerShell: $env:ADMIN_PASSWORD='yourpass'; node server.js)
 import http from 'node:http';
@@ -47,20 +47,27 @@ function addCol(t, c, type) { if (!db.prepare(`pragma table_info(${t})`).all().s
 addCol('branches', 'openTime', 'text'); addCol('branches', 'graceMins', 'integer');
 addCol('users', 'pinKey', 'text'); addCol('attendance', 'status', 'text'); addCol('attendance', 'breakStartedAt', 'text'); addCol('attendance', 'breakMins', 'integer');
 addCol('shifts', 'no', 'integer'); addCol('cash_moves', 'by', 'text');
+addCol('staff', 'photo', 'text'); addCol('items', 'photo', 'text'); addCol('items', 'bookable', 'integer'); addCol('items', 'apptOnly', 'integer'); addCol('branches', 'closeTime', 'text');
+db.exec(`
+create table if not exists images(id text primary key, mime text, data blob, createdAt text);
+create table if not exists bookings(id text primary key, branchId text, staffId text, customerName text, phone text, date text, time text, mins integer,
+  itemIds text, status text, notes text, source text, orderId text, createdAt text);
+create index if not exists bookings_date on bookings(date, branchId);
+`);
 db.exec("create table if not exists settings(k text primary key, v text)");
 db.exec("create unique index if not exists users_pin on users(pinKey) where pinKey is not null and pinKey<>''");
 
 const COLS = {
-  branches: ['name', 'phone', 'address', 'openTime', 'graceMins'],
+  branches: ['name', 'phone', 'address', 'openTime', 'graceMins', 'closeTime'],
   chairs: ['branchId', 'name', 'sort', 'active'],
-  staff: ['name', 'branchId', 'chairId', 'pct', 'allowance', 'active'],
+  staff: ['name', 'branchId', 'chairId', 'pct', 'allowance', 'active', 'photo'],
   categories: ['name', 'type'],
-  items: ['name', 'categoryId', 'type', 'price', 'mins', 'active'],
+  items: ['name', 'categoryId', 'type', 'price', 'mins', 'active', 'photo', 'bookable', 'apptOnly'],
   discounts: ['name', 'kind', 'value', 'active'],
   customers: ['name', 'phone', 'email', 'notes', 'createdAt'],
   users: ['name', 'username', 'role', 'branchId', 'active']
 };
-const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins']);
+const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly']);
 const uid = () => crypto.randomBytes(5).toString('hex');
 const pad = n => String(n).padStart(2, '0');
 const dOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -115,6 +122,9 @@ if (!one('select count(*) n from categories').n) {
     insert('items', { name: n, price: p, categoryId: c, type: t, mins: m, active: 1 });
 }
 if (!one('select count(*) n from discounts').n) insert('discounts', { name: 'Student', kind: 'amount', value: 50, active: 1 });
+run("update branches set closeTime='21:00' where closeTime is null or closeTime=''");
+run("update items set bookable=case when type='service' then 1 else 0 end where bookable is null");
+run("update items set apptOnly=case when name='Vip Compadre' then 1 else 0 end where apptOnly is null");
 
 // ---------- backups (daily snapshot on the volume + owner download) ----------
 const BK_DIR = path.join(path.dirname(DB_FILE), 'backups');
@@ -230,6 +240,69 @@ function zData(shift) {
     tender, items, openingFloat: shift.openingFloat, cashSales, cashIn: r2(cashIn), cashOut: r2(cashOut),
     expected: r2(shift.openingFloat + cashSales + cashIn - cashOut)
   };
+}
+
+// ---------- online / phone bookings ----------
+const hmOf = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+const bookHits = new Map();
+const bookingLimited = ip => { const now = Date.now(), a = (bookHits.get(ip) || []).filter(t => now - t < 3600e3); a.push(now); bookHits.set(ip, a); return a.length > (+process.env.BOOK_LIMIT || 10); };
+function bookingMins(ids) {
+  let m = 0;
+  for (const id of ids) { const it = get('items', id); if (!it || !it.active || it.type !== 'service') bad(400, 'Unknown service'); m += it.mins || 30; }
+  return Math.max(30, m);
+}
+const bookedOverlap = (sid, date, start, mins) => all("select * from bookings where staffId=? and date=? and status in ('booked','arrived')", sid, date)
+  .some(b => start < toMin(b.time) + b.mins && toMin(b.time) < start + mins);
+const staffFree = (s, date, start, mins) => s.active && !(date === todayStr() && staffState(s.id, date).state === 'off') && !bookedOverlap(s.id, date, start, mins);
+function slotsFor(branchId, date, staffId, mins) {
+  const br = get('branches', branchId); if (!br) bad(400, 'Pick a branch');
+  const open = toMin(br.openTime || '09:00'), close = toMin(br.closeTime || '21:00'), nowM = minsOfDay(new Date());
+  const pool = staffId === 'any' ? all('select * from staff where branchId=? and active=1', branchId) : [get('staff', staffId)].filter(s => s && s.branchId === branchId);
+  const out = [];
+  for (let m = open; m + mins <= close; m += 30) {
+    if (date === todayStr() && m < nowM + 15) continue;
+    if (pool.some(s => staffFree(s, date, m, mins))) out.push(hmOf(m));
+  }
+  return out;
+}
+function createBooking(b, source) {
+  const branchId = String(b.branchId || ''); if (!get('branches', branchId)) bad(400, 'Pick a branch');
+  const date = String(b.date || ''), time = String(b.time || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) bad(400, 'Invalid date or time');
+  if (date < todayStr()) bad(400, 'Date is in the past');
+  if (date > dOf(new Date(Date.now() + 60 * 864e5))) bad(400, 'Too far ahead (max 60 days)');
+  const itemIds = (Array.isArray(b.itemIds) ? b.itemIds : []).map(String); if (!itemIds.length) bad(400, 'Pick at least one service');
+  const name = String(b.name || '').trim().slice(0, 100), phone = String(b.phone || '').trim().slice(0, 30);
+  if (!name) bad(400, 'Name required');
+  if (phone.replace(/\D/g, '').length < 10) bad(400, 'Enter a valid mobile number');
+  const mins = bookingMins(itemIds), start = toMin(time);
+  let sid = String(b.staffId || 'any');
+  if (!slotsFor(branchId, date, sid, mins).includes(time)) bad(409, 'That time is no longer available. Please pick another.');
+  if (sid === 'any') {
+    const load = s => one("select count(*) n from bookings where staffId=? and date=? and status in ('booked','arrived')", s.id, date).n;
+    const free = all('select * from staff where branchId=? and active=1', branchId).filter(s => staffFree(s, date, start, mins)).sort((x, y) => load(x) - load(y));
+    sid = free[0].id;
+  }
+  const id = uid();
+  run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), 'booked', String(b.notes || '').slice(0, 300), source, '', nowISO());
+  return bookingView(one('select * from bookings where id=?', id));
+}
+function bookingView(b) {
+  const ids = jp(b.itemIds), its = ids.map(i => get('items', i)).filter(Boolean), s = b.staffId ? get('staff', b.staffId) : null;
+  return { ...b, itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
+}
+// a walk-in style ticket (used when a booked customer arrives)
+function createTicket(me, branchId, customerId, name, items, barberId) {
+  const t = todayStr(), tt = totals(items, null), id = uid();
+  const no = (one('select max(no) m from orders where branchId=? and date=?', branchId, t).m || 0) + 1, ord = (one('select max(ord) m from orders').m || 0) + 1;
+  run(`insert into orders(id,ord,no,branchId,date,customerId,customerName,barberId,chairId,status,items,subtotal,discountName,discountAmt,total,tenders,cashierId,createdAt)
+    values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, customerId || '', name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO());
+  if (barberId) {
+    try { const a = checkAssign({ id, branchId }, { barberId }); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); }
+    catch (e) { if (!(e instanceof HttpError)) throw e; }   // preferred barber busy/off: customer simply waits
+  }
+  return parseOrder(get('orders', id));
 }
 
 // ---------- payroll / reports ----------
@@ -390,7 +463,7 @@ const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
 });
-const STATIC = { '/': 'index.html', '/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/.well-known/assetlinks.json': 'assetlinks.json' };
+const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/': 'index.html', '/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', json: 'application/json' };
 const REFS = {
   staff: [['orders', 'barberId'], ['attendance', 'staffId']], chairs: [['orders', 'chairId'], ['staff', 'chairId']],
@@ -428,7 +501,34 @@ async function handle(req, res) {
   const url = new URL(req.url, 'http://x'), p = url.pathname, method = req.method, q = Object.fromEntries(url.searchParams);
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   if (method === 'GET' && STATIC[p]) return send(res, 200, fs.readFileSync(path.join(DIR, STATIC[p])), MIME[STATIC[p].split('.').pop()]);
+  const im = p.match(/^\/img\/(\w+)$/);
+  if (im && method === 'GET') {
+    const r = one('select mime,data from images where id=?', im[1]); if (!r) return send(res, 404, { error: 'Not found' });
+    res.writeHead(200, { 'Content-Type': r.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+    return res.end(Buffer.from(r.data));
+  }
   if (!p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
+
+  // ----- public booking (customers, no login) -----
+  if (p === '/api/public/info' && method === 'GET') {
+    return send(res, 200, {
+      shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime from branches order by rowid'),
+      services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price"),
+      categories: all("select id,name from categories where type='service'"),
+      staff: all('select id,name,photo,branchId from staff where active=1 order by name')
+    });
+  }
+  if (p === '/api/public/slots' && method === 'GET') {
+    const date = String(q.date || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < todayStr()) return send(res, 200, { slots: [] });
+    const ids = String(q.items || '').split(',').filter(Boolean); if (!ids.length) return send(res, 200, { slots: [] });
+    return send(res, 200, { slots: slotsFor(String(q.branch || ''), date, String(q.staff || 'any'), bookingMins(ids)) });
+  }
+  if (p === '/api/public/book' && method === 'POST') {
+    if (bookingLimited(ip)) bad(429, 'Too many bookings from this device. Please try again later.');
+    const bk = createBooking(await readBody(req), 'online');
+    log({ name: 'Online: ' + bk.customerName }, 'booking', 'bookings', bk.id, `${bk.date} ${bk.time} ${bk.branchName}`);
+    return send(res, 201, { ok: true, booking: { date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, staffPhoto: bk.staffPhoto, items: bk.items, total: bk.total, name: bk.customerName } });
+  }
 
   if (p === '/api/login' && method === 'POST') {
     const b = await readBody(req);
@@ -496,6 +596,47 @@ async function handle(req, res) {
     return send(res, 200, { added, skipped });
   }
 
+  // ----- photos (admin) -----
+  if (p === '/api/upload' && method === 'POST') {
+    adminOnly(); const b = await readBody(req, 1_500_000);
+    const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.data || '')); if (!m) bad(400, 'Image must be JPEG, PNG or WebP');
+    const buf = Buffer.from(m[2], 'base64'); if (buf.length > 700_000) bad(413, 'Image is too large (max about 700KB)');
+    const id = uid() + uid(); run('insert into images(id,mime,data,createdAt) values(?,?,?,?)', id, m[1], buf, nowISO());
+    log(me, 'upload', 'image', id, Math.round(buf.length / 1024) + ' KB'); return send(res, 201, { url: '/img/' + id });
+  }
+
+  // ----- bookings (cashier + admin) -----
+  if (p === '/api/bookings' && method === 'GET') {
+    const bid = me.role === 'cashier' ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null);
+    const ok = s => /^\d{4}-\d{2}-\d{2}$/.test(s || ''), from = ok(q.from) ? q.from : (ok(q.date) ? q.date : todayStr()), to = ok(q.to) ? q.to : (ok(q.date) ? q.date : from);
+    return send(res, 200, all(`select * from bookings where date>=? and date<=?${bid ? ' and branchId=?' : ''} order by date, time`, ...(bid ? [from, to, bid] : [from, to])).map(bookingView));
+  }
+  if (p === '/api/bookings' && method === 'POST') {
+    const b = await readBody(req); b.branchId = me.role === 'cashier' ? me.branchId : b.branchId;
+    const bk = createBooking(b, 'pos'); log(me, 'booking', 'bookings', bk.id, `${bk.customerName} ${bk.date} ${bk.time}`); return send(res, 201, bk);
+  }
+  const bkm = p.match(/^\/api\/bookings\/(\w+)(?:\/(arrive))?$/);
+  if (bkm) {
+    const cur = one('select * from bookings where id=?', bkm[1]); if (!cur) bad(404, 'Not found');
+    if (me.role === 'cashier' && cur.branchId !== me.branchId) bad(403, 'Not your branch');
+    if (method === 'PUT' && !bkm[2]) {
+      const b = await readBody(req); if (!['cancelled', 'noshow'].includes(b.status)) bad(400, 'Bad status');
+      if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
+      run('update bookings set status=? where id=?', b.status, cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
+    }
+    if (method === 'POST' && bkm[2] === 'arrive') {
+      if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
+      const items = priceItems(jp(cur.itemIds).map(i => ({ itemId: i, qty: 1 })));
+      const key = s => String(s || '').replace(/\D/g, '').replace(/^63/, '0');
+      let cust = all('select * from customers').find(c => key(c.phone) && key(c.phone) === key(cur.phone));
+      if (!cust) cust = insert('customers', { name: cur.customerName, phone: cur.phone, email: '', notes: '', createdAt: nowISO() });
+      const o = createTicket(me, cur.branchId, cust.id, cust.name, items, cur.staffId);
+      run("update bookings set status='arrived', orderId=? where id=?", o.id, cur.id); log(me, 'booking-arrived', 'bookings', cur.id, `#${o.no} ${cur.customerName}`);
+      return send(res, 200, { order: o, seated: o.status === 'in_chair' });
+    }
+    bad(405, 'Method not allowed');
+  }
+
   // ----- reports -----
   const rm = p.match(/^\/api\/reports\/(\w+)$/);
   if (rm && method === 'GET') {
@@ -534,7 +675,7 @@ async function handle(req, res) {
     const bid = branchScope(me, q.branch), t = todayStr();
     return send(res, 200, {
       branch: get('branches', bid), chairs: all('select * from chairs where branchId=? and active=1 order by sort', bid),
-      staff: all('select id,name,chairId,pct from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, onDuty: !!onDuty(s.id, t), ...staffState(s.id, t) })),
+      staff: all('select id,name,chairId,pct,photo from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, onDuty: !!onDuty(s.id, t), ...staffState(s.id, t) })),
       categories: all('select * from categories order by name'), items: all('select * from items where active=1 order by name'), discounts: all('select * from discounts where active=1 order by name'),
       shift: openShift(bid) || null,
       queue: all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair') order by no", bid, t).map(parseOrder)
@@ -546,7 +687,7 @@ async function handle(req, res) {
     const queue = all("select o.*, s.name barberName from orders o left join staff s on s.id=o.barberId where o.branchId=? and o.date=? and o.status in ('waiting','in_chair') order by o.no", bid, t).map(parseOrder);
     const st = all('select id from staff where branchId=? and active=1', bid).map(s => staffState(s.id, t).state);
     return send(res, 200, {
-      gross: r2(sum(paid, o => o.subtotal)), net: r2(sum(paid, o => o.total)), completed: paid.length, waiting: queue.filter(o => o.status === 'waiting').length,
+      gross: r2(sum(paid, o => o.subtotal)), net: r2(sum(paid, o => o.total)), completed: paid.length, bookings: one("select count(*) n from bookings where branchId=? and date=? and status='booked'", bid, t).n, waiting: queue.filter(o => o.status === 'waiting').length,
       cutting: queue.filter(o => o.status === 'in_chair').length, onDuty: st.filter(x => ['present', 'late', 'break'].includes(x)).length, totalBarbers: st.length, queue
     });
   }
@@ -565,7 +706,7 @@ async function handle(req, res) {
   }
   if (p === '/api/pos/attendance' && method === 'GET') {
     const bid = branchScope(me, q.branch), t = todayStr();
-    return send(res, 200, all('select s.id,s.name,s.chairId,c.name chairName from staff s left join chairs c on c.id=s.chairId where s.branchId=? and s.active=1 order by s.name', bid).map(s => ({ ...s, ...staffState(s.id, t) })));
+    return send(res, 200, all('select s.id,s.name,s.photo,s.chairId,c.name chairName from staff s left join chairs c on c.id=s.chairId where s.branchId=? and s.active=1 order by s.name', bid).map(s => ({ ...s, ...staffState(s.id, t) })));
   }
   if (p === '/api/expenses' && method === 'GET') {
     const bid = branchScope(me, q.branch), t = todayStr(), term = '%' + String(q.q || '').toLowerCase() + '%';
@@ -711,6 +852,7 @@ async function handle(req, res) {
     if ((kind === 'chairs' || kind === 'staff') && !get('branches', b.branchId)) bad(400, 'Pick a branch');
     if (kind === 'items' && !(+b.price >= 0)) bad(400, 'Check the price');
     if (kind === 'staff' || kind === 'chairs' || kind === 'items' || kind === 'discounts') b.active ??= 1;
+    if (kind === 'items') { b.bookable ??= b.type === 'service' ? 1 : 0; b.apptOnly ??= 0; }
     let row;
     if (kind === 'users') { checkUser(b, null); b.active = 1; row = insert('users', b); setPw(row.id, b); row = strip(get('users', row.id)); } else row = insert(kind, b);
     log(me, 'create', kind, row.id, row.name || ''); return send(res, 201, row);
@@ -720,6 +862,7 @@ async function handle(req, res) {
     if ('name' in b && !String(b.name).trim()) bad(400, 'Name required');
     let row;
     if (kind === 'users') { checkUser(b, cur); update('users', id, b); setPw(id, b); row = strip(get('users', id)); } else row = update(kind, id, b);
+    if ((kind === 'staff' || kind === 'items') && 'photo' in b && cur.photo && cur.photo !== b.photo) { const im = /\/img\/(\w+)/.exec(cur.photo); if (im) run('delete from images where id=?', im[1]); }
     log(me, 'update', kind, id, JSON.stringify({ ...b, password: b.password ? '***' : undefined, pin: b.pin ? '***' : undefined })); return send(res, 200, row);
   }
   if (method === 'DELETE' && id) {
