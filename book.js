@@ -53,13 +53,14 @@ async function loadReviews() {
   render();
 }
 
+const hasBarbers = id => I.staff.some(s => s.branchId === id);   // a branch can take online bookings only once barbers are added to it
 function branchCards() {
   return `<div class="branches">${I.branches.map(b => {
-    const rt = I.ratings?.[b.id];
-    return `<div class="bcard ${S.branch === b.id ? 'on' : ''}" data-branch="${b.id}" role="button" tabindex="0"><div class="bimg" style="${b.photo ? `background-image:url('${esc(b.photo)}')` : ''}">${b.photo ? '' : ic('scissors')}<span class="pin">Selected</span></div>
+    const rt = I.ratings?.[b.id], open = hasBarbers(b.id);
+    return `<div class="bcard ${S.branch === b.id ? 'on' : ''} ${open ? '' : 'soon'}" ${open ? `data-branch="${b.id}" role="button" tabindex="0"` : ''}><div class="bimg" style="${b.photo ? `background-image:url('${esc(b.photo)}')` : ''}">${b.photo ? '' : ic('scissors')}<span class="pin">Selected</span></div>
       <div class="bbody"><b>${esc(b.name)}</b>${b.google && b.google.rating ? `<span class="rate">G ★ ${Number(b.google.rating).toFixed(1)} <span class="mute" style="font-weight:500">(${b.google.count} on Google)</span></span>` : ''}${rt ? `<span class="rate">★ ${rt.avg} <span class="mute" style="font-weight:500">(${rt.count} review${rt.count === 1 ? '' : 's'})</span></span>` : ''}
       <small>${ic('pin')} ${esc(b.address || 'Brotherhood Barber')}</small><small>Open ${hours(b)}${b.phone ? ' · ' + esc(b.phone) : ''}</small>
-      <div class="bact"><span class="sel">${S.branch === b.id ? '✓ Selected' : 'Select'}</span>${b.mapUrl ? `<a href="${esc(b.mapUrl)}" target="_blank" rel="noopener">Get directions</a>` : ''}</div></div></div>`;
+      <div class="bact">${open ? `<span class="sel">${S.branch === b.id ? '✓ Selected' : 'Select'}</span>` : `<span class="sel off">Online booking opens soon</span>${b.phone ? `<a href="tel:${esc(b.phone)}">Call to book</a>` : ''}`}${b.mapUrl ? `<a href="${esc(b.mapUrl)}" target="_blank" rel="noopener">Get directions</a>` : ''}</div></div></div>`;
   }).join('')}</div>`;
 }
 function summaryHtml(forBar) {
@@ -94,7 +95,7 @@ function stepBody() {
   if (n === 4) return `<section class="step"><h2><b>4</b>Pick a date and time</h2>
       <div class="chips">${days.map(d => `<button class="chip ${S.date === d.v ? 'on' : ''}" data-date="${d.v}">${d.l}<small>${d.s}</small></button>`).join('')}</div>
       <label>Or pick another date</label><input type="date" id="pickdate" min="${days[0].v}" max="${maxDate}" value="${days.some(d => d.v === S.date) ? '' : esc(S.date)}" style="max-width:240px">
-      ${!S.date ? '<p class="mute" style="margin:10px 0 0">Choose a date to see the available times.</p>' : S.slots === null ? '<p class="mute">Looking for open times…</p>' : S.slots.length ? `<div class="slots">${S.slots.map(x => `<button class="chip ${S.time === x ? 'on' : ''}" data-time="${x}">${t12(x)}</button>`).join('')}</div>` : '<p class="mute" style="margin:10px 0 0">No open times on this date. Try another day or go back and choose another barber.</p>'}
+      ${!S.date ? '<p class="mute" style="margin:10px 0 0">Choose a date to see the available times.</p>' : S.slots === null ? '<p class="mute">Looking for open times…</p>' : S.slots.length ? `<div class="slots">${S.slots.map(x => `<button class="chip ${S.time === x ? 'on' : ''}" data-time="${x}">${t12(x)}</button>`).join('')}</div>` : `<p class="mute" style="margin:10px 0 0">${hasBarbers(S.branch) ? 'No open times on this date. Try another day or go back and choose another barber.' : 'This branch has no barbers set up for online booking yet. Please choose another branch or call the shop.'}</p>`}
       <div class="err">${esc(S.err)}</div>${stepNav()}</section>`;
   return `<section class="step"><h2><b>5</b>Your details</h2>
       <div class="row2"><div><label>Full name</label><input id="name" value="${esc(S.name)}" autocomplete="name"></div><div><label>Mobile number</label><input id="phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(S.phone)}" autocomplete="tel"></div></div>
@@ -202,7 +203,7 @@ document.addEventListener('input', e => {
 });
 
 Promise.all([fetch('/api/public/info').then(r => r.json()), fetch('/api/public/reviews').then(r => r.json()).catch(() => R)])
-  .then(([info, rev]) => { I = info; R = { ...R, ...rev }; const want = new URLSearchParams(location.search).get('branch'), pre = I.branches.length === 1 ? I.branches[0] : I.branches.find(b => b.id === want);
+  .then(([info, rev]) => { I = info; R = { ...R, ...rev }; const want = new URLSearchParams(location.search).get('branch'), pre = I.branches.length === 1 ? I.branches[0] : I.branches.find(b => b.id === want && hasBarbers(b.id));
     if (pre) { S.branch = pre.id; S.rv.branchId = pre.id; S.step = 2; loadGoogle(pre.id); } render(); })
   .catch(() => { app.innerHTML = '<div class="top"><h1>Brotherhood</h1><p>Could not load. Please try again in a moment.</p></div>'; });
 render();
