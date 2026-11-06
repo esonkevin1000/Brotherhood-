@@ -344,3 +344,5 @@ sheet.addEventListener('close', () => render());
   render();
   setInterval(() => { if (P.me && !sheet.open && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) refresh(); }, 10000);
 })();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => { });
