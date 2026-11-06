@@ -15,7 +15,7 @@ const stars = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n))
 
 let G = {};
 let I = null, R = { reviews: [], count: 0, avg: 0, shown: 6 };
-const S = { step: 1, branch: '', items: [], staff: 'any', date: '', time: '', slots: null, name: '', phone: '', email: '', cut: '', consent: false, terms: null, showTerms: false, err: '', busy: false, done: null,
+const S = { step: 1, lock: false, branch: '', items: [], staff: 'any', date: '', time: '', slots: null, name: '', phone: '', email: '', cut: '', consent: false, terms: null, showTerms: false, err: '', busy: false, done: null,
   rv: { branchId: '', staffId: '', rating: 0, name: '', text: '', busy: false, err: '', thanks: false } };
 const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(Date.now() + i * 864e5); return { v: ymd(d), l: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-PH', { weekday: 'short' }), s: d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) }; });
 const maxDate = ymd(new Date(Date.now() + 60 * 864e5));
@@ -88,7 +88,7 @@ function progressHtml() {
 function stepBody() {
   const n = S.step;
   if (n === 1) return `<section class="step"><h2><b>1</b>Choose your branch</h2><p class="mute" style="margin:-4px 0 12px">Tap a branch to continue.</p>${branchCards()}</section>`;
-  if (n === 2) return `<section class="step"><h2><b>2</b>Choose your services</h2><p class="mute" style="margin:-4px 0 12px">Pick one or more. You will pay at the shop after your haircut.</p><div class="services">${I.services.map(s => `<button class="opt ${S.items.includes(s.id) ? 'on' : ''}" data-svc="${s.id}">${s.photo ? `<img class="pic" src="${esc(s.photo)}" alt="" loading="lazy">` : `<span class="pic">${ic('scissors')}</span>`}<span><span class="nm">${esc(s.name)}</span>${s.apptOnly ? '<span class="tag">By appointment</span>' : ''}<small>${s.mins} min</small></span><span class="pr">${peso(s.price)}</span><span class="ck">${S.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('') || '<p class="mute">No services available.</p>'}</div>${stepNav()}</section>`;
+  if (n === 2) return `<section class="step">${S.lock ? lockedBarber() : ''}<h2><b>2</b>Choose your services</h2><p class="mute" style="margin:-4px 0 12px">Pick one or more. You will pay at the shop after your haircut.</p><div class="services">${I.services.map(s => `<button class="opt ${S.items.includes(s.id) ? 'on' : ''}" data-svc="${s.id}">${s.photo ? `<img class="pic" src="${esc(s.photo)}" alt="" loading="lazy">` : `<span class="pic">${ic('scissors')}</span>`}<span><span class="nm">${esc(s.name)}</span>${s.apptOnly ? '<span class="tag">By appointment</span>' : ''}<small>${s.mins} min</small></span><span class="pr">${peso(s.price)}</span><span class="ck">${S.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('') || '<p class="mute">No services available.</p>'}</div>${stepNav()}</section>`;
   if (n === 3) return `<section class="step"><h2><b>3</b>Choose your barber</h2><div class="team">
       <button class="mate ${S.staff === 'any' ? 'on' : ''}" data-staff="any"><span class="av">${ic('scissors')}</span><b>Any barber</b><small>Fastest</small></button>
       ${team().map(m => `<button class="mate ${S.staff === m.id ? 'on' : ''}" data-staff="${m.id}">${pic(m.photo, m.name)}<b>${esc(m.name)}</b></button>`).join('')}</div>${stepNav()}</section>`;
@@ -104,6 +104,7 @@ function stepBody() {
       <p class="mute" style="font-size:12px;margin:8px 0 0">Your phone number or email is used to recognise you when you come back and to keep track of your visits and loyalty points.</p>
       <div class="err">${esc(S.err)}</div>${stepNav()}</section>`;
 }
+function lockedBarber() { const m = I.staff.find(x => x.id === S.staff); if (!m) return ''; return `<div class="lockb">${pic(m.photo, m.name, 'lav')}<div style="flex:1;min-width:0"><small class="mute">Booking with</small><b>${esc(m.name)}</b><small class="mute">${esc(branch(S.branch).name)}</small></div><button class="back" data-act="goto" data-n="3" style="padding:8px 14px;font-size:13px">Change</button></div>`; }
 const stepNav = () => `<div class="stepnav">${navBtns()}</div>`;
 function goStep(n) { S.step = n; S.err = ''; if (n === 4) { if (!S.date) S.date = days[0].v; loadSlots(); } else render(); window.scrollTo(0, 0); }
 function reviewsHtml() {
@@ -146,11 +147,11 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-branch],[data-svc],[data-staff],[data-date],[data-time],[data-go],[data-star],[data-act]'); if (!el) return;
   const d = el.dataset;
   if (el.tagName === 'A') e.preventDefault();
-  if (d.branch) { if (S.branch !== d.branch) { S.staff = 'any'; S.time = ''; S.slots = null; } S.branch = d.branch; S.err = ''; S.rv.branchId ||= d.branch; loadReviews(); loadGoogle(d.branch); return goStep(2); }
+  if (d.branch) { if (S.branch !== d.branch) { S.staff = 'any'; S.lock = false; S.time = ''; S.slots = null; } S.branch = d.branch; S.err = ''; S.rv.branchId ||= d.branch; loadReviews(); loadGoogle(d.branch); return goStep(2); }
   if (d.svc) { S.items = S.items.includes(d.svc) ? S.items.filter(x => x !== d.svc) : [...S.items, d.svc]; S.err = ''; S.time = ''; S.slots = null; return render(); }
-  if (d.staff) { S.staff = d.staff; S.time = ''; S.slots = null; return render(); }
-  if (d.act === 'next') { if (stepOk(S.step)) goStep(S.step + 1); return; }
-  if (d.act === 'back') return goStep(Math.max(firstStep(), S.step - 1));
+  if (d.staff) { S.staff = d.staff; S.lock = false; S.time = ''; S.slots = null; return render(); }
+  if (d.act === 'next') { if (stepOk(S.step)) goStep(S.lock && S.step === 2 ? 4 : S.step + 1); return; }   // a barber chosen from the promo site skips the barber step
+  if (d.act === 'back') return goStep(S.lock && S.step === 4 ? 2 : Math.max(firstStep(), S.step - 1));
   if (d.act === 'goto') return goStep(+d.n);
   if (d.date) { S.date = d.date; return loadSlots(); }
   if (d.time) { S.time = d.time; S.err = ''; return render(); }
@@ -204,6 +205,8 @@ document.addEventListener('input', e => {
 
 Promise.all([fetch('/api/public/info').then(r => r.json()), fetch('/api/public/reviews').then(r => r.json()).catch(() => R)])
   .then(([info, rev]) => { I = info; R = { ...R, ...rev }; const want = new URLSearchParams(location.search).get('branch'), pre = I.branches.length === 1 ? I.branches[0] : I.branches.find(b => b.id === want && hasBarbers(b.id));
-    if (pre) { S.branch = pre.id; S.rv.branchId = pre.id; S.step = 2; loadGoogle(pre.id); } render(); })
+    const wb = new URLSearchParams(location.search).get('barber'), pb = wb && I.staff.find(x => x.id === wb && hasBarbers(x.branchId));
+    if (pb) { S.branch = pb.branchId; S.rv.branchId = pb.branchId; S.staff = pb.id; S.lock = true; S.step = 2; loadGoogle(pb.branchId); }
+    else if (pre) { S.branch = pre.id; S.rv.branchId = pre.id; S.step = 2; loadGoogle(pre.id); } render(); })
   .catch(() => { app.innerHTML = '<div class="top"><h1>Brotherhood</h1><p>Could not load. Please try again in a moment.</p></div>'; });
 render();
