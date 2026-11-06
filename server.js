@@ -759,13 +759,13 @@ const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
 });
-const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/': 'landing.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
+const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/': 'landing.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace(/:\d+$/, '').replace(/^www\./, '');
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST);
 const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/logo.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/.well-known/assetlinks.json']);
 // App version = hash of every file the apps load. It changes on each deploy, which is what makes phones offer the "Update app" button.
 const APP_VERSION = (() => { const h = crypto.createHash('sha1'); for (const f of Object.values(STATIC).filter((v, i, a) => a.indexOf(v) === i && v !== 'sw.js').sort()) { try { h.update(fs.readFileSync(path.join(DIR, f))); } catch { } } return h.digest('hex').slice(0, 12); })();
-const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', json: 'application/json' };
+const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', jpg: 'image/jpeg', json: 'application/json' };
 const REFS = {
   staff: [['orders', 'barberId'], ['attendance', 'staffId']], chairs: [['orders', 'chairId'], ['staff', 'chairId']],
   branches: [['staff', 'branchId'], ['chairs', 'branchId'], ['orders', 'branchId'], ['users', 'branchId']], categories: [['items', 'categoryId']]
