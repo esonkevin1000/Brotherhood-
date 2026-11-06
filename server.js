@@ -1516,7 +1516,7 @@ async function handle(req, res) {
     if (method === 'PUT' && !bkm[2]) {
       const b = await readBody(req); if (!['cancelled', 'noshow'].includes(b.status)) bad(400, 'Bad status');
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
-      run('update bookings set status=? where id=?', b.status, cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
+      run('update bookings set status=? where id=?', b.status, cur.id); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
     }
     if (method === 'POST' && bkm[2] === 'arrive') {
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);

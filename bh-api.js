@@ -21,6 +21,9 @@ create table if not exists bh_follows(userId text, targetId text, createdAt text
 create table if not exists bh_blocks(userId text, blockedId text, createdAt text, primary key(userId, blockedId));
 create table if not exists bh_reports(id text primary key, kind text, targetId text, userId text, reason text, createdAt text, status text default 'open');
 create unique index if not exists bh_reports_once on bh_reports(kind, targetId, userId);
+create table if not exists bh_notifs(id text primary key, userId text, kind text, text text, link text, ref text, createdAt text, readAt text);
+create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
+create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
   addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
@@ -31,6 +34,16 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
   const hit = (ip, kind) => { const k = kind + ip; hits.set(k, [...(hits.get(k) || []), Date.now()]); };
   setInterval(() => hits.clear(), 3600e3).unref();
 
+  // in-app notifications (deduplicated by user + kind + ref)
+  const notify = (userId, kind, text, link, ref) => { if (!userId) return; try { run('insert or ignore into bh_notifs(id,userId,kind,text,link,ref,createdAt,readAt) values(?,?,?,?,?,?,?,null)', uid(), userId, kind, String(text).slice(0, 200), link || '', ref || uid(), nowISO()); } catch { } };
+  // "rate your cut" appears once a booked visit has been paid at the POS
+  const syncRate = userId => {
+    for (const b of all("select id,orderId,staffId,date from bookings where userId=? and status='arrived' and orderId<>''", userId)) {
+      if (one("select status from orders where id=?", b.orderId)?.status !== 'paid' || one('select 1 x from reviews where orderId=?', b.orderId)) continue;
+      notify(userId, 'rate', `How was your cut with ${get('staff', b.staffId)?.name || 'your barber'}? Rate your visit.`, '#/bookings', b.id);
+    }
+  };
+  const unreadOf = id => one('select count(*) n from bh_notifs where userId=? and readAt is null', id).n;
   const userOf = req => {
     const o = readToken((req.headers.authorization || '').replace(/^Bearer /, ''));
     if (!o || !String(o.u).startsWith('c:')) return null;
@@ -60,7 +73,7 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
   const servicesList = () => all("select id,name,price,mins,photo,apptOnly from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) }));
 
   // ---------- handler ----------
-  return async function handleBH(req, res, p, method, q, ip) {
+  const handleBH = async function (req, res, p, method, q, ip) {
     const sub = p.slice('/api/bh'.length);
 
     // ----- accounts -----
@@ -85,7 +98,7 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
       if (!u || !checkPw(String(b.password || ''), u.passHash)) { hit(ip, 'li'); bad(401, 'Wrong email or password'); }
       return send(res, 200, { token: tokenOf(u), user: pubUser(u) });
     }
-    if (sub === '/me' && method === 'GET') { const u = needUser(req); return send(res, 200, { user: pubUser(u), favorites: all('select staffId from bh_favorites where userId=?', u.id).map(r => r.staffId) }); }
+    if (sub === '/me' && method === 'GET') { const u = needUser(req); syncRate(u.id); return send(res, 200, { user: pubUser(u), favorites: all('select staffId from bh_favorites where userId=?', u.id).map(r => r.staffId), unread: unreadOf(u.id) }); }
     if (sub === '/me' && method === 'PUT') {
       const u = needUser(req), b = await readBody(req), name = clip(b.name ?? u.name, 80), phone = clip(b.phone ?? u.phone, 30);
       if (!name) bad(400, 'Please enter your name'); if (normPhone(phone).length < 10) bad(400, 'Enter a valid mobile number');
@@ -104,6 +117,7 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
       if (!checkPw(String(b.password || ''), u.passHash)) bad(403, 'Password is wrong');
       run("update bookings set userId='' where userId=?", u.id); run("update reviews set userId='' where userId=?", u.id);
       run('delete from bh_favorites where userId=?', u.id);
+      run('delete from bh_notifs where userId=?', u.id);
       for (const t of ['bh_likes', 'bh_comments', 'bh_follows', 'bh_blocks', 'bh_reports']) run(`delete from ${t} where userId=?`, u.id);
       run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
       run('delete from bh_comments where postId in (select id from bh_posts where userId=?)', u.id);
@@ -154,6 +168,7 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
       const b = await readBody(req);
       const bk = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date: b.date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
       hit(ip, 'bk'); run('update bookings set userId=? where id=?', u.id, bk.id);
+      notify(u.id, 'booking', `Booked: ${bk.date} ${bk.time} with ${bk.staffName || 'any barber'} at ${bk.branchName}`, '#/bookings', 'bk-' + bk.id);
       if (bk.customerId && !u.customerId) run('update bh_users set customerId=? where id=?', bk.customerId, u.id);
       log({ name: 'App: ' + u.name }, 'booking', 'bookings', bk.id, `${bk.date} ${bk.time} ${bk.branchName}`);
       return send(res, 201, { ok: true, booking: { id: bk.id, date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, items: bk.items, total: bk.total } });
@@ -189,6 +204,13 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
       log({ name: 'App: ' + u.name }, 'review', 'reviews', id, `${rating} stars (verified)`); return send(res, 201, { ok: true });
     }
 
+
+    // ----- notifications -----
+    if (sub === '/notifications' && method === 'GET') {
+      const u = needUser(req); syncRate(u.id);
+      return send(res, 200, { unread: unreadOf(u.id), items: all('select id,kind,text,link,createdAt,readAt from bh_notifs where userId=? order by createdAt desc limit 50', u.id) });
+    }
+    if (sub === '/notifications/read' && method === 'POST') { const u = needUser(req); run('update bh_notifs set readAt=? where userId=? and readAt is null', nowISO(), u.id); return send(res, 200, { ok: true }); }
 
     // ----- community -----
     const blockedOf = id => id ? new Set([...all('select blockedId x from bh_blocks where userId=?', id), ...all('select userId x from bh_blocks where blockedId=?', id)].map(r => r.x)) : new Set();
@@ -226,7 +248,7 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
         run('delete from bh_likes where postId=?', post.id); run('delete from bh_comments where postId=?', post.id); run('delete from bh_posts where id=?', post.id); return send(res, 200, { ok: true });
       }
       if (pm0[2] === 'like' && (method === 'PUT' || method === 'DELETE')) {
-        const u = needUser(req); if (method === 'PUT') run('insert or ignore into bh_likes(postId,userId) values(?,?)', post.id, u.id); else run('delete from bh_likes where postId=? and userId=?', post.id, u.id);
+        const u = needUser(req); if (method === 'PUT') { const had = one('select 1 x from bh_likes where postId=? and userId=?', post.id, u.id); run('insert or ignore into bh_likes(postId,userId) values(?,?)', post.id, u.id); if (!had && post.userId !== u.id) notify(post.userId, 'like', `${short(u.name)} liked your post`, '#/community', 'like-' + post.id + '-' + u.id); } else run('delete from bh_likes where postId=? and userId=?', post.id, u.id);
         return send(res, 200, { likes: one('select count(*) n from bh_likes where postId=?', post.id).n });
       }
       if (pm0[2] === 'comments' && method === 'GET') {
@@ -237,7 +259,8 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
         const u = needUser(req); if (tooMany(ip, 'cm', 30, 3600e3)) bad(429, 'You are commenting too fast. Please try again later.');
         if (one('select 1 x from bh_blocks where (userId=? and blockedId=?) or (userId=? and blockedId=?)', u.id, post.userId, post.userId, u.id)) bad(403, 'You cannot comment on this post');
         const text = clip((await readBody(req)).text, 300); if (!text) bad(400, 'Write a comment'); if (spammy(text)) bad(400, 'Too many links in one comment');
-        const id = uid(), at = nowISO(); run('insert into bh_comments(id,postId,userId,text,createdAt,hidden) values(?,?,?,?,?,0)', id, post.id, u.id, text, at); hit(ip, 'cm');
+        const id = uid(), at = nowISO(); if (post.userId !== u.id) notify(post.userId, 'comment', `${short(u.name)} commented: ${text.slice(0, 60)}`, '#/community', 'cm-' + id);
+        run('insert into bh_comments(id,postId,userId,text,createdAt,hidden) values(?,?,?,?,?,0)', id, post.id, u.id, text, at); hit(ip, 'cm');
         return send(res, 201, { comment: { id, text, createdAt: at, author: short(u.name), userId: u.id, mine: true } });
       }
     }
@@ -247,7 +270,7 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
     if (flm && (method === 'PUT' || method === 'DELETE')) {
       const u = needUser(req), tid = flm[2]; if (tid === u.id) bad(400, 'You cannot do that to yourself'); if (!get('bh_users', tid)) bad(404, 'Member not found');
       const [tbl, col] = flm[1] === 'follow' ? ['bh_follows', 'targetId'] : ['bh_blocks', 'blockedId'];
-      if (method === 'PUT') { run(`insert or ignore into ${tbl}(userId,${col},createdAt) values(?,?,?)`, u.id, tid, nowISO()); if (flm[1] === 'block') run('delete from bh_follows where (userId=? and targetId=?) or (userId=? and targetId=?)', u.id, tid, tid, u.id); }
+      if (method === 'PUT') { run(`insert or ignore into ${tbl}(userId,${col},createdAt) values(?,?,?)`, u.id, tid, nowISO()); if (flm[1] === 'follow') notify(tid, 'follow', `${short(u.name)} started following you`, '#/community', 'fl-' + u.id); if (flm[1] === 'block') run('delete from bh_follows where (userId=? and targetId=?) or (userId=? and targetId=?)', u.id, tid, tid, u.id); }
       else run(`delete from ${tbl} where userId=? and ${col}=?`, u.id, tid);
       return send(res, 200, { ok: true });
     }
@@ -334,4 +357,6 @@ create unique index if not exists bh_reports_once on bh_reports(kind, targetId, 
     }
     bad(404, 'Not found');
   };
+  handleBH.notify = notify;
+  return handleBH;
 }

@@ -13,7 +13,7 @@ const ICON = {
   heart: '<path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z"/>', back: '<path d="m15 18-6-6 6-6"/>',
   pin: '<path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>', check: '<path d="M20 6 9 17l-5-5"/>',
   ver: '<path d="M12 2 9.5 4.5 6 4.6 5.4 8 3 10.5 4.6 13.5 4 17l3.3 1.1L9.5 21l2.5-1.4 2.5 1.4 2.2-2.9L20 17l-.6-3.5L21 10.5 18.6 8 18 4.6l-3.5-.1z"/><path d="m8.5 12 2.5 2.5 4.5-5" stroke="#fff"/>',
-  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', plus: '<path d="M12 5v14M5 12h14"/>', chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>', team: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2.5.6 4 2.2 4 5.2"/>'
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', plus: '<path d="M12 5v14M5 12h14"/>', bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 21a2 2 0 0 0 4 0"/>', chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>', team: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2.5.6 4 2.2 4 5.2"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
 const stars = n => '<span class="star">' + '★'.repeat(Math.round(n)) + '</span><span style="color:var(--line)">' + '★'.repeat(5 - Math.round(n)) + '</span>';
@@ -21,7 +21,7 @@ const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url
 const rate = (a, n) => n ? `<span class="star">★</span> ${a.toFixed(1)} <span class="mute">(${n})</span>` : '<span class="mute sm">New</span>';
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { } } };
 
-const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashDays: 30, toastMsg: '' };
+const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashDays: 30, toastMsg: '' };
 
 async function api(path, opt = {}, token = S.token) {
   const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
@@ -40,12 +40,12 @@ async function loadDiscover() {
 }
 async function loadMe() {
   if (!S.token) { S.user = null; S.favs = []; return; }
-  try { const j = await api('/me'); S.user = j.user; S.favs = j.favorites; } catch (e) { if (e.code === 401) { S.token = null; store.set('bh_token', null); S.user = null; } }
+  try { const j = await api('/me'); S.user = j.user; S.favs = j.favorites; S.unread = j.unread || 0; } catch (e) { if (e.code === 401) { S.token = null; store.set('bh_token', null); S.user = null; } }
 }
 async function loadBookings() { if (!S.token) { S.mine = null; return; } try { S.mine = (await api('/bookings')).bookings; } catch { S.mine = []; } }
 
 // ---------- views ----------
-const header = (title, back) => `<div class="bar">${back ? `<button class="btn sec sm" data-go="${back}" aria-label="Back">${ic('back')}</button>` : ''}<div class="${title ? '' : 'logo'}">${title ? `<h2 style="font-size:20px">${esc(title)}</h2>` : 'Brother<b>hood</b>'}</div><span class="sp"></span>${S.user ? `<button class="btn sec sm" data-go="/me">${esc(S.user.name.split(' ')[0])}</button>` : `<button class="btn sm" data-go="/auth">Log in</button>`}</div>`;
+const header = (title, back) => `<div class="bar">${back ? `<button class="btn sec sm" data-go="${back}" aria-label="Back">${ic('back')}</button>` : ''}<div class="${title ? '' : 'logo'}">${title ? `<h2 style="font-size:20px">${esc(title)}</h2>` : 'Brother<b>hood</b>'}</div><span class="sp"></span>${S.user ? `<button class="btn sec sm bellb" data-go="/notifications" aria-label="Notifications">${ic('bell')}${S.unread ? `<span class="badge">${S.unread > 9 ? '9+' : S.unread}</span>` : ''}</button><button class="btn sec sm" data-go="/me">${esc(S.user.name.split(' ')[0])}</button>` : `<button class="btn sm" data-go="/auth">Log in</button>`}</div>`;
 const barberRow = b => `<button class="bcard" data-go="/barber/${b.id}">${pic(b.photo, b.name)}<div class="sp"><div class="nm">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</div>
   <div class="sm mute">${esc(b.headline || b.specialties.join(' · ') || 'Barber')} · ${esc(b.branchName)}</div><div class="sm row" style="margin-top:3px;flex-wrap:wrap;gap:6px">${rate(b.rating, b.reviews)}${b.years ? `<span class="mute">· ${b.years} yrs</span>` : ''}${b.slotsToday ? `<span class="tag ok">${b.slotsToday} slots today</span>` : ''}</div></div></button>`;
 const shopCard = s => `<button class="shop" data-shop="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="${esc(s.name)}" loading="lazy">` : ''}<div class="in"><div class="nm">${esc(s.name)}</div>
@@ -187,6 +187,20 @@ async function loadDash() {
   render();
 }
 
+
+// ----- notifications -----
+const NICON = { booking: 'cal', rate: 'heart', like: 'heart', comment: 'chat', follow: 'team' };
+function vNotifs() {
+  if (!S.token) { setTimeout(() => nav('/auth')); return ''; }
+  const n = S.notifs; if (!n) return header('Notifications', '/') + '<div class="empty">Loading…</div>';
+  return header('Notifications', '/') + `<div class="list">${n.items.map(x => `<button class="bcard" data-ngo="${esc(x.link || '#/')}" style="${x.readAt ? 'opacity:.7' : 'border-color:var(--blue)'}"><span class="av" style="width:40px;height:40px">${ic(NICON[x.kind] || 'bell')}</span><div class="sp"><div>${esc(x.text)}</div><div class="sm mute">${(a => a === 'just now' ? a : a + ' ago')(ago(x.createdAt))}</div></div></button>`).join('') || '<div class="card empty">No notifications yet. Booking updates and community activity show up here.</div>'}</div>`;
+}
+async function loadNotifs() {
+  try { S.notifs = await api('/notifications'); S.unread = 0; await api('/notifications/read', { method: 'POST' }); } catch { S.notifs = { items: [] }; }
+  render();
+}
+setInterval(async () => { if (S.token && !document.hidden) { try { const j = await api('/me'); if (j.unread !== S.unread && route().a !== 'notifications') { S.unread = j.unread; render(); } } catch { } } }, 60000);
+
 // ----- community -----
 const ago = iso => { const m = Math.max(0, (Date.now() - new Date(iso)) / 60000); return m < 1 ? 'just now' : m < 60 ? Math.floor(m) + 'm' : m < 1440 ? Math.floor(m / 60) + 'h' : Math.floor(m / 1440) + 'd'; };
 async function loadFeed() { try { S.feed = await api('/feed?scope=' + S.feedScope); } catch { S.feed = { posts: [], more: false }; } }
@@ -231,10 +245,10 @@ let rendering = 0;
 async function render() {
   const my = ++rendering, r = route(); let html = '';
   if (r.a === 'home') html = vHome(); else if (r.a === 'discover') html = vDiscover(); else if (r.a === 'barber') html = await vBarber(r.b);
-  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else html = vHome();
+  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else html = vHome();
   if (my !== rendering) return;
   const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart, sy = window.scrollY;
-  const showNav = !['barber', 'book', 'auth', 'pro'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
+  const showNav = !['barber', 'book', 'auth', 'pro', 'notifications'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
   app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'home' && r.a === 'home') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
   if (focus === 'q') { const el = document.getElementById('q'); el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
   if (r.a === 'barber' || r.a === 'book') window.scrollTo(0, r.a === 'book' ? sy : 0);
@@ -246,6 +260,7 @@ async function onRoute() {
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; loadDash(); }
   if (r.a === 'bookings' && S.token) loadBookings().then(render);
   if (r.a === 'community') loadFeed().then(render);
+  if (r.a === 'notifications' && S.token) { S.notifs = null; loadNotifs(); }
   if (r.a === 'book' && S.bk && !S.token) { nav('/auth'); return; }
   render();
 }
@@ -285,7 +300,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-ngo],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) { S.branch = D.shop; S.tab = 'barbers'; await loadDiscover(); return nav('/discover'); }
@@ -353,6 +368,7 @@ app.addEventListener('click', async e => {
     try { await api('/posts/' + D.pdel, { method: 'DELETE' }); await loadFeed(); toast('Post deleted'); } catch (x) { toast(x.message); } return render();
   }
   if (D.pdel) { if (!confirm('Remove this photo?')) return; try { await api('/pro/portfolio/' + D.pdel, { method: 'DELETE' }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
+  if (D.ngo) { if (D.ngo.startsWith('#/')) { S.mine = null; return nav(D.ngo.slice(1)); } return; }
   if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); return render(); }
   if (D.ddays) { S.dashDays = +D.ddays; render(); return loadDash(); }
   if (D.prologout != null) { S.proToken = null; S.pro = null; store.set('bh_pro', null); return render(); }
