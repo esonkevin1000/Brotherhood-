@@ -27,12 +27,12 @@ const qs = () => `from=${ui.from}&to=${ui.to}&branch=${ui.branch}`;
 async function loadView() {
   const v = ui.view;
   try {
-    if (v === 'dashboard') { [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
+    if (v === 'dashboard') { api('GET', `/api/checklists?from=${today()}&to=${today()}&branch=${ui.branch}`).then(r => { ui.chkToday = r; if (ui.view === 'dashboard' && !modal.open) render(); }).catch(() => { }); [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}&branch=${ui.branch}`)); }
     else if (v === 'leave') ui.leave = await api('GET', `/api/leaves?branch=${ui.branch}&status=${ui.lstatus || ''}`);
     else if (v === 'chk') { [ui.chk, ui.chkTpl] = await Promise.all([api('GET', `/api/checklists?${qs()}`), api('GET', '/api/checklists/template')]); }
-    else if (v === 'slip') ui.slip = await api('GET', `/api/payslips?${qs()}`);
+    else if (v === 'slip') { [ui.slip, ui.adj] = await Promise.all([api('GET', `/api/payslips?${qs()}`), api('GET', '/api/adjustments')]); }
     else if (v === 'prob') ui.prob = await api('GET', `/api/problems?branch=${ui.branch}&status=${ui.pstatus || ''}`);
     else if (v === 'att') ui.att = await api('GET', `/api/attendance/log?${qs()}&flagged=${ui.aflag ? 1 : 0}`);
     else if (v === 'adv') ui.adv = await api('GET', `/api/advances?branch=${ui.branch}&status=${ui.astatus || ''}`);
@@ -107,10 +107,11 @@ function renderBase() {
   nav.style.display = '';
   const on = k => ui.view === k ? 'on' : '';
   nav.innerHTML = `<div class="brand"><img src="/logo.png" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
+    <button data-act="bell" style="background:${ui.notif && ui.notif.total ? '#fff1f2' : ''};color:${ui.notif && ui.notif.total ? '#e5384a' : ''};font-weight:700">🔔 Notifications${ui.notif && ui.notif.total ? ` <span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${ui.notif.total}</span>` : ''}</button>
     <select id="branchsel"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
     ${navGroups(on)}
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
-  document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).trim();
+  document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { mb.textContent = ui.notif && ui.notif.total ? '🔔 ' + ui.notif.total : '🔔'; mb.style.color = ui.notif && ui.notif.total ? '#e5384a' : ''; }
   view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
@@ -163,11 +164,34 @@ const NAVG = [
   ['Reports & Analytics', [['rep:items'], ['rep:readings'], ['rep:cash'], ['rep:accountability']]],
   ['Settings & Permissions', [['settings', 'Settings', 'gear'], ['activity', 'Activity', 'activity']]]
 ];
+// ---------- notifications: red badges, the bell, a banner and desktop alerts ----------
+const notifCount = v => (ui.notif && ui.notif.items.find(i => i.view === v) || {}).count || 0;
+const badge = v => notifCount(v) ? ` <span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${notifCount(v)}</span>` : '';
+function bellModal() {
+  const n = ui.notif || { total: 0, items: [] };
+  openModal(`<h2 style="margin-top:0">Notifications</h2>${n.items.length ? n.items.map(i => `<button class="btn ghost" style="width:100%;justify-content:space-between;margin-bottom:8px" data-view="${i.view}"><span>${i.count} ${esc(i.label)}</span><span class="tag" style="color:#fff;background:#e5384a">${i.count}</span></button>`).join('') : '<p class="mute">You are all caught up. Nothing needs your attention.</p>'}
+    ${'Notification' in window && Notification.permission === 'default' ? '<button class="btn sm" data-act="allownotif" style="margin-top:6px">🔔 Also alert me on this device</button>' : ''}<br><br><button class="btn ghost" data-act="close">Close</button>`);
+}
+let notifPrev = -1;
+async function pollNotif(first) {
+  if (!loggedIn) return;
+  try {
+    const n = await api('GET', '/api/notifications'), was = notifPrev; ui.notif = n; ui.inUnread = (n.items.find(i => i.key === 'inbox') || {}).count || 0;
+    document.title = (n.total ? '(' + n.total + ') ' : '') + 'Brotherhood';
+    if (!first && was >= 0 && n.total > was) {
+      const fresh = n.items.slice(0, 3).map(i => i.count + ' ' + i.label).join(' · ');
+      const b = document.getElementById('notice') || Object.assign(document.body.appendChild(document.createElement('div')), { id: 'notice' });
+      b.style.cssText = 'position:fixed;top:12px;right:12px;left:12px;max-width:420px;margin-left:auto;z-index:99999;background:#000;color:#fff;border-radius:14px;padding:12px 16px;box-shadow:0 12px 40px rgba(0,0,0,.4);cursor:pointer;font-weight:600';
+      b.innerHTML = '🔔 You have new notifications<br><span style="font-weight:400;font-size:13px">' + esc(fresh) + '</span>'; b.onclick = () => { b.remove(); bellModal(); }; clearTimeout(b._t); b._t = setTimeout(() => b.remove(), 9000);
+      if ('Notification' in window && Notification.permission === 'granted' && document.hidden) new Notification('Brotherhood: new notification', { body: fresh });
+    }
+    notifPrev = n.total; if (!modal.open && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) && ui.view !== 'inbox') render();
+  } catch (e) { }
+}
 function navGroups(on) {
   return NAVG.map(([h, list]) => `<div class="navh">${h}</div>` + list.map(([v, l, i]) => {
     if (!l) { const k = v.slice(v.indexOf(':') + 1), r = (v.startsWith('rep:') ? REPORTS : MGMT).find(x => x[0] === k); if (!r) return ''; l = r[1]; i = r[2]; }
-    const badge = v === 'inbox' && ui.inUnread ? ` <span class="tag" style="color:#fff;background:#e5384a">${ui.inUnread}</span>` : '';
-    return `<button class="${on(v)}" data-view="${v}">${ic(i)}${l.replace('&', '&amp;')}${badge}</button>`;
+    return `<button class="${on(v)}" data-view="${v}" style="width:100%">${ic(i)}${l.replace('&', '&amp;')}${badge(v)}</button>`;
   }).join('')).join('');
 }
 function vLeave() {
@@ -187,12 +211,30 @@ function vChk() {
   ${r.missing.length ? `<div class="card overflow" style="margin-top:14px"><h3>Not submitted</h3><table><tr><th>Date</th><th>Branch</th><th>Checklist</th></tr>${r.missing.slice(0, 150).map(x => `<tr><td>${esc(x.date)}</td><td>${esc(x.branchName)}</td><td style="text-transform:capitalize">${esc(x.kind)}</td></tr>`).join('')}</table></div>` : ''}` : '<p class="mute">Loading…</p>'}
   ${t ? `<div class="card" style="margin-top:14px"><h3>Checklist tasks</h3><p class="mute" style="font-size:13px;margin:0 0 8px">One task per line. Cashiers see these every day.</p><div class="grid"><div><label>Opening</label><textarea id="chk-open" rows="7">${esc(t.opening.join('\n'))}</textarea></div><div><label>Closing</label><textarea id="chk-close" rows="7">${esc(t.closing.join('\n'))}</textarea></div></div><button class="btn sm" data-act="chksave">Save tasks</button></div>` : ''}`;
 }
+function payslipHtml(x) {
+  const row = (l, v, b, c) => `<tr><td${c ? ` style="color:${c}"` : ''}>${l}</td><td style="text-align:right">${b ? '<b>' + v + '</b>' : v}</td></tr>`, hd = t => `<tr><td colspan="2" style="padding-top:12px"><b>${t}</b></td></tr>`;
+  const adv = x.advanceItems, ded = x.deductionItems, cats = ['Cash advance', 'Partial salary release', 'Other authorized deduction'];
+  return `<div style="text-align:center"><img src="/logo.png" width="76" style="border-radius:50%"><h2 style="margin:6px 0 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
+    <p><b>${esc(x.staffName)}</b><br>${esc(x.branchName)}<br>Pay period: ${esc(x.period)} (${x.days.length} day${x.days.length > 1 ? 's' : ''})<br>Paid on ${esc(x.paidAt.slice(0, 10))}</p>
+    <table style="width:100%;border-collapse:collapse">
+    ${hd('EARNINGS')}${x.dayItems.map(d => row('Haircut commission · ' + esc(d.date), peso(d.commission))).join('')}${x.topup ? row('Daily allowance top-up', peso(x.topup)) : ''}${x.earningItems.map(e => row(esc(e.kind) + ': ' + esc(e.note), peso(e.amount))).join('')}${row('GROSS EARNINGS', peso(x.gross), 1)}
+    ${hd('DEDUCTIONS')}${adv.map(a => row(esc(a.label), '−' + peso(a.amount), 0, '#b00')).join('')}${ded.map(a => row(esc(a.label), '−' + peso(a.amount), 0, '#b00')).join('')}${!adv.length && !ded.length ? row('None', peso(0)) : ''}${row('TOTAL DEDUCTIONS', '−' + peso(x.totalDeductions), 1)}
+    <tr><td colspan="2"><hr></td></tr>${row('NET SALARY', peso(x.net), 1)}</table>
+    <p style="font-size:11px;color:#666;margin-top:20px">Prepared by ${esc(x.paidBy || '')}. Deductions were authorized in writing by the employee.</p>`;
+}
 function vSlip() {
-  const r = ui.slip;
-  return `<h2>Payslips <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar('')}
-  <p class="mute" style="font-size:13px">A payslip is created every time you mark a barber as paid in Payroll. It lists the commission, the daily top-up, advances and release-pay deductions that were really paid.</p>
-  ${r ? `<div class="card overflow"><table><tr><th>Paid on</th><th>Employee</th><th>Branch</th><th>Days</th><th>Commission</th><th>Top-up</th><th>Advances</th><th>Release pay deductions</th><th>Net pay</th><th></th></tr>
-  ${r.rows.map((x, i) => `<tr><td>${esc(x.paidAt.slice(0, 10))}</td><td><b>${esc(x.staffName)}</b></td><td>${esc(x.branchName)}</td><td>${x.days.length}<br><span class="mute" style="font-size:11px">${esc(x.days[0])}${x.days.length > 1 ? ' → ' + esc(x.days[x.days.length - 1]) : ''}</span></td><td>${peso(x.commission)}</td><td>${peso(x.topup)}</td><td>${peso(x.advance)}</td><td>${peso(x.deduction)}</td><td><b>${peso(x.net)}</b></td><td><button class="btn ghost sm" data-act="slipprint" data-i="${i}">Print payslip</button></td></tr>`).join('') || '<tr><td colspan="10" class="mute">No payroll paid in this period.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
+  const r = ui.slip, adj = ui.adj;
+  return `<h2>Payslips <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(`<button class="btn sm" data-act="addadj">＋ Bonus / incentive / other earning</button>`)}
+  <p class="mute" style="font-size:13px">A payslip is created every time you mark a barber as paid in Payroll, and every one is kept here. Barbers can see their own in the POS app when their login is linked to their barber profile (Users).</p>
+  ${adj && adj.rows.some(a => !a.payrollDate) ? `<div class="card" style="margin-bottom:14px"><h3>Waiting for the next payroll</h3>${adj.rows.filter(a => !a.payrollDate).map(a => `<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span><b>${esc(a.staffName)}</b> · ${esc(a.kind)} · ${esc(a.note)} <span class="mute">(${esc(a.date)})</span></span><span><b>${peso(a.amount)}</b> <button class="btn ghost sm" data-act="rmadj" data-id="${a.id}">Remove</button></span></div>`).join('')}</div>` : ''}
+  ${r ? `<div class="card overflow"><table><tr><th>Paid on</th><th>Employee</th><th>Branch</th><th>Period</th><th>Commission</th><th>Top-up</th><th>Bonuses</th><th>Gross</th><th>Deductions</th><th>Net salary</th><th></th></tr>
+  ${r.rows.map((x, i) => `<tr><td>${esc(x.paidAt.slice(0, 10))}</td><td><b>${esc(x.staffName)}</b></td><td>${esc(x.branchName)}</td><td>${esc(x.period)}</td><td>${peso(x.commission)}</td><td>${peso(x.topup)}</td><td>${peso(x.bonus)}</td><td>${peso(x.gross)}</td><td>${peso(x.totalDeductions)}</td><td><b>${peso(x.net)}</b></td><td><button class="btn ghost sm" data-act="slipview" data-i="${i}">View / print</button></td></tr>`).join('') || '<tr><td colspan="11" class="mute">No payroll paid in this period.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
+}
+function vChkToday() {
+  const c = ui.chkToday; if (!c) return '';
+  const open = c.rows.flatMap(r => r.items.filter(i => !i.done).map(i => ({ br: r.branchName, kind: r.kind, text: i.text, note: i.note })));
+  if (!c.missing.length && !open.length) return '<div class="card" style="margin-bottom:14px"><b style="color:var(--ok)">✔ All branch checklists are complete today.</b></div>';
+  return `<div class="card" style="margin-bottom:14px;border-color:#f1d98a"><h3 style="color:#b26a00">Incomplete checklists today</h3>${c.missing.length ? `<p style="margin:0 0 6px"><b>Not submitted:</b> ${c.missing.map(m => esc(m.branchName) + ' (' + m.kind + ')').join(', ')}</p>` : ''}${open.length ? `<p style="margin:6px 0 2px"><b>Tasks not done:</b></p>${open.map(o => `<div style="padding:3px 0">✗ <b>${esc(o.br)}</b> · ${esc(o.kind)}: ${esc(o.text)} <span class="mute">${esc(o.note)}</span></div>`).join('')}` : ''}<button class="btn ghost sm" data-view="chk" style="margin-top:8px">Open checklists</button></div>`;
 }
 function vProb() {
   const r = ui.prob, st = ui.pstatus || '', FLOW = ['SUBMITTED', 'ACKNOWLEDGED', 'IN PROGRESS', 'RESOLVED', 'CLOSED'];
@@ -266,7 +308,7 @@ function vDashboard() {
     <div class="card stat"><span>In the chair</span><b>${l.cutting}</b><small class="mute">Walk-ins being served now</small></div></div>
     <div class="card overflow" style="margin-bottom:14px"><h3>Live walk-in floor queue</h3><table><tr><th>Ticket</th><th>Customer</th><th>Branch</th><th>Services</th><th>Status</th><th>Barber</th><th>Time</th></tr>
     ${l.queue.map(q => `<tr><td>#${String(q.no).padStart(3, '0')}</td><td>${esc(q.customer)}</td><td>${esc(q.branch)}</td><td>${esc(q.services)}</td><td><span class="tag ${q.status === 'in_chair' ? 'done' : 'booked'}">${q.status === 'in_chair' ? 'In Chair' : 'Waiting'}</span></td><td>${esc(q.barber)}</td><td>${ago(q.since)}</td></tr>`).join('') || '<tr><td colspan="7" class="mute">No customers on the floor right now.</td></tr>'}</table></div>` : '';
-  return `<h2>Dashboard <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${live}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : ''}`;
+  return `<h2>Dashboard <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${vChkToday()}${live}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : ''}`;
 }
 const vActivity = () => `<div class="row" style="justify-content:space-between;margin-bottom:14px"><h2 style="margin:0">Activity</h2>${S.me.role === 'owner' ? '<button class="btn" data-act="backup">⬇ Download backup</button>' : ''}</div>
   <p class="mute">The server saves an automatic daily backup. Also download one now and then and keep it somewhere else (Google Drive, a flash drive).</p>
@@ -297,6 +339,7 @@ const M = {
     form: () => [['name', 'Full name', 'text'], ['username', 'Username', 'text'],
       ['role', 'Role', 'select', { opts: [['cashier', 'Cashier (POS, one branch)'], ['barber', 'Barber (POS, limited, one branch)'], ['admin', 'Admin (all branches)']] }],
       ['branchId', 'Branch', 'select', { opts: [['', '— all —'], ...BR()], req: false, hint: 'required for cashier and barber' }],
+      ['staffId', 'Linked barber profile', 'select', { opts: [['', '— not linked —'], ...S.staff.map(s => [s.id, s.name + ' · ' + brName(s.branchId)])], req: false, hint: 'Link a barber login to their profile so they can see their own performance and payslips' }],
       ['pin', 'PIN', 'text', { req: false, hint: '6 digits, for cashier and barber; blank = keep current' }],
       ['password', 'Password', 'password', { req: false, hint: 'admins only; blank = keep current; min 6' }],
       ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
@@ -459,6 +502,26 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
+  if (act === 'bell') return bellModal();
+  if (act === 'allownotif') { await Notification.requestPermission(); return bellModal(); }
+  if (act === 'slipview') {
+    const x = ui.slip.rows[+d.i]; return openModal(`<div id="slipbox">${payslipHtml(x)}</div><div class="row" style="margin-top:12px"><button class="btn" data-act="slipprint" data-i="${d.i}">🖨 Print / save as PDF</button><button class="btn ghost" data-act="close">Close</button></div>`);
+  }
+  if (act === 'slipprint') {
+    const x = ui.slip.rows[+d.i], w = window.open('', '_blank'); if (!w) return alert('Allow pop-ups to print the payslip.');
+    w.document.write('<!doctype html><title>Payslip ' + esc(x.staffName) + '</title><body style="font:14px Arial;max-width:440px;margin:24px auto">' + payslipHtml(x) + '<script>window.print()<\/script>'); w.document.close(); return;
+  }
+  if (act === 'addadj') {
+    return openModal(`<h2 style="margin-top:0">Bonus, incentive or other earning</h2><p class="mute" style="font-size:13px">It is added to the employee's next payslip.</p>
+      <label>Employee</label><select id="aj-staff">${S.staff.filter(s => s.active).map(s => `<option value="${s.id}">${esc(s.name)} · ${esc(brName(s.branchId))}</option>`).join('')}</select>
+      <label>Type</label><select id="aj-kind"><option>Bonus</option><option>Incentive</option><option>Other earning</option></select><label>Amount (₱)</label><input id="aj-amt" type="number"><label>Date</label><input id="aj-date" type="date" value="${today()}"><label>What is it for?</label><input id="aj-note" maxlength="200" placeholder="e.g. Best barber of the week">
+      <p id="aj-err" style="color:var(--bad)"></p><div class="row"><button class="btn" data-act="addadjgo">Save</button><button class="btn ghost" data-act="close">Cancel</button></div>`);
+  }
+  if (act === 'addadjgo') {
+    const v = i => document.getElementById(i).value;
+    try { await api('POST', '/api/adjustments', { staffId: v('aj-staff'), kind: v('aj-kind'), amount: +v('aj-amt'), date: v('aj-date'), note: v('aj-note') }); closeModal(); await loadView(); render(); } catch (x) { document.getElementById('aj-err').textContent = x.message; } return;
+  }
+  if (act === 'rmadj') { if (!confirm('Remove this bonus?')) return; try { await api('DELETE', '/api/adjustments/' + d.id); await loadView(); render(); } catch (x) { alert(x.message); } return; }
   if (act === 'lvreview') {
     const action = d.a, note = action === 'approve' ? '' : prompt('Why is this leave rejected?'); if (note === null) return; if (action !== 'approve' && !String(note).trim()) return alert('A note is required.');
     try { await api('PUT', '/api/leaves/' + d.id + '/review', { action, note }); await loadView(); render(); } catch (x) { alert(x.message); } return;
@@ -467,7 +530,7 @@ document.addEventListener('click', async e => {
     const ls = id => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
     try { ui.chkTpl = await api('PUT', '/api/checklists/template', { opening: ls('chk-open'), closing: ls('chk-close') }); alert('Checklist tasks saved.'); render(); } catch (x) { alert(x.message); } return;
   }
-  if (act === 'slipprint') {
+  if (act === 'slipprint_old') {
     const x = ui.slip.rows[+d.i], w = window.open('', '_blank'); if (!w) return alert('Allow pop-ups to print the payslip.');
     const row = (l, v, b) => `<tr><td>${l}</td><td style="text-align:right">${b ? '<b>' + v + '</b>' : v}</td></tr>`;
     w.document.write(`<!doctype html><title>Payslip</title><body style="font:14px Arial;max-width:420px;margin:24px auto"><div style="text-align:center"><img src="/logo.png" width="80" style="border-radius:50%"><h2 style="margin:6px 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
@@ -667,6 +730,7 @@ document.addEventListener('submit', e => {
 });
 
 fetch('/api/public/login-hint').then(r => r.json()).then(j => { ui.ownerNamed = !!j.ownerNamed; if (!loggedIn) render(); }).catch(() => { });
-setInterval(async () => { if (!loggedIn || !window.Inbox || document.hidden) return; Inbox.setOpt(inboxOpts()); try { const n = await Inbox.refreshUnread(); if (n !== ui.inUnread) { ui.inUnread = n; if (!modal.open && ui.view !== 'inbox' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) render(); } } catch (e) { } }, 15000);
+setInterval(() => { if (!document.hidden) pollNotif(false); }, 15000);
+setTimeout(() => pollNotif(true), 2500);
 load().then(() => setInterval(() => { if (loggedIn && !modal.open && ui.view === 'dashboard' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) load(); }, 15000));
 render();

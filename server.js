@@ -61,7 +61,7 @@ addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'int
 addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
 db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
 addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
-addCol('payroll_days', 'deduction', 'real');
+addCol('payroll_days', 'deduction', 'real'); addCol('payroll_days', 'extra', 'real'); addCol('users', 'staffId', 'text');
 for (const c of ['inPhoto', 'outPhoto', 'deviceIn', 'deviceOut', 'receivedIn', 'receivedOut', 'geoIn', 'geoOut', 'flagReason', 'corrections']) addCol('attendance', c, 'text');
 for (const c of ['undertimeMins', 'overtimeMins', 'flagged', 'offline', 'corrected']) addCol('attendance', c, 'integer');
 db.exec(`create table if not exists attendance_events(id text primary key, clientId text unique, staffId text, branchId text, action text, deviceAt text, receivedAt text, effectiveAt text, photoId text, flag text, byName text);`); addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
@@ -69,6 +69,7 @@ db.exec(`
 create table if not exists expense_claims(id text primary key, branchId text, date text, category text, description text, amount real, method text, receipts text, noReceiptReason text,
   status text, submittedById text, submittedBy text, staffId text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text, cashMoveId text, history text);
 create index if not exists exp_date on expense_claims(date, branchId);
+create table if not exists staff_adjustments(id text primary key, staffId text, branchId text, date text, kind text, amount real, note text, byName text, createdAt text, payrollDate text);
 create table if not exists equipment(id text primary key, branchId text, name text, category text, serial text, status text, lastService text, nextService text, notes text, active integer);
 create table if not exists checklist_runs(id text primary key, branchId text, date text, kind text, items text, photoId text, submittedById text, submittedBy text, createdAt text);
 create table if not exists leaves(id text primary key, branchId text, staffId text, type text, from_date text, to_date text, reason text, status text, requestedBy text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text);
@@ -107,7 +108,7 @@ const COLS = {
   items: ['name', 'categoryId', 'type', 'price', 'mins', 'active', 'photo', 'bookable', 'apptOnly', 'needId'],
   discounts: ['name', 'kind', 'value', 'active'],
   customers: ['name', 'phone', 'email', 'notes', 'createdAt', 'preferredCut'],
-  users: ['name', 'username', 'role', 'branchId', 'active'],
+  users: ['name', 'username', 'role', 'branchId', 'active', 'staffId'],
   equipment: ['branchId', 'name', 'category', 'serial', 'status', 'lastService', 'nextService', 'notes', 'active']
 };
 const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly', 'defaultPct', 'needId']);
@@ -214,8 +215,8 @@ function whoami(req) {
 const isAdmin = me => me.role === 'owner' || me.role === 'admin';
 const isBranchUser = me => me.role === 'cashier' || me.role === 'barber';
 // Which parts of the POS each role may open (editable by the owner in Settings → Access)
-const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release', 'problems', 'inbox', 'checklist', 'leave'];
-const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue', 'problems', 'inbox'] };
+const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release', 'problems', 'inbox', 'checklist', 'leave', 'myperf'];
+const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue', 'problems', 'inbox', 'myperf'] };
 const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber }; } catch { return { ...DEFAULT_PERMS }; } };
 const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
 const needAny = (me, mods) => { if (isAdmin(me)) return; const have = modulesFor(me.role); if (![].concat(mods).some(m => have.includes(m))) bad(403, 'Your role is not allowed to open this section'); };
@@ -585,6 +586,23 @@ function planDeductions(staffId, to, avail) {
   for (const d of all("select * from advance_deductions where staffId=? and status='SCHEDULED' and dueDate<=? order by dueDate, seq", staffId, to)) { if (r2(tot + d.amount) > r2(avail)) break; list.push(d); tot = r2(tot + d.amount); }
   return { list, total: tot };
 }
+// Bonuses, incentives and other earnings entered by the owner and not yet paid out in payroll
+const adjTotal = (staffId, to) => r2(sum(all("select amount from staff_adjustments where staffId=? and payrollDate is null and date<=?", staffId, to), a => a.amount));
+// Barber performance numbers (used by the owner scorecard and by each barber's own screen)
+function scoreData(from, to, br, onlyStaff) {
+  const os = paidOrders(from, to, br), days = dayRows(from, to, br);
+  const rv = all(`select * from reviews where substr(createdAt,1,10)>=? and substr(createdAt,1,10)<=?${br ? ' and branchId=?' : ''}`, ...(br ? [from, to, br] : [from, to]));
+  const leaves = all("select * from leaves where status='APPROVED' and from_date<=? and to_date>=?", to, from);
+  const visits = new Map(all("select customerId, count(*) n from orders where status='paid' and customerId<>'' group by customerId").map(r => [r.customerId, r.n]));
+  const end = to < todayStr() ? to : todayStr(), cal = []; for (let d = new Date(from + 'T00:00'), n = 0; dOf(d) <= end && n < 400; d.setDate(d.getDate() + 1), n++) cal.push(dOf(d));
+  return all(`select * from staff where active=1${br ? ' and branchId=?' : ''} order by name`, ...(br ? [br] : [])).filter(s => !onlyStaff || s.id === onlyStaff).map(s => {
+    const mine = os.filter(o => o.barberId === s.id), svc = sum(mine, o => serviceNet(o)), dd = days.filter(d => d.staffId === s.id), r = rv.filter(x => x.staffId === s.id);
+    const custs = new Set(mine.map(o => o.customerId).filter(Boolean)), returning = [...custs].filter(c => (visits.get(c) || 0) > 1).length, workedDays = new Set(dd.map(d => d.date)), leave = new Set();
+    for (const l of leaves.filter(l => l.staffId === s.id)) for (const d of cal) if (d >= l.from_date && d <= l.to_date) leave.add(d);
+    return { s, branchId: s.branchId, n: mine.length, sales: r2(svc), avg: mine.length ? svc / mine.length : 0, comm: r2(sum(mine, o => commissionOf(o, s.pct))), worked: workedDays.size, late: dd.filter(d => d.lateMins > 0).length, lateMins: sum(dd, d => d.lateMins || 0),
+      absent: cal.filter(d => !workedDays.has(d) && !leave.has(d)).length, leaveDays: leave.size, rating: r.length ? sum(r, x => x.rating) / r.length : null, rc: r.length, custs: custs.size, returning, perDay: workedDays.size ? svc / workedDays.size : 0, cutsPerDay: workedDays.size ? mine.length / workedDays.size : 0 };
+  });
+}
 const REPORTS = {
   dashboard(f) {
     const t = todayStr(), w = dOf(new Date(Date.now() - 6 * 864e5));
@@ -642,14 +660,14 @@ const REPORTS = {
   payroll(f) {
     const days = dayRows('2000-01-01', f.to, f.br), unpaid = days.filter(d => !d.paidAt).sort((a, b) => a.date.localeCompare(b.date));
     const by = new Map(); for (const d of unpaid) { const r = by.get(d.staffId) || { d: [], name: d.name, branchId: d.branchId }; r.d.push(d); by.set(d.staffId, r); }
-    const rows = [...by.entries()].map(([id, r]) => ({ id, ...r, comm: sum(r.d, x => x.commission), top: sum(r.d, x => x.topup), adv: sum(r.d, x => x.advance) })).map(r => ({ ...r, ded: planDeductions(r.id, f.to, r2(r.comm + r.top - r.adv)).total }));
+    const rows = [...by.entries()].map(([id, r]) => ({ id, ...r, comm: sum(r.d, x => x.commission), top: sum(r.d, x => x.topup), adv: sum(r.d, x => x.advance) })).map(r => { const bon = adjTotal(r.id, f.to); return { ...r, bon, ded: planDeductions(r.id, f.to, r2(r.comm + r.top + bon - r.adv)).total }; });
     const paidP = all('select * from payroll_days where date>=? and date<=?', f.from, f.to);
     return {
-      cards: [{ label: 'Payroll due', value: sum(rows, r => r.comm + r.top - r.adv - r.ded), t: 'peso', sub: 'Unpaid days up to ' + f.to }, { label: 'Barbers', value: rows.length, t: 'num' },
-        { label: 'Released during the day', value: sum(rows, r => r.adv), t: 'peso', sub: 'Already deducted' }, { label: 'Paid in period', value: sum(paidP, p => p.commission + p.topup - p.advance - (p.deduction || 0)), t: 'peso' }],
+      cards: [{ label: 'Payroll due', value: sum(rows, r => r.comm + r.top + r.bon - r.adv - r.ded), t: 'peso', sub: 'Unpaid days up to ' + f.to }, { label: 'Barbers', value: rows.length, t: 'num' },
+        { label: 'Released during the day', value: sum(rows, r => r.adv), t: 'peso', sub: 'Already deducted' }, { label: 'Paid in period', value: sum(paidP, p => p.commission + p.topup + (p.extra || 0) - p.advance - (p.deduction || 0)), t: 'peso' }],
       tables: [{
-        title: 'Payroll', selectable: true, ids: rows.map(r => r.id), cols: [['Barber'], ['Branch'], ['Days', 'num'], ['Dates'], ['Commission', 'peso'], ['Top-up', 'peso'], ['Advances', 'peso'], ['Release pay deductions', 'peso'], ['Net due', 'peso']],
-        rows: rows.map(r => [r.name, get('branches', r.branchId)?.name || '', r.d.length, r.d[0].date + (r.d.length > 1 ? ' → ' + r.d[r.d.length - 1].date : ''), r.comm, r.top, r.adv, r.ded, r.comm + r.top - r.adv - r.ded])
+        title: 'Payroll', selectable: true, ids: rows.map(r => r.id), cols: [['Barber'], ['Branch'], ['Days', 'num'], ['Dates'], ['Commission', 'peso'], ['Top-up', 'peso'], ['Bonuses & incentives', 'peso'], ['Advances', 'peso'], ['Release pay deductions', 'peso'], ['Net due', 'peso']],
+        rows: rows.map(r => [r.name, get('branches', r.branchId)?.name || '', r.d.length, r.d[0].date + (r.d.length > 1 ? ' → ' + r.d[r.d.length - 1].date : ''), r.comm, r.top, r.bon, r.adv, r.ded, r.comm + r.top + r.bon - r.adv - r.ded])
       }]
     };
   },
@@ -697,15 +715,14 @@ const REPORTS = {
     };
   },
   scorecard(f) {
-    const os = paidOrders(f.from, f.to, f.br), days = dayRows(f.from, f.to, f.br), rv = all(`select * from reviews where substr(createdAt,1,10)>=? and substr(createdAt,1,10)<=?${f.br ? ' and branchId=?' : ''}`, ...(f.br ? [f.from, f.to, f.br] : [f.from, f.to]));
-    const rows = all(`select * from staff where active=1${f.br ? ' and branchId=?' : ''} order by name`, ...(f.br ? [f.br] : [])).map(s => {
-      const mine = os.filter(o => o.barberId === s.id), svc = sum(mine, o => serviceNet(o)), dd = days.filter(d => d.staffId === s.id), r = rv.filter(x => x.staffId === s.id);
-      return { s, n: mine.length, sales: svc, avg: mine.length ? svc / mine.length : 0, comm: sum(mine, o => commissionOf(o, s.pct)), worked: dd.length, late: dd.filter(d => d.lateMins > 0).length, rating: r.length ? sum(r, x => x.rating) / r.length : null, rc: r.length };
-    }).sort((a, b) => b.sales - a.sales);
+    const rows = scoreData(f.from, f.to, f.br).sort((a, b) => b.sales - a.sales), rate = r => r.rating == null ? '—' : r.rating.toFixed(1) + ' ★ (' + r.rc + ')';
+    const byBr = {}; for (const r of rows) { const b = byBr[r.branchId] ||= { n: 0, sales: 0, worked: 0, late: 0, absent: 0, custs: 0, returning: 0, rs: 0, rc: 0, barbers: 0 }; b.n += r.n; b.sales += r.sales; b.worked += r.worked; b.late += r.late; b.absent += r.absent; b.custs += r.custs; b.returning += r.returning; b.rs += (r.rating || 0) * r.rc; b.rc += r.rc; b.barbers++; }
     return {
-      cards: [{ label: 'Customers served', value: sum(rows, r => r.n), t: 'num' }, { label: 'Service sales', value: sum(rows, r => r.sales), t: 'peso' }, { label: 'Top barber', value: rows[0] && rows[0].n ? rows[0].s.name : '—', t: 'text' }],
-      tables: [{ title: 'Barber performance scorecard', cols: [['Barber'], ['Branch'], ['Customers', 'num'], ['Service sales', 'peso'], ['Avg ticket', 'peso'], ['Commission', 'peso'], ['Days worked', 'num'], ['Late days', 'num'], ['Rating'], ['Reviews', 'num']],
-        rows: rows.map(r => [r.s.name, get('branches', r.s.branchId)?.name || '', r.n, r.sales, r.avg, r.comm, r.worked, r.late, r.rating == null ? '—' : r.rating.toFixed(1) + ' ★', r.rc]) }]
+      cards: [{ label: 'Haircuts completed', value: sum(rows, r => r.n), t: 'num' }, { label: 'Service sales', value: sum(rows, r => r.sales), t: 'peso' }, { label: 'Top barber', value: rows[0] && rows[0].n ? rows[0].s.name : '—', t: 'text' }, { label: 'Returning customers', value: sum(rows, r => r.returning), t: 'num', sub: 'of ' + sum(rows, r => r.custs) + ' identified customers' }],
+      tables: [{ title: 'Barber comparison (ranked by sales)', cols: [['Rank', 'num'], ['Barber'], ['Branch'], ['Haircuts', 'num'], ['Service sales', 'peso'], ['Avg ticket', 'peso'], ['Sales per day', 'peso'], ['Haircuts per day', 'num'], ['Returning customers', 'num'], ['Commission', 'peso'], ['Days worked', 'num'], ['Late arrivals', 'num'], ['Days without time-in', 'num'], ['Rating']],
+        rows: rows.map((r, i) => [i + 1, r.s.name, get('branches', r.branchId)?.name || '', r.n, r.sales, r.avg, r.perDay, Math.round(r.cutsPerDay * 10) / 10, r.returning, r.comm, r.worked, r.late, r.absent, rate(r)]) },
+        { title: 'Branch comparison', cols: [['Branch'], ['Barbers', 'num'], ['Haircuts', 'num'], ['Service sales', 'peso'], ['Sales per barber', 'peso'], ['Returning customers', 'num'], ['Late arrivals', 'num'], ['Days without time-in', 'num'], ['Rating']],
+          rows: Object.entries(byBr).sort((a, b) => b[1].sales - a[1].sales).map(([id, b]) => [get('branches', id)?.name || '', b.barbers, b.n, b.sales, b.barbers ? b.sales / b.barbers : 0, b.returning, b.late, b.absent, b.rc ? (b.rs / b.rc).toFixed(1) + ' ★ (' + b.rc + ')' : '—']) }]
     };
   },
   accountability(f) {
@@ -897,6 +914,7 @@ async function handle(req, res) {
       if (/^\/api\/problems/.test(p)) return 'problems';
       if (/^\/api\/checklists/.test(p)) return 'checklist';
       if (/^\/api\/leaves/.test(p)) return 'leave';
+      if (/^\/api\/me\//.test(p)) return 'myperf';
       if (/^\/api\/inbox/.test(p)) return 'inbox';
       if (/^\/api\/files/.test(p)) return ['remittance', 'expenses', 'pos'];
       if (/^\/api\/orders\/\w+\/(pay|void)$/.test(p)) return 'pos';
@@ -1269,15 +1287,21 @@ async function handle(req, res) {
     return send(res, 201, { id, type: m[1], name: String(b.name || '').slice(0, 80) });
   }
   // ----- daily opening / closing checklists -----
-  const DEF_CHK = { opening: ['Unlock the shop and turn on the lights and aircon', 'Clean the chairs, mirrors and floor', 'Sanitize clippers, scissors and combs', 'Restock towels, capes and neck strips', 'Open the shift on the POS and count the cash float', 'Barbers are in uniform and timed in'], closing: ['Close all open tickets on the POS', 'Count the cash and do the sales reading (Z-reading)', 'Sanitize and store all tools', 'Sweep and mop the floor, empty the trash', 'Turn off aircon, lights and equipment', 'Lock the doors and secure the cash'] };
+  const DEF_CHK = { opening: ['Shop cleanliness [photo]', 'Barber stations ready [photo]', 'Clippers and equipment working', 'Lights and air conditioning working', 'Cash fund checked', 'Shop ready for customers'], closing: ['Cleaning completed [photo]', 'Equipment switched off and secured', 'Cash count completed', 'Shop secured [photo]', 'End-of-day tasks completed'] };
+  const DEF_CHK_OLD = { opening: ['Unlock the shop and turn on the lights and aircon', 'Clean the chairs, mirrors and floor', 'Sanitize clippers, scissors and combs', 'Restock towels, capes and neck strips', 'Open the shift on the POS and count the cash float', 'Barbers are in uniform and timed in'], closing: ['Close all open tickets on the POS', 'Count the cash and do the sales reading (Z-reading)', 'Sanitize and store all tools', 'Sweep and mop the floor, empty the trash', 'Turn off aircon, lights and equipment', 'Lock the doors and secure the cash'] };
   const chkTpl = () => { const t = {}; for (const k of ['opening', 'closing']) { const v = jp(getSetting('chk_' + k)); t[k] = v.length ? v.map(String) : DEF_CHK[k]; } return t; };
   if (p === '/api/checklists/template' && method === 'GET') return send(res, 200, chkTpl());
   if (p === '/api/checklists/template' && method === 'PUT') { adminOnly(); const b = await readBody(req); for (const k of ['opening', 'closing']) if (Array.isArray(b[k])) setSetting('chk_' + k, JSON.stringify(b[k].map(s => String(s).trim().slice(0, 120)).filter(Boolean).slice(0, 30))); log(me, 'checklist-template', 'settings', '', ''); return send(res, 200, chkTpl()); }
-  if (p === '/api/checklists/today' && method === 'GET') { const bid = branchScope(me, q.branch), t0 = todayStr(); return send(res, 200, { template: chkTpl(), runs: all('select * from checklist_runs where branchId=? and date=?', bid, t0).map(r => ({ ...r, items: jp(r.items) })) }); }
+  const chkParse = s => ({ text: String(s).replace(/\s*\[photo\]\s*$/i, ''), photo: /\[photo\]\s*$/i.test(s) });
+  if (p === '/api/checklists/today' && method === 'GET') { const bid = branchScope(me, q.branch), t0 = todayStr(), tp = chkTpl(); return send(res, 200, { template: { opening: tp.opening.map(chkParse), closing: tp.closing.map(chkParse) }, runs: all('select * from checklist_runs where branchId=? and date=?', bid, t0).map(r => ({ ...r, items: jp(r.items) })) }); }
   if (p === '/api/checklists/submit' && method === 'POST') {
     const b = await readBody(req), bid = branchScope(me, b.branchId), kind = ['opening', 'closing'].includes(b.kind) ? b.kind : bad(400, 'Choose opening or closing'), t0 = todayStr(), tpl = chkTpl()[kind];
     if (one('select 1 x from checklist_runs where branchId=? and date=? and kind=?', bid, t0, kind)) bad(409, `The ${kind} checklist for today was already submitted`);
-    const items = tpl.map((text, i) => { const x = (Array.isArray(b.items) ? b.items : [])[i] || {}; return { text, done: !!x.done, note: String(x.note || '').slice(0, 200) }; });
+    const items = tpl.map((raw, i) => {
+      const x = (Array.isArray(b.items) ? b.items : [])[i] || {}, tk = chkParse(raw), ph = x.photoId ? get('files', String(x.photoId)) : null, okPhoto = ph && ph.branchId === bid, at = x.doneAt && Math.abs(Date.now() - new Date(x.doneAt)) < 36e5 * 20 ? new Date(x.doneAt).toISOString() : nowISO();
+      if (x.done && tk.photo && !okPhoto) bad(400, `Take a photo for: ${tk.text}`);
+      return { text: tk.text, photoRequired: tk.photo, done: !!x.done, note: String(x.note || '').slice(0, 200), photoId: okPhoto ? ph.id : '', by: x.done ? me.name : '', at: x.done ? at : '' };
+    });
     const missing = items.filter(i => !i.done && !i.note.trim()); if (missing.length) bad(400, `Tick every task, or write a note for the ones not done (${missing.length} left)`);
     const photo = b.photoId ? get('files', String(b.photoId)) : null; const id = uid();
     run('insert into checklist_runs(id,branchId,date,kind,items,photoId,submittedById,submittedBy,createdAt) values(?,?,?,?,?,?,?,?,?)', id, bid, t0, kind, JSON.stringify(items), photo && photo.branchId === bid ? photo.id : '', me.id, me.name, nowISO());
@@ -1312,15 +1336,55 @@ async function handle(req, res) {
     if (!act) bad(400, 'Choose approve or reject'); if (act === 'REJECTED' && !note) bad(400, 'A note is required to reject leave');
     run('update leaves set status=?, reviewedBy=?, reviewedAt=?, reviewNote=? where id=?', act, me.name, nowISO(), note, l.id); log(me, 'leave-' + b.action, 'leaves', l.id, note); return send(res, 200, leaveView(get('leaves', l.id)));
   }
-  // ----- digital payslips (built from what was actually paid in payroll) -----
-  if (p === '/api/payslips' && method === 'GET') {
-    adminOnly(); const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : '2000-01-01', to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : '2099-12-31', br = q.branch && q.branch !== 'all' ? q.branch : null;
-    const days = all(`select pd.*, s.name staffName from payroll_days pd join staff s on s.id=pd.staffId where substr(pd.paidAt,1,10)>=? and substr(pd.paidAt,1,10)<=?${br ? ' and pd.branchId=?' : ''} order by pd.paidAt desc, pd.date`, from, to, ...(br ? [br] : [])), by = new Map();
-    for (const d of days) { const k = d.staffId + '|' + d.paidAt.slice(0, 16); const r = by.get(k) || { staffId: d.staffId, staffName: d.staffName, branchName: get('branches', d.branchId)?.name || '', paidAt: d.paidAt, paidBy: d.paidBy, days: [], commission: 0, topup: 0, advance: 0, deduction: 0 }; r.days.push(d.date); r.commission = r2(r.commission + d.commission); r.topup = r2(r.topup + d.topup); r.advance = r2(r.advance + d.advance); r.deduction = r2(r.deduction + (d.deduction || 0)); by.set(k, r); }
-    const rows = [...by.values()].map(r => ({ ...r, gross: r2(r.commission + r.topup), net: r2(r.commission + r.topup - r.advance - r.deduction), deductionItems: all("select d.amount, d.seq, a.type from advance_deductions d join advances a on a.id=d.advanceId where d.staffId=? and d.status='APPLIED' and d.payrollDate in (" + r.days.map(() => '?').join(',') + ')', r.staffId, ...r.days) }));
-    return send(res, 200, { rows });
-  }
   // ----- barber scorecard and cash accountability are in REPORTS -----
+  // ----- bonuses / incentives / other earnings (owner only; they appear on the next payslip) -----
+  const ADJ_KINDS = ['Bonus', 'Incentive', 'Other earning'];
+  if (p === '/api/adjustments' && method === 'GET') { adminOnly(); const rows = all(`select a.*, s.name staffName from staff_adjustments a join staff s on s.id=a.staffId${q.staffId ? ' where a.staffId=?' : ''} order by a.date desc, a.createdAt desc limit 300`, ...(q.staffId ? [String(q.staffId)] : [])); return send(res, 200, { rows }); }
+  if (p === '/api/adjustments' && method === 'POST') {
+    adminOnly(); const b = await readBody(req), s = get('staff', String(b.staffId || '')); if (!s) bad(400, 'Choose the employee');
+    const kind = ADJ_KINDS.includes(b.kind) ? b.kind : bad(400, 'Choose Bonus, Incentive or Other earning'), amount = r2(b.amount); if (!(amount > 0)) bad(400, 'Enter the amount');
+    const note = String(b.note || '').trim().slice(0, 200); if (note.length < 3) bad(400, 'Enter a short note (what is it for?)'); const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : todayStr(), id = uid();
+    run('insert into staff_adjustments(id,staffId,branchId,date,kind,amount,note,byName,createdAt) values(?,?,?,?,?,?,?,?,?)', id, s.id, s.branchId, date, kind, amount, note, me.name, nowISO()); log(me, 'adjustment', 'staff_adjustments', id, `${s.name} ${kind} ${amount}`); return send(res, 201, get('staff_adjustments', id));
+  }
+  const adm = p.match(/^\/api\/adjustments\/(\w+)$/);
+  if (adm && method === 'DELETE') { adminOnly(); const a = get('staff_adjustments', adm[1]); if (!a) bad(404, 'Not found'); if (a.payrollDate) bad(409, 'This was already paid in payroll and cannot be removed'); run('delete from staff_adjustments where id=?', a.id); log(me, 'adjustment-removed', 'staff_adjustments', a.id, `${a.kind} ${a.amount}`); return send(res, 200, { ok: true }); }
+  // ----- digital payslips: every payroll payment, with a full breakdown -----
+  const payslipRows = (from, to, br, staffId) => {
+    const days = all(`select pd.*, s.name staffName from payroll_days pd join staff s on s.id=pd.staffId where substr(pd.paidAt,1,10)>=? and substr(pd.paidAt,1,10)<=?${br ? ' and pd.branchId=?' : ''}${staffId ? ' and pd.staffId=?' : ''} order by pd.paidAt desc, pd.date`, from, to, ...(br ? [br] : []), ...(staffId ? [staffId] : [])), by = new Map();
+    for (const d of days) { const k = d.staffId + '|' + d.paidAt.slice(0, 16); const r = by.get(k) || { staffId: d.staffId, staffName: d.staffName, branchName: get('branches', d.branchId)?.name || '', paidAt: d.paidAt, paidBy: d.paidBy, days: [], dayItems: [], commission: 0, topup: 0, bonus: 0, advance: 0, deduction: 0 }; r.days.push(d.date); r.dayItems.push({ date: d.date, commission: d.commission, topup: d.topup }); r.commission = r2(r.commission + d.commission); r.topup = r2(r.topup + d.topup); r.bonus = r2(r.bonus + (d.extra || 0)); r.advance = r2(r.advance + d.advance); r.deduction = r2(r.deduction + (d.deduction || 0)); by.set(k, r); }
+    const cat = t => t === 'Partial Salary Release' ? 'Partial salary release' : t === 'Other Authorized Deduction' ? 'Other authorized deduction' : 'Cash advance';
+    return [...by.values()].map(r => {
+      const ph = r.days.map(() => '?').join(','), last = r.days[r.days.length - 1];
+      const earnings = all(`select kind, amount, note, date from staff_adjustments where staffId=? and payrollDate=?`, r.staffId, last), cashAdv = all(`select date, amount, note from cash_moves where kind='advance' and staffId=? and date in (${ph})`, r.staffId, ...r.days);
+      const deds = all(`select d.amount, d.seq, a.type, a.installments from advance_deductions d join advances a on a.id=d.advanceId where d.staffId=? and d.status='APPLIED' and d.payrollDate=?`, r.staffId, last);
+      const gross = r2(r.commission + r.topup + r.bonus), totalDed = r2(r.advance + r.deduction);
+      return { ...r, period: r.days[0] + (r.days.length > 1 ? ' to ' + last : ''), earningItems: earnings, gross, advanceItems: cashAdv.map(c => ({ label: 'Cash advance taken on ' + c.date, amount: c.amount })), deductionItems: deds.map(d => ({ label: `${cat(d.type)} (installment ${d.seq} of ${d.installments})`, category: cat(d.type), amount: d.amount })), totalDeductions: totalDed, net: r2(gross - totalDed) };
+    });
+  };
+  if (p === '/api/payslips' && method === 'GET') { adminOnly(); return send(res, 200, { rows: payslipRows(/^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : '2000-01-01', /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : '2099-12-31', q.branch && q.branch !== 'all' ? q.branch : null, null) }); }
+  // ----- an employee's own performance and payslips (their login is linked to their barber profile by the owner) -----
+  const myStaff = () => { const u = get('users', me.id); return u && u.staffId && get('staff', u.staffId) ? u.staffId : ''; };
+  if (p === '/api/me/payslips' && method === 'GET') { const sid = myStaff(); if (!sid) bad(404, 'Your login is not linked to a barber profile yet. Ask the owner.'); return send(res, 200, { rows: payslipRows('2000-01-01', '2099-12-31', null, sid) }); }
+  if (p === '/api/me/performance' && method === 'GET') {
+    const sid = myStaff(); if (!sid) bad(404, 'Your login is not linked to a barber profile yet. Ask the owner.');
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : todayStr(), to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : todayStr(), s = get('staff', sid);
+    const mineRow = scoreData(from, to, s.branchId, sid)[0], peers = scoreData(from, to, s.branchId, null).sort((a, b) => b.sales - a.sales), clean = r => ({ ...r, s: undefined, name: r.s.name });
+    return send(res, 200, { me: clean(mineRow), rank: peers.findIndex(r => r.s.id === sid) + 1, of: peers.length, branchAvg: { sales: peers.length ? sum(peers, r => r.sales) / peers.length : 0, haircuts: peers.length ? sum(peers, r => r.n) / peers.length : 0 }, from, to });
+  }
+  // ----- what needs the owner's attention (drives the red badges and the bell) -----
+  if (p === '/api/notifications' && method === 'GET') {
+    const chats = all('select * from channels').filter(chanOk).reduce((s, c) => s + (chanView(c).unread || 0), 0), items = [];
+    if (chats) items.push({ key: 'inbox', label: chats === 1 ? 'new chat message' : 'new chat messages', count: chats, view: 'inbox' });
+    if (isOwnerOrAdmin) {
+      const n = (sql, ...a) => one(sql, ...a).n, t0 = todayStr();
+      const list = [['leave', 'leave request waiting for approval', 'leave requests waiting for approval', "select count(*) n from leaves where status='PENDING'", 'leave'], ['adv', 'release pay request to review', 'release pay requests to review', "select count(*) n from advances where status in ('REQUESTED','APPROVED')", 'adv'], ['exp', 'expense waiting for approval', 'expenses waiting for approval', "select count(*) n from expense_claims where status='PENDING'", 'exp'],
+        ['remit', 'remittance to review', 'remittances to review', "select count(*) n from remittances where status in ('PENDING','FLAGGED')", 'remit'], ['prob', 'new problem report', 'new problem reports', "select count(*) n from problems where status='SUBMITTED'", 'prob'], ['att', 'attendance record flagged', 'attendance records flagged', "select count(*) n from attendance where flagged=1 and date>=date('now','-7 day')", 'att']];
+      for (const [key, one1, many, sql, view] of list) { const c = n(sql); if (c) items.push({ key, label: c === 1 ? one1 : many, count: c, view }); }
+      const openMissing = all('select id from branches').filter(b => !one("select 1 x from checklist_runs where branchId=? and date=? and kind='opening'", b.id, t0)).length;
+      if (openMissing && minsOfDay(new Date()) > 11 * 60) items.push({ key: 'chk', label: openMissing === 1 ? 'branch has not submitted its opening checklist' : 'branches have not submitted the opening checklist', count: openMissing, view: 'chk' });
+    }
+    return send(res, 200, { total: items.reduce((s, i) => s + i.count, 0), items });
+  }
   // ----- daily sales remittance (separate from expenses) -----
   const remitCalc = (branchId, date) => {
     const os = all("select * from orders where branchId=? and date=? and status='paid'", branchId, date).map(parseOrder), tender = {};
@@ -1419,13 +1483,14 @@ async function handle(req, res) {
     adminOnly(); const b = await readBody(req), to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : todayStr(); let n = 0;
     for (const sid of Array.isArray(b.staffIds) ? b.staffIds : []) {
       const days = dayRows('2000-01-01', to, null).filter(x => x.staffId === sid && !x.paidAt).sort((x, y) => x.date.localeCompare(y.date)); if (!days.length) continue;
-      const plan = planDeductions(sid, to, r2(sum(days, x => x.commission + x.topup - x.advance))), last = days[days.length - 1].date;
+      const bonus = adjTotal(sid, to), plan = planDeductions(sid, to, r2(sum(days, x => x.commission + x.topup - x.advance) + bonus)), last = days[days.length - 1].date;
       db.exec('begin');
       try {
         for (const d of days) { run('insert or ignore into payroll_days(staffId,date,branchId,commission,topup,advance,paidAt,paidBy) values(?,?,?,?,?,?,?,?)', sid, d.date, d.branchId, d.commission, d.topup, d.advance, nowISO(), me.name); n++; }
         let applied = 0;
         for (const d of plan.list) { if (Number(run("update advance_deductions set status='APPLIED', appliedAt=?, payrollDate=? where id=? and status='SCHEDULED'", nowISO(), last, d.id).changes) === 1) applied = r2(applied + d.amount); }
-        if (applied) run('update payroll_days set deduction=? where staffId=? and date=?', applied, sid, last);
+        if (bonus) run('update staff_adjustments set payrollDate=? where staffId=? and payrollDate is null and date<=?', last, sid, to);
+        if (applied || bonus) run('update payroll_days set deduction=?, extra=? where staffId=? and date=?', applied, bonus, sid, last);
         db.exec('commit');
       } catch (e) { db.exec('rollback'); throw e; }
     }

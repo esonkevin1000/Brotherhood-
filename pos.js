@@ -35,7 +35,7 @@ const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: 
   cart: { items: [], barberId: '', mode: 'later', editing: null }, q: [], sf: null, offline: false, cust: { q: '', tier: '', rows: [], total: 0 }, rm: { date: '', calc: null, list: [], proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 // which sections this login may open (the owner sets this in Settings → Access)
-const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance', release: 'release', problems: 'problems', inbox: 'inbox', checklist: 'checklist', leave: 'leave' };
+const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance', release: 'release', problems: 'problems', inbox: 'inbox', checklist: 'checklist', leave: 'leave', myperf: 'myperf' };
 const freshCart = () => ({ items: [], editing: null, mode: (typeof P !== 'undefined' && P.cart && P.cart.mode) || 'later' });
 const isAdminRole = () => P.me && ['owner', 'admin'].includes(P.me.role);
 const canOpen = v => (P.mods || []).includes(VMAP[v]);
@@ -120,6 +120,16 @@ async function sfSubmit() {
   }
   await OFF.put(item); P.q = await OFF.all(); P.sf = null; closeSheet(); toast('Saved on this device. It will upload when the internet is back.'); render();
 }
+async function loadMp() {
+  const m = P.mp ||= { range: 'today', perf: null, slips: [], err: '' }, s = m.range === 'today' ? [ymd(0), ymd(0)] : m.range === 'week' ? (() => { const d = new Date(); const back = (d.getDay() + 6) % 7; return [ymd(-back), ymd(6 - back)]; })() : [ymd(0).slice(0, 8) + '01', ymd(0)];
+  try { [m.perf, m.slips] = await Promise.all([api('GET', '/api/me/performance?from=' + s[0] + '&to=' + s[1]), api('GET', '/api/me/payslips').then(r => r.rows)]); m.err = ''; } catch (e) { if (isNet(e)) throw e; m.err = e.message; }
+}
+function slipSheet(x) {
+  const row = (l, v, b) => '<div class="row between" style="padding:5px 0;border-bottom:1px solid var(--line)"><span' + (b ? ' style="font-weight:700"' : '') + '>' + l + '</span><span' + (b ? ' style="font-weight:700"' : '') + '>' + v + '</span></div>';
+  const html = row('Pay period', esc(x.period)) + '<p style="margin:10px 0 4px"><b>Earnings</b></p>' + x.dayItems.map(d => row('Haircut commission · ' + esc(d.date), peso(d.commission))).join('') + (x.topup ? row('Daily allowance top-up', peso(x.topup)) : '') + x.earningItems.map(e => row(esc(e.kind) + ': ' + esc(e.note), peso(e.amount))).join('') + row('Gross earnings', peso(x.gross), 1)
+    + '<p style="margin:10px 0 4px"><b>Deductions</b></p>' + x.advanceItems.concat(x.deductionItems).map(a => row(esc(a.label), '−' + peso(a.amount))).join('') + (!x.advanceItems.length && !x.deductionItems.length ? row('None', peso(0)) : '') + row('Total deductions', '−' + peso(x.totalDeductions), 1) + '<div class="paybox"><small>Net salary</small><div class="num">' + peso(x.net) + '</div></div>';
+  openSheet('<div class="row between"><h2 style="margin:0">Payslip · ' + esc(x.staffName) + '</h2><button class="ghost sm" data-a="closesheet">Close</button></div>' + html + '<button class="block" data-a="slipprint" data-i="' + P.mp.slips.indexOf(x) + '" style="margin-top:10px">🖨 Print</button>');
+}
 async function loadChk() {
   const r = await api('GET', withBr('/api/checklists/today')), keep = P.ck;
   P.ck = { template: r.template, runs: r.runs, kind: keep ? keep.kind : 'opening', items: keep && keep.items ? keep.items : [] };
@@ -135,6 +145,7 @@ async function refresh() {
     if (P.view === 'customers') await loadCustomers();
     if (P.view === 'remit') await loadRemit();
     if (P.view === 'checklist') await loadChk();
+    if (P.view === 'myperf') await loadMp();
     if (P.view === 'leave') P.lv = await api('GET', withBr('/api/leaves'));
     if (P.view === 'problems') P.pr = await api('GET', withBr('/api/problems'));
     if (canOpen('inbox') && window.Inbox) { Inbox.setOpt({ token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); try { P.inUnread = await Inbox.refreshUnread(); } catch (x) { } }
@@ -163,7 +174,7 @@ async function afterLogin(j) {
 }
 
 // ---------- shell ----------
-const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay', problems: 'Report a Problem', inbox: 'Inbox', checklist: 'Daily Checklist', leave: 'Leave Requests' };
+const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay', problems: 'Report a Problem', inbox: 'Inbox', checklist: 'Daily Checklist', leave: 'Leave Requests', myperf: 'My Performance' };
 function render() {
   if (!P.me) {
     app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
@@ -173,7 +184,7 @@ function render() {
   const b = P.boot; app.classList.toggle('in', !!P.me);
   if (!canOpen(P.view)) P.view = firstView();
   if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
-  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Problems'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Checklist'], ['leave', 'calendar', 'Leave']];
+  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Problems'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Checklist'], ['leave', 'calendar', 'Leave'], ['myperf', 'star', 'My Performance']];
   const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.inUnread && P.view !== 'inbox' ? `<span class="shiftchip" style="color:#e5384a" data-a="go" data-v="inbox">✉ ${P.inUnread}</span>` : ''}${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
@@ -252,16 +263,29 @@ const VIEWS = {
     const c = P.ck; if (!c) return '<p class="mute">Loading…</p>';
     const tabs = `<div class="seg"><button class="${c.kind === 'opening' ? 'on' : ''}" data-a="ckkind" data-k="opening">Opening</button><button class="${c.kind === 'closing' ? 'on' : ''}" data-a="ckkind" data-k="closing">Closing</button></div>`;
     const run = c.runs.find(r => r.kind === c.kind);
-    if (run) return tabs + `<div class="card"><b style="color:var(--ok)">✔ Submitted</b> <span class="mute">by ${esc(run.submittedBy)} at ${hm(run.createdAt)}</span>${run.items.map(i => `<div class="row" style="padding:6px 0;border-top:1px solid var(--line);flex-wrap:nowrap"><span style="color:${i.done ? 'var(--ok)' : 'var(--bad)'}">${i.done ? '✔' : '✗'}</span><div><span>${esc(i.text)}</span>${i.note ? `<br><small class="mute">${esc(i.note)}</small>` : ''}</div></div>`).join('')}</div>`;
-    return tabs + `<div class="card"><h3 style="margin:0 0 6px;font-size:15px;text-transform:uppercase;letter-spacing:1px">${c.kind === 'opening' ? 'Opening' : 'Closing'} checklist</h3><p class="mute" style="margin:0 0 6px;font-size:13px">Tick every task. If a task cannot be done, leave it unticked and write why.</p>
-      ${c.template[c.kind].map((txt, i) => { const it = c.items[i] || {}; return `<div style="padding:8px 0;border-top:1px solid var(--line)"><label class="consent" style="margin:0"><input type="checkbox" data-a="ckitem" data-i="${i}" ${it.done ? 'checked' : ''}><span>${esc(txt)}</span></label>${it.done ? '' : `<input data-ck="${i}" placeholder="Why was this not done?" value="${esc(it.note || '')}" style="margin-top:6px">`}</div>`; }).join('')}
-      <p id="err" style="color:var(--bad);margin:8px 0 0"></p><button class="block" data-a="cksubmit">Submit ${c.kind} checklist</button></div>`;
+    if (run) return tabs + `<div class="card"><b style="color:var(--ok)">✔ Submitted</b> <span class="mute">by ${esc(run.submittedBy)} at ${hm(run.createdAt)}</span>${run.items.map(i => `<div class="row" style="padding:6px 0;border-top:1px solid var(--line);flex-wrap:nowrap"><span style="color:${i.done ? 'var(--ok)' : 'var(--bad)'}">${i.done ? '✔' : '✗'}</span><div style="flex:1"><span>${esc(i.text)}</span>${i.done && i.by ? `<br><small class="mute">${esc(i.by)} · ${hm(i.at)}</small>` : ''}${i.note ? `<br><small class="mute">${esc(i.note)}</small>` : ''}</div>${i.photoId ? `<button class="ghost sm" data-a="viewfiles" data-ids="${i.photoId}">Photo</button>` : ''}</div>`).join('')}</div>`;
+    return tabs + `<div class="card"><h3 style="margin:0 0 6px;font-size:15px;text-transform:uppercase;letter-spacing:1px">${c.kind === 'opening' ? 'Opening' : 'Closing'} checklist</h3><p class="mute" style="margin:0 0 6px;font-size:13px">Tick every task. Tasks marked 📷 need a photo. If a task cannot be done, leave it unticked and write why.</p>
+      ${c.template[c.kind].map((tk, i) => { const it = c.items[i] || {}; return `<div style="padding:8px 0;border-top:1px solid var(--line)"><label class="consent" style="margin:0"><input type="checkbox" data-a="ckitem" data-i="${i}" ${it.done ? 'checked' : ''}><span>${esc(tk.text)}${tk.photo ? ' 📷' : ''}</span></label>
+        ${it.done && tk.photo ? `<div class="row" style="margin-top:6px"><button class="ghost sm" data-a="ckphoto" data-i="${i}">${it.photoId ? 'Retake photo' : '📷 Take photo'}</button>${it.preview ? `<img src="${it.preview}" alt="" style="width:46px;height:46px;border-radius:10px;object-fit:cover">` : '<small style="color:var(--bad)">Photo required</small>'}</div>` : ''}
+        ${it.done ? `<small class="mute">${esc(P.me.name)} · ${hm(it.doneAt)}</small>` : `<input data-ck="${i}" placeholder="Why was this not done?" value="${esc(it.note || '')}" style="margin-top:6px">`}</div>`; }).join('')}
+      <input type="file" id="ckfile" accept="image/*" capture="environment" hidden><p id="err" style="color:var(--bad);margin:8px 0 0"></p><button class="block" data-a="cksubmit">Submit ${c.kind} checklist</button></div>`;
   },
   leave() {
     const l = P.lv; if (!l) return '<p class="mute">Loading…</p>';
     const st = s => ({ PENDING: 'waiting', APPROVED: 'paid', REJECTED: 'void' }[s] || '');
     return `<button class="block" data-a="newleave" style="margin-bottom:12px;padding:16px">${ic('plus')} New leave request</button>
     ${l.rows.map(x => `<div class="card" style="padding:14px"><div class="row between" style="flex-wrap:nowrap"><b>${esc(x.staffName)}</b><span class="tag ${st(x.status)}">${x.status}</span></div><small class="mute">${esc(x.type)} · ${esc(x.from_date)}${x.to_date !== x.from_date ? ' to ' + esc(x.to_date) : ''}</small><br><small>${esc(x.reason)}</small>${x.reviewNote ? `<br><small>Owner note: ${esc(x.reviewNote)}</small>` : ''}</div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No leave requests.</p></div>'}`;
+  },
+  myperf() {
+    const m = P.mp; if (!m) return '<p class="mute">Loading…</p>';
+    if (m.err) return `<div class="card"><p>${esc(m.err)}</p></div>`;
+    const me = m.perf.me, rg = [['today', 'Today'], ['week', 'This week'], ['month', 'This month']], k = (l, v) => `<div class="card kpi"><small>${l}</small><div class="num" style="font-size:24px">${v}</div></div>`;
+    return `<div class="seg">${rg.map(([v, l]) => `<button class="${m.range === v ? 'on' : ''}" data-a="mprange" data-r="${v}">${l}</button>`).join('')}</div>
+    <div class="card hero"><small>${esc(me.name)} · rank</small><div class="num">#${m.perf.rank} <span style="font-size:20px">of ${m.perf.of} barbers</span></div><span class="mute">Branch average: ${peso(m.perf.branchAvg.sales)} sales · ${Math.round(m.perf.branchAvg.haircuts * 10) / 10} haircuts</span></div>
+    <div class="kpis">${k('Haircuts', me.n)}${k('Service sales', peso(me.sales))}${k('Average ticket', peso(me.avg))}${k('Returning customers', me.returning)}${k('Days worked', me.worked)}${k('Late arrivals', me.late)}${k('Days without time-in', me.absent)}${k('Rating', me.rating == null ? '—' : me.rating.toFixed(1) + ' ★')}</div>
+    <p class="mute" style="font-size:12.5px;margin:0 2px 8px">Sales per day ${peso(me.perDay)} · ${Math.round(me.cutsPerDay * 10) / 10} haircuts per day · ${me.rc} review${me.rc === 1 ? '' : 's'}</p>
+    <div class="sect"><h3>My payslips</h3><span class="mute">${m.slips.length}</span></div>
+    ${m.slips.map((x, i) => `<div class="card" style="padding:14px"><div class="row between"><b>${esc(x.period)}</b><b>${peso(x.net)}</b></div><small class="mute">Paid ${esc(x.paidAt.slice(0, 10))} · Gross ${peso(x.gross)} · Deductions ${peso(x.totalDeductions)}</small><div class="row" style="margin-top:8px"><button class="sm ghost" data-a="slipview" data-i="${i}">View payslip</button></div></div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No payslips yet. One is created every time payroll is paid.</p></div>'}`;
   },
   release() {
     const l = P.adv; if (!l) return '<p class="mute">Loading…</p>';
@@ -644,7 +668,7 @@ document.addEventListener('click', async e => {
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
-      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Report a Problem'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Daily Checklist'], ['leave', 'calendar', 'Leave Requests'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Report a Problem'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Daily Checklist'], ['leave', 'calendar', 'Leave Requests'], ['myperf', 'star', 'My Performance & Payslips'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
@@ -688,9 +712,13 @@ document.addEventListener('click', async e => {
     return;
   }
   if (a === 'pbcomment') { const text = prompt('Write your comment'); if (!text || !text.trim()) return; await guard(() => api('POST', '/api/problems/' + d.id + '/comment', { text })); return refresh(); }
+  if (a === 'mprange') { P.mp.range = d.r; await refresh(); return render(); }
+  if (a === 'slipview') return slipSheet(P.mp.slips[+d.i]);
+  if (a === 'slipprint') { const x = P.mp.slips[+d.i]; return printHtml('<div class="c"><b>' + esc((P.shop || 'Brotherhood').toUpperCase()) + ' BARBERSHOP</b></div><div class="c">PAYSLIP</div><hr>' + R('Employee', x.staffName) + R('Pay period', x.period) + R('Paid on', x.paidAt.slice(0, 10)) + '<hr>' + x.dayItems.map(d => R('Commission ' + d.date, peso(d.commission))).join('') + (x.topup ? R('Daily top-up', peso(x.topup)) : '') + x.earningItems.map(e => R(e.kind + ': ' + e.note, peso(e.amount))).join('') + R('GROSS', peso(x.gross), 1) + '<hr>' + x.advanceItems.concat(x.deductionItems).map(a => R(a.label, '-' + peso(a.amount))).join('') + R('TOTAL DEDUCTIONS', '-' + peso(x.totalDeductions), 1) + '<hr>' + R('NET SALARY', peso(x.net), 1)); }
+  if (a === 'ckphoto') { P.ckTarget = +d.i; document.getElementById('ckfile')?.click(); return; }
   if (a === 'ckkind') { P.ck.kind = d.k; P.ck.items = []; return render(); }
   if (a === 'cksubmit') {
-    const c = P.ck, n = c.template[c.kind].length, items = Array.from({ length: n }, (_, i) => c.items[i] || { done: false, note: '' });
+    const c = P.ck, n = c.template[c.kind].length, items = Array.from({ length: n }, (_, i) => { const x = c.items[i] || { done: false, note: '' }; return { done: !!x.done, note: x.note || '', photoId: x.photoId || '', doneAt: x.doneAt || '' }; });
     try { await api('POST', '/api/checklists/submit', { branchId: P.boot.branch.id, kind: c.kind, items }); toast('Checklist submitted'); c.items = []; await refresh(); }
     catch (x) { const er = document.getElementById('err'); if (er) er.textContent = x.message; else toast(x.message, true); }
     return;
@@ -857,7 +885,8 @@ document.addEventListener('change', async e => {
   if (t.id === 'avconsent') { P.av.consent = t.checked; return; }
   if (a === 'rmdate' || t.id === 'rmdate') { P.rm.date = t.value || ymd(0); P.rm.proofId = ''; P.rm.preview = ''; refresh().then(render); return; }
   if (t.id === 'sffile') { const file = t.files[0]; if (!file || !P.sf) return; try { P.sf.data = await resizeToJpeg(file, 900); selfieSheet(); } catch (x) { toast('Could not read that photo. Please try again.', true); } return; }
-  if (a === 'ckitem') { const i = +t.dataset.i; P.ck.items[i] = { ...(P.ck.items[i] || {}), done: t.checked }; return render(); }
+  if (a === 'ckitem') { const i = +t.dataset.i; P.ck.items[i] = { ...(P.ck.items[i] || {}), done: t.checked, doneAt: t.checked ? new Date().toISOString() : '' }; return render(); }
+  if (t.id === 'ckfile') { const file = t.files[0], i = P.ckTarget; if (!file || i === undefined) return; try { const data = await resizeToJpeg(file, 1200); const r = await api('POST', '/api/files', { data, kind: 'checklist', branchId: P.boot.branch.id }); P.ck.items[i] = { ...(P.ck.items[i] || {}), photoId: r.id, preview: data }; render(); } catch (x) { toast(x.message || 'Could not upload the photo.', true); } return; }
   if (t.id === 'lvstaff') { P.lvf.staffId = t.value; return; }
   if (t.id === 'lvtype') { P.lvf.type = t.value; return; }
   if (t.id === 'lvfrom') { P.lvf.from = t.value; return; }
