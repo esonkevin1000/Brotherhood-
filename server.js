@@ -1517,7 +1517,7 @@ async function handle(req, res) {
     if (method === 'PUT' && !bkm[2]) {
       const b = await readBody(req); if (!['cancelled', 'noshow'].includes(b.status)) bad(400, 'Bad status');
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
-      run('update bookings set status=? where id=?', b.status, cur.id); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
+      run('update bookings set status=? where id=?', b.status, cur.id); BH.freed(cur.branchId, cur.staffId, cur.date); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
     }
     if (method === 'POST' && bkm[2] === 'arrive') {
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
@@ -1856,7 +1856,7 @@ async function handle(req, res) {
   bad(405, 'Method not allowed');
 }
 
-const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
+const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 
 http.createServer(async (req, res) => {
   if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);

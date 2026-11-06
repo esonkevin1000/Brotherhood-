@@ -54,7 +54,7 @@ const shopCard = s => `<button class="shop" data-shop="${s.id}">${s.photo ? `<im
 function vHome() {
   const D = S.D, up = (S.mine || []).filter(b => b.status === 'booked' && b.date >= ymd(new Date())).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
   return header() + `<div class="hero pop"><h1>More than a haircut.<br>It's a brotherhood.</h1><p>Find your barber. Book in seconds. Always free for customers.</p><button class="btn" data-go="/discover">${ic('search')} Find a barber</button></div>
-  ${up ? `<div class="card pop" style="margin-bottom:6px"><div class="sm mute">YOUR NEXT CUT</div><div class="nm" style="margin-top:4px">${fmtDate(up.date)} · ${t12(up.time)}</div><div class="sm mute">${esc(up.items.map(i => i.name).join(' + '))} with ${esc(up.staffName)} · ${esc(up.branchName)}</div></div>` : ''}
+  ${installCard()}${up ? `<div class="card pop" style="margin-bottom:6px"><div class="sm mute">YOUR NEXT CUT</div><div class="nm" style="margin-top:4px">${fmtDate(up.date)} · ${t12(up.time)}</div><div class="sm mute">${esc(up.items.map(i => i.name).join(' + '))} with ${esc(up.staffName)} · ${esc(up.branchName)}</div></div>` : ''}
   <button class="bcard" data-go="/style" style="margin-top:6px"><span class="av" style="background:var(--s2)">${ic('scissors')}</span><div class="sp"><div class="nm">Find your cut</div><div class="sm mute">Pick your face shape and get cut ideas to show your barber</div></div></button>
   <div class="sec-h"><h2>Top barbers</h2><button class="link" data-go="/discover">See all</button></div>
   <div class="list">${D ? D.barbers.slice(0, 5).map(barberRow).join('') || '<div class="empty">No barbers yet.</div>' : '<div class="empty">Loading…</div>'}</div>
@@ -83,7 +83,7 @@ async function vBarber(id) {
   <div class="sec-h"><h2>Portfolio</h2><span class="mute sm">${j.portfolio.length} photos</span></div>
   ${j.portfolio.length ? `<div class="grid3">${j.portfolio.map(p => `<img src="${esc(p.url)}" alt="${esc(p.caption || 'Haircut by ' + b.name)}" data-lb="${esc(p.url)}" loading="lazy">`).join('')}</div>` : '<div class="card empty">This barber has not added portfolio photos yet.</div>'}
   <div class="sec-h"><h2>Services</h2></div><div class="list">${j.services.map(s => `<div class="card row">${s.photo ? `<img src="${esc(s.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(s.price)}</b></div>`).join('')}</div>
-  <div class="sec-h"><h2>Reviews</h2></div><div class="list">${j.reviews.length ? j.reviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? `<span class="tag ok">Verified visit</span>` : ''}<span class="sp"></span><span class="sm mute">${new Date(r.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div><div>${stars(r.rating)}</div>${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}</div>`).join('') : '<div class="card empty">No reviews yet. Be the first after your cut.</div>'}</div>
+  <div class="sec-h"><h2>Reviews</h2></div><div class="list">${j.reviews.length ? j.reviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? `<span class="tag ok">Verified visit</span>` : ''}<span class="sp"></span><span class="sm mute">${new Date(r.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div><div>${stars(r.rating)}</div>${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}${replyBox(r)}</div>`).join('') : '<div class="card empty">No reviews yet. Be the first after your cut.</div>'}</div>
   <div class="foot"><div><div class="sp"><div class="sm mute">Book with</div><b>${esc(b.name)}</b></div><button class="btn" data-book="${b.id}" style="min-width:150px">${ic('cal')} Book now</button></div></div>`;
 }
 
@@ -107,7 +107,7 @@ function vBook() {
   <div class="sec-h"><h2>1 · Barber</h2></div><div class="chips"><button class="chip ${k.staffId === 'any' ? 'on' : ''}" data-bstaff="any">Any available</button>${team.map(b => `<button class="chip ${k.staffId === b.id ? 'on' : ''}" data-bstaff="${b.id}">${esc(b.name)}</button>`).join('')}</div>
   <div class="sec-h"><h2>2 · Service</h2></div><div class="list">${D.services.map(s => `<button class="svc ${k.items.includes(s.id) ? 'on' : ''}" data-bsvc="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="">` : ''}<div class="sp" style="text-align:left"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num">${peso(s.price)}</b><span class="chk">${k.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('')}</div>
   <div class="sec-h"><h2>3 · Date</h2></div><div class="days">${days.map(d => `<button class="day ${k.date === ymd(d) ? 'on' : ''}" data-bday="${ymd(d)}"><span class="sm">${d.toLocaleDateString('en-PH', { weekday: 'short' })}</span><b>${d.getDate()}</b><span class="sm">${d.toLocaleDateString('en-PH', { month: 'short' })}</span></button>`).join('')}</div>
-  <div class="sec-h"><h2>4 · Time</h2></div>${!k.items.length ? '<div class="mute sm">Pick a service first.</div>' : k.slots === null ? '<div class="mute sm">Checking availability…</div>' : k.slots.length ? `<div class="slots">${k.slots.map(t => `<button class="slot ${k.time === t ? 'on' : ''}" data-btime="${t}">${t12(t)}</button>`).join('')}</div>` : '<div class="card empty">No open slots that day. Try another date or barber.</div>'}
+  <div class="sec-h"><h2>4 · Time</h2></div>${!k.items.length ? '<div class="mute sm">Pick a service first.</div>' : k.slots === null ? '<div class="mute sm">Checking availability…</div>' : k.slots.length ? `<div class="slots">${k.slots.map(t => `<button class="slot ${k.time === t ? 'on' : ''}" data-btime="${t}">${t12(t)}</button>`).join('')}</div>` : `<div class="card empty">No open slots that day. Try another date or barber.<div style="margin-top:10px"><button class="btn sec sm" data-wl>Notify me if a slot opens</button></div></div>`}
   ${(S.user?.styles || []).length ? `<div class="sm mute" style="margin-top:14px">Add a saved style to your notes</div><div class="chips">${S.user.styles.map(cutById).filter(Boolean).map(c => `<button class="chip" data-snote="${c.id}">${esc(c.name)}</button>`).join('')}</div>` : ''}
   <label class="f">Notes for your barber (optional)<textarea id="bnotes" rows="2" maxlength="300" placeholder="Reference cut, allergies, anything we should know">${esc(k.notes)}</textarea></label>
   ${k.err ? `<div class="err">${esc(k.err)}</div>` : ''}
@@ -128,7 +128,8 @@ function vBookings() {
   const card = b => `<div class="card pop"><div class="row"><b>${fmtDate(b.date)} · ${t12(b.time)}</b><span class="sp"></span><span class="tag ${b.status === 'booked' ? 'on' : b.status === 'cancelled' || b.status === 'noshow' ? 'bad' : 'ok'}">${b.status === 'arrived' ? 'completed' : b.status === 'noshow' ? 'no-show' : esc(b.status)}</span></div>
     <div class="sm mute">${esc(b.items.map(i => i.name).join(' + '))} · ${peso(b.total)}</div><div class="sm mute">${esc(b.staffName || 'Any barber')} · ${esc(b.branchName)}</div>
     <div class="row" style="margin-top:10px;flex-wrap:wrap">${b.canCancel ? `<button class="btn danger sm" data-cancel="${b.id}">Cancel</button>` : ''}${b.canReview ? `<button class="btn sm" data-review="${b.id}">Rate your cut</button>` : ''}${b.reviewed ? '<span class="tag ok">Reviewed</span>' : ''}${b.status !== 'booked' ? `<button class="btn sec sm" data-rebook="${b.id}">Book again</button>` : ''}</div></div>`;
-  return header('My bookings') + `<div class="sec-h"><h2>Upcoming</h2></div><div class="list">${up.map(card).join('') || '<div class="card empty">Nothing booked. <button class="link" data-go="/discover">Find a barber</button></div>'}</div>
+  const wl = (S.wait || []).length ? `<div class="sec-h"><h2>Waitlist</h2></div><div class="list">${S.wait.map(w => `<div class="card row"><div class="sp"><b>${fmtDate(w.date)}</b><div class="sm mute">${esc(w.staffName || 'Any barber')} · ${esc(w.branchName)} · we will notify you if a slot opens</div></div><button class="btn danger sm" data-wldel="${w.id}">Remove</button></div>`).join('')}</div>` : '';
+  return header('My bookings') + wl + `<div class="sec-h"><h2>Upcoming</h2></div><div class="list">${up.map(card).join('') || '<div class="card empty">Nothing booked. <button class="link" data-go="/discover">Find a barber</button></div>'}</div>
   <div class="sec-h"><h2>History</h2></div><div class="list">${past.map(card).join('') || '<div class="card empty">Your past visits will show here.</div>'}</div>`;
 }
 
@@ -181,7 +182,7 @@ function vDash() {
   ${e ? `<div class="card" style="margin-top:10px"><div class="sm mute">MY PAY · NOT YET PAID OUT</div><div class="num" style="font-size:28px">${peso(e.unpaid.net)}</div><div class="sm mute">${e.unpaid.days} day${e.unpaid.days === 1 ? '' : 's'} · commission ${peso(e.unpaid.commission)}${e.unpaid.bonus ? ' · bonus ' + peso(e.unpaid.bonus) : ''}${e.unpaid.advance ? ' · advance −' + peso(e.unpaid.advance) : ''}</div><div class="sm" style="margin-top:6px">Today: ${e.today.cuts} cut${e.today.cuts === 1 ? '' : 's'} · ${peso(e.today.commission)}</div></div>` : ''}
   <div class="sec-h"><h2>Appointments · next 7 days</h2></div><div class="list">${d.appointments.map(a => `<div class="card"><div class="row"><b>${a.date === today ? 'Today' : fmtDate(a.date)} · ${t12(a.time)}</b><span class="sp"></span><span class="tag ${a.status === 'arrived' ? 'ok' : 'on'}">${a.status === 'arrived' ? 'arrived' : 'booked'}</span></div><div>${esc(a.customer)}${a.phone ? ` <a class="sm" style="color:var(--blue)" href="tel:${esc(a.phone)}">${esc(a.phone)}</a>` : ''}</div><div class="sm mute">${esc(a.items.join(' + '))} · ${a.mins} min · ${peso(a.total)}</div>${a.notes ? `<div class="sm" style="margin-top:4px">“${esc(a.notes)}”</div>` : ''}</div>`).join('') || '<div class="card empty">No appointments in the next 7 days.</div>'}</div>
   <div class="sec-h"><h2>My clients</h2><span class="mute sm">${d.clients.length}</span></div><div class="list">${d.clients.slice(0, 50).map(c => `<div class="card row"><span class="av" style="width:42px;height:42px;font-size:14px">${esc(initials(c.name))}</span><div class="sp"><div class="nm">${esc(c.name)}${c.visits >= 5 ? '<span class="tag">Regular</span>' : ''}</div><div class="sm mute">${c.visits} visit${c.visits === 1 ? '' : 's'} · last ${fmtDate(c.last)}${c.phone ? ' · ' + esc(c.phone) : ''}</div></div><b class="num">${peso(c.spent)}</b></div>`).join('') || '<div class="card empty">Clients appear here after their first paid visit with you.</div>'}</div>
-  <div class="sec-h"><h2>Latest reviews</h2></div><div class="list">${d.recentReviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? '<span class="tag ok">Verified visit</span>' : ''}<span class="sp"></span>${stars(r.rating)}</div>${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}</div>`).join('') || '<div class="card empty">No reviews yet.</div>'}</div>`;
+  <div class="sec-h"><h2>Latest reviews</h2></div><div class="list">${d.recentReviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? '<span class="tag ok">Verified visit</span>' : ''}<span class="sp"></span>${stars(r.rating)}</div>${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}${r.reply ? `<div class="sm" style="margin-top:8px;padding:8px 10px;border-left:3px solid var(--blue);background:var(--s3);border-radius:8px"><b>Your reply</b><div>${esc(r.reply)}</div></div>` : ''}<button class="btn sec sm" style="margin-top:8px" data-rreply="${r.id}" data-cur="${esc(r.reply || '')}">${r.reply ? 'Edit reply' : 'Reply'}</button></div>`).join('') || '<div class="card empty">No reviews yet.</div>'}</div>`;
 }
 async function loadDash() {
   S.dash = null; S.earn = null; if (!S.pro || !S.proSel) return;
@@ -244,22 +245,45 @@ async function saveStyle(id) {
 }
 
 
+const replyBox = r => r.reply ? `<div class="sm" style="margin-top:8px;padding:8px 10px;border-left:3px solid var(--blue);background:var(--s3);border-radius:8px"><b>Reply from ${esc(r.replyBy || 'the shop')}</b><div style="white-space:pre-wrap">${esc(r.reply)}</div></div>` : '';
 // ----- shop page -----
 async function vShop(id) {
   let j; try { j = await api('/shops/' + id); } catch (e) { return header('', '/discover') + `<div class="err">${esc(e.message)}</div>`; }
   const s = j.shop; S.curShop = s;
   return header('', '/discover') + `<h1 style="font-size:28px">${esc(s.name)}</h1><div class="mute sm">${esc(s.address || 'Brotherhood Barbershop')}</div>
-  <div style="margin:6px 0 12px">${rate(s.rating, s.reviews)} <span class="tag ok">Open ${t12(s.openTime)}–${t12(s.closeTime)}</span></div>
+  <div style="margin:6px 0 12px">${rate(s.rating, s.reviews)} <span class="tag">${t12(s.openTime)}–${t12(s.closeTime)}</span></div>
+  ${j.live ? `<div class="card row" style="margin:0 0 12px"><span class="tag ${j.live.open ? 'ok' : 'bad'}">${j.live.open ? 'Open now' : 'Closed'}</span><div class="sp sm">${j.live.open ? `<b>${j.live.waiting}</b> waiting · <b>${j.live.cutting}</b> in the chair · <b>${j.live.onDuty}</b> barber${j.live.onDuty === 1 ? '' : 's'} on duty` : 'Opens ' + t12(s.openTime)}${j.live.estWait != null && j.live.waiting ? `<div class="mute">Walk-in wait is about ${j.live.estWait} min (estimate)</div>` : j.live.open && j.live.onDuty ? '<div class="mute">No wait right now</div>' : ''}</div></div>` : ''}
   ${j.gallery.length ? `<div class="chips" style="margin:0 -16px;padding:0 16px">${j.gallery.map(g => `<img src="${esc(g)}" alt="${esc(s.name)} shop photo" data-lb="${esc(g)}" loading="lazy" style="height:170px;width:auto;border-radius:14px;flex:none;cursor:zoom-in;background:var(--s2)">`).join('')}</div>` : ''}
   <div class="row" style="margin:12px 0;flex-wrap:wrap">${s.phone ? `<a class="btn sec sm" href="tel:${esc(s.phone)}">Call</a>` : ''}${s.mapUrl ? `<a class="btn sec sm" href="${esc(s.mapUrl)}" target="_blank" rel="noopener">${ic('pin')} Directions</a>` : ''}</div>
   <div class="sec-h"><h2>Barbers · ${j.barbers.length}</h2></div><div class="list">${j.barbers.map(barberRow).join('') || '<div class="card empty">Barber profiles are coming soon. You can still book any available barber.</div>'}</div>
   <div class="sec-h"><h2>Prices</h2></div><div class="list">${j.services.map(x => `<div class="card row">${x.photo ? `<img src="${esc(x.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(x.name)}</div><div class="sm mute">${x.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(x.price)}</b></div>`).join('')}</div>
-  <div class="sec-h"><h2>Reviews</h2></div><div class="list">${j.reviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? '<span class="tag ok">Verified visit</span>' : ''}<span class="sp"></span>${stars(r.rating)}</div>${r.staffName ? `<div class="sm mute">Haircut by ${esc(r.staffName)}</div>` : ''}${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}</div>`).join('') || '<div class="card empty">No reviews for this shop yet.</div>'}</div>
+  <div class="sec-h"><h2>Reviews</h2></div><div class="list">${j.reviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? '<span class="tag ok">Verified visit</span>' : ''}<span class="sp"></span>${stars(r.rating)}</div>${r.staffName ? `<div class="sm mute">Haircut by ${esc(r.staffName)}</div>` : ''}${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}${replyBox(r)}</div>`).join('') || '<div class="card empty">No reviews for this shop yet.</div>'}</div>
   <div class="foot"><div><div class="sp"><div class="sm mute">Book at</div><b>${esc(s.name)}</b></div><button class="btn" data-bookshop="${s.id}" style="min-width:150px">${ic('cal')} Book here</button></div></div>`;
 }
 
+
+// ----- install as an app + updates -----
+let deferredInstall = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; if (route().a === 'home') render(); });
+addEventListener('appinstalled', () => { deferredInstall = null; store.set('bh_inst', '1'); render(); });
+const canOfferInstall = () => !isStandalone() && !store.get('bh_inst') && (deferredInstall || isIOS);
+const installCard = () => canOfferInstall() ? `<div class="card row pop" style="margin-bottom:12px"><span class="av" style="width:44px;height:44px;background:var(--s2)">${ic('home')}</span><div class="sp"><b>Install Brotherhood</b><div class="sm mute">${deferredInstall ? 'Add it to your home screen for one-tap booking.' : 'Tap Share, then "Add to Home Screen".'}</div></div>${deferredInstall ? '<button class="btn sm" data-install>Install</button>' : ''}<button class="link" data-noinstall aria-label="Dismiss">✕</button></div>` : '';
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    const offer = w => { if (!w || !navigator.serviceWorker.controller || document.getElementById('upd')) return; const b = document.createElement('div'); b.id = 'upd'; b.className = 'toast'; b.style.cssText += ';display:flex;gap:10px;align-items:center;bottom:84px';
+      b.innerHTML = 'A new version is ready <button class="btn sm" style="padding:6px 12px">Update</button>'; b.querySelector('button').onclick = () => w.postMessage('SKIP_WAITING'); document.body.appendChild(b); };
+    if (reg.waiting) offer(reg.waiting);
+    reg.addEventListener('updatefound', () => { const w = reg.installing; w && w.addEventListener('statechange', () => { if (w.state === 'installed') offer(reg.waiting || w); }); });
+    setInterval(() => reg.update().catch(() => { }), 3600e3);
+  }).catch(() => { });
+  let reloaded = false; const hadController = !!navigator.serviceWorker.controller;   // first install must not reload the page
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloaded || !hadController) return; reloaded = true; location.reload(); });
+}
+
 // ----- notifications -----
-const NICON = { booking: 'cal', rate: 'heart', like: 'heart', comment: 'chat', follow: 'team' };
+const NICON = { waitlist: 'cal', reply: 'chat', booking: 'cal', rate: 'heart', like: 'heart', comment: 'chat', follow: 'team' };
 function vNotifs() {
   if (!S.token) { setTimeout(() => nav('/auth')); return ''; }
   const n = S.notifs; if (!n) return header('Notifications', '/') + '<div class="empty">Loading…</div>';
@@ -328,7 +352,7 @@ async function onRoute() {
   if (['discover', 'home', 'book', 'barber', 'shop'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; loadDash(); }
-  if (r.a === 'bookings' && S.token) loadBookings().then(render);
+  if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
   if (r.a === 'community') loadFeed().then(render);
   if (r.a === 'notifications' && S.token) { S.notifs = null; loadNotifs(); }
   if (r.a === 'book' && S.bk && !S.token) { nav('/auth'); return; }
@@ -370,10 +394,21 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-ngo],[data-bookshop],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
+  if (D.rreply) {
+    const text = prompt('Reply to this review (leave empty to remove your reply):', D.cur || ''); if (text === null) return;
+    try { await api(`/pro/reviews/${D.rreply}/reply`, { method: 'POST', body: { text } }, S.proToken); toast('Reply saved'); await loadDash(); } catch (x) { toast(x.message); } return;
+  }
+  if (D.install != null) { if (deferredInstall) { deferredInstall.prompt(); await deferredInstall.userChoice.catch(() => { }); deferredInstall = null; render(); } return; }
+  if (D.noinstall != null) { store.set('bh_inst', '1'); return render(); }
+  if (D.wl != null) {
+    if (!S.token) return nav('/auth'); const k = S.bk;
+    try { await api('/waitlist', { method: 'POST', body: { branchId: k.branchId, staffId: k.staffId, date: k.date } }); toast('You are on the waitlist. We will notify you.'); S.wait = null; } catch (x) { toast(x.message); } return;
+  }
+  if (D.wldel) { try { await api('/waitlist/' + D.wldel, { method: 'DELETE' }); S.wait = (S.wait || []).filter(x => x.id !== D.wldel); } catch (x) { toast(x.message); } return render(); }
   if (D.bookshop) { startBooking(D.bookshop, 'any'); if (!S.token) nav('/auth'); return; }
   if (D.avail != null) { S.avail = !S.avail; await loadDiscover(); return render(); }
   if (D.branchf != null) { S.branch = D.branchf; await loadDiscover(); return render(); }

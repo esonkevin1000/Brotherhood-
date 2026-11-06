@@ -2,7 +2,7 @@
 // Mounted from server.js under /api/bh/*. Shares the same database, staff, branches, bookings and reviews as the POS.
 export function mountBH(c) {
   const { db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor,
-    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
+    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
 
   // ---------- schema ----------
   db.exec(`
@@ -21,11 +21,13 @@ create table if not exists bh_follows(userId text, targetId text, createdAt text
 create table if not exists bh_blocks(userId text, blockedId text, createdAt text, primary key(userId, blockedId));
 create table if not exists bh_reports(id text primary key, kind text, targetId text, userId text, reason text, createdAt text, status text default 'open');
 create unique index if not exists bh_reports_once on bh_reports(kind, targetId, userId);
+create table if not exists bh_waitlist(id text primary key, userId text, branchId text, staffId text, date text, createdAt text, notifiedAt text);
+create index if not exists bh_wl_day on bh_waitlist(branchId, date);
 create table if not exists bh_notifs(id text primary key, userId text, kind text, text text, link text, ref text, createdAt text, readAt text);
 create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
 create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
-  addCol('bh_users', 'styles', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
+  addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
 
   // ---------- helpers ----------
@@ -42,6 +44,18 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       if (one("select status from orders where id=?", b.orderId)?.status !== 'paid' || one('select 1 x from reviews where orderId=?', b.orderId)) continue;
       notify(userId, 'rate', `How was your cut with ${get('staff', b.staffId)?.name || 'your barber'}? Rate your visit.`, '#/bookings', b.id);
     }
+  };
+  // when a slot is freed (cancel / no-show), tell waitlisted members for that shop and day if that barber (or anyone) now has an opening
+  const freed = (branchId, staffId, date) => {
+    try {
+      for (const w of all('select * from bh_waitlist where branchId=? and date=? and notifiedAt is null', branchId, date)) {
+        if (w.staffId !== 'any' && w.staffId !== staffId) continue;
+        if (!slotsFor(branchId, date, w.staffId, 30).length) continue;
+        run('update bh_waitlist set notifiedAt=? where id=?', nowISO(), w.id);
+        const who = w.staffId === 'any' ? get('branches', branchId)?.name : get('staff', w.staffId)?.name;
+        notify(w.userId, 'waitlist', `A slot opened on ${date} at ${who}. Book it before someone else does.`, w.staffId === 'any' ? '#/shop/' + branchId : '#/barber/' + w.staffId, 'wl-' + w.id);
+      }
+    } catch { }
   };
   const unreadOf = id => one('select count(*) n from bh_notifs where userId=? and readAt is null', id).n;
   const userOf = req => {
@@ -121,7 +135,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       if (!checkPw(String(b.password || ''), u.passHash)) bad(403, 'Password is wrong');
       run("update bookings set userId='' where userId=?", u.id); run("update reviews set userId='' where userId=?", u.id);
       run('delete from bh_favorites where userId=?', u.id);
-      run('delete from bh_notifs where userId=?', u.id);
+      run('delete from bh_notifs where userId=?', u.id); run('delete from bh_waitlist where userId=?', u.id);
       for (const t of ['bh_likes', 'bh_comments', 'bh_follows', 'bh_blocks', 'bh_reports']) run(`delete from ${t} where userId=?`, u.id);
       run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
       run('delete from bh_comments where postId in (select id from bh_posts where userId=?)', u.id);
@@ -152,7 +166,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const s = get('staff', bm[1]); if (!s || !s.active) bad(404, 'Barber not found');
       const brs = new Map(all('select * from branches').map(b => [b.id, b])), card = barberCard(s, ratingMap(), portCount(), brs), pr = one('select * from bh_barber where staffId=?', s.id) || {};
       const br = brs.get(s.branchId) || {};
-      const reviews = all('select id,name,rating,text,createdAt,coalesce(verified,0) verified from reviews where staffId=? order by createdAt desc limit 30', s.id);
+      const reviews = all('select id,name,rating,text,createdAt,coalesce(verified,0) verified,reply,replyAt,replyBy from reviews where staffId=? order by createdAt desc limit 30', s.id);
       const u = userOf(req);
       return send(res, 200, { barber: { ...card, bio: pr.bio || '', instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '' },
         branch: { id: br.id, name: br.name, address: br.address || '', phone: br.phone || '', openTime: br.openTime || '09:00', closeTime: br.closeTime || '21:00', mapUrl: br.mapUrl || '' },
@@ -164,8 +178,12 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const b = get('branches', shm[1]); if (!b) bad(404, 'Shop not found');
       const bm2 = new Map(all('select * from branches').map(x => [x.id, x])), rm = ratingMap(), pc = portCount(), rv = one('select count(*) n, avg(rating) a from reviews where branchId=?', b.id);
       const barbers = all('select * from staff where branchId=? and active=1', b.id).map(s => barberCard(s, rm, pc, bm2)).sort((x, y) => y.score - x.score);
-      const gallery = siteGallery(b.name), reviews = all('select r.id,r.name,r.rating,r.text,r.createdAt,coalesce(r.verified,0) verified, s.name staffName from reviews r left join staff s on s.id=r.staffId where r.branchId=? order by r.createdAt desc limit 20', b.id);
-      return send(res, 200, { shop: { id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '', photo: b.photo || siteCover(b.name) || '',
+      const gallery = siteGallery(b.name), reviews = all('select r.id,r.name,r.rating,r.text,r.createdAt,coalesce(r.verified,0) verified, r.reply, r.replyAt, r.replyBy, s.name staffName from reviews r left join staff s on s.id=r.staffId where r.branchId=? order by r.createdAt desc limit 20', b.id);
+      const t = todayStr(), waiting = one("select count(*) n from orders where branchId=? and date=? and status='waiting'", b.id, t).n, cutting = one("select count(*) n from orders where branchId=? and date=? and status='in_chair'", b.id, t).n;
+      const onDuty = all('select id from staff where branchId=? and active=1', b.id).filter(x => ['present', 'late'].includes(staffState(x.id, t).state)).length;
+      const nowM = new Date().getHours() * 60 + new Date().getMinutes(), isOpen = nowM >= toMin(b.openTime || '09:00') && nowM < toMin(b.closeTime || '21:00');
+      const live = { open: isOpen, waiting, cutting, onDuty, estWait: isOpen && onDuty ? Math.ceil(waiting / onDuty) * 30 : null };
+      return send(res, 200, { live, shop: { id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '', photo: b.photo || siteCover(b.name) || '',
         rating: rv.n ? Math.round(rv.a * 10) / 10 : 0, reviews: rv.n }, gallery: b.photo ? [b.photo, ...gallery.filter(g => g !== b.photo)] : gallery, barbers, reviews, services: servicesList() });
     }
     const fm = sub.match(/^\/favorites\/(\w+)$/);
@@ -202,7 +220,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const u = needUser(req), b = one('select * from bookings where id=? and userId=?', cm[1], u.id); if (!b) bad(404, 'Booking not found');
       if (b.status !== 'booked') bad(409, 'This booking is already ' + b.status);
       if (new Date(`${b.date}T${b.time}:00`).getTime() - Date.now() < 3600e3) bad(409, 'Bookings can be cancelled up to 1 hour before. Please call the shop.');
-      run("update bookings set status='cancelled' where id=?", b.id); log({ name: 'App: ' + u.name }, 'booking-cancelled', 'bookings', b.id, b.customerName);
+      run("update bookings set status='cancelled' where id=?", b.id); log({ name: 'App: ' + u.name }, 'booking-cancelled', 'bookings', b.id, b.customerName); freed(b.branchId, b.staffId, b.date);
       return send(res, 200, { ok: true });
     }
 
@@ -217,6 +235,23 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       log({ name: 'App: ' + u.name }, 'review', 'reviews', id, `${rating} stars (verified)`); return send(res, 201, { ok: true });
     }
 
+
+    // ----- waitlist -----
+    if (sub === '/waitlist' && method === 'GET') {
+      const u = needUser(req), t = todayStr();
+      return send(res, 200, { items: all('select * from bh_waitlist where userId=? and date>=? and notifiedAt is null order by date', u.id, t).map(w => ({ id: w.id, date: w.date, branchId: w.branchId, branchName: get('branches', w.branchId)?.name || '', staffId: w.staffId, staffName: w.staffId === 'any' ? '' : get('staff', w.staffId)?.name || '' })) });
+    }
+    if (sub === '/waitlist' && method === 'POST') {
+      const u = needUser(req), b = await readBody(req), date = String(b.date || ''), staffId = String(b.staffId || 'any');
+      if (!get('branches', String(b.branchId || ''))) bad(400, 'Pick a shop'); if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < todayStr()) bad(400, 'Pick a valid date');
+      if (staffId !== 'any' && get('staff', staffId)?.branchId !== String(b.branchId)) bad(400, 'Pick a barber from this shop');
+      if (slotsFor(String(b.branchId), date, staffId, 30).length) bad(409, 'There are open slots for that day. Please book instead.');
+      if (one('select 1 x from bh_waitlist where userId=? and branchId=? and date=? and staffId=? and notifiedAt is null', u.id, b.branchId, date, staffId)) return send(res, 200, { ok: true });
+      if (one('select count(*) n from bh_waitlist where userId=? and date>=? and notifiedAt is null', u.id, todayStr()).n >= 5) bad(409, 'You can wait on up to 5 days at a time');
+      run('insert into bh_waitlist(id,userId,branchId,staffId,date,createdAt,notifiedAt) values(?,?,?,?,?,?,null)', uid(), u.id, String(b.branchId), staffId, date, nowISO()); return send(res, 201, { ok: true });
+    }
+    const wlm = sub.match(/^\/waitlist\/(\w+)$/);
+    if (wlm && method === 'DELETE') { const u = needUser(req); run('delete from bh_waitlist where id=? and userId=?', wlm[1], u.id); return send(res, 200, { ok: true }); }
 
     // ----- notifications -----
     if (sub === '/notifications' && method === 'GET') {
@@ -325,7 +360,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const appts = all("select * from bookings where staffId=? and date>=? and date<=? and status in ('booked','arrived') order by date, time", s.id, to, dOf(new Date(Date.now() + 7 * 864e5))).map(b => {
           const v = bookingView(b); return { id: v.id, date: v.date, time: v.time, mins: v.mins, status: v.status, customer: v.customerName, phone: v.phone, items: v.items.map(i => i.name), total: v.total, notes: v.notes || '' };
         });
-        const recent = all('select name,rating,text,createdAt,coalesce(verified,0) verified from reviews where staffId=? order by createdAt desc limit 5', s.id);
+        const recent = all('select id,name,rating,text,createdAt,coalesce(verified,0) verified,reply from reviews where staffId=? order by createdAt desc limit 10', s.id);
         return send(res, 200, { staff: { id: s.id, name: s.name }, from, to, days, metrics: { haircuts: m.n, revenue: m.sales, avgService: Math.round(m.avg * 100) / 100, commission: m.comm, rating: m.rating ? Math.round(m.rating * 10) / 10 : 0, reviews: m.rc,
           clients: m.custs, retention: m.custs ? Math.round(m.returning / m.custs * 100) : 0, rebooking: rebook, daysWorked: m.worked }, appointments: appts, clients, recentReviews: recent });
       }
@@ -343,6 +378,14 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         if (b.action === 'remove') { if (kind === 'post') { const im = /\/img\/(\w+)/.exec(get(tbl, id).imageUrl || ''); if (im) run('delete from images where id=?', im[1]); run('delete from bh_comments where postId=?', id); run('delete from bh_likes where postId=?', id); } run(`delete from ${tbl} where id=?`, id); }
         else if (b.action === 'restore') run(`update ${tbl} set hidden=0 where id=?`, id); else bad(400, 'Bad action');
         run("update bh_reports set status='closed' where kind=? and targetId=?", kind, id); log(me, 'moderate-' + b.action, tbl, id, ''); return send(res, 200, { ok: true });
+      }
+      const rrm = sub.match(/^\/pro\/reviews\/(\w+)\/reply$/);
+      if (rrm && method === 'POST') {
+        const rv = get('reviews', rrm[1]); if (!rv) bad(404, 'Review not found'); if (!admin && !(mine && rv.staffId === mine)) bad(403, 'You can only reply to your own reviews');
+        const text = clip((await readBody(req)).text, 400);
+        if (!text) run("update reviews set reply=null, replyAt=null, replyBy=null where id=?", rv.id); else run('update reviews set reply=?, replyAt=?, replyBy=? where id=?', text, nowISO(), me.name, rv.id);
+        if (text && rv.userId) notify(rv.userId, 'reply', `${me.name} replied to your review`, '#/bookings', 'rp-' + rv.id);
+        log(me, 'review-reply', 'reviews', rv.id, ''); return send(res, 200, { ok: true });
       }
       if (sub === '/pro/profile' && method === 'PUT') {
         const b = await readBody(req), s = target(b.staffId), cur = one('select * from bh_barber where staffId=?', s.id) || {};
@@ -370,6 +413,6 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     }
     bad(404, 'Not found');
   };
-  handleBH.notify = notify;
+  handleBH.notify = notify; handleBH.freed = freed;
   return handleBH;
 }
