@@ -3,6 +3,9 @@
       "target": {
         "namespace": "android_app",
         "package_name": "com.brotherhood.pos",
-        "sha256_cert_fingerprints": ["67:35:CC:EF:EE:EF:F2:75:7F:82:5B:6D:21:E4:91:7E:93:82:03:DD:2C:78:93:3E:CC:3B:42:2A:61:14:13:33"]
+        "sha256_cert_fingerprints": [
+          "67:35:CC:EF:EE:EF:F2:75:7F:82:5B:6D:21:E4:91:7E:93:82:03:DD:2C:78:93:3E:CC:3B:42:2A:61:14:13:33",
+          "32:62:8E:89:67:00:AD:87:1A:B0:ED:2B:2F:C9:66:09:EB:54:69:C2:46:8F:35:D8:7F:D1:A3:94:3C:2B:50:64"
+        ]
       }
     }]
