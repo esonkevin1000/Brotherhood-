@@ -77,7 +77,7 @@ async function refresh() {
     if (P.view === 'remit') await loadRemit();
     if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
-    if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expenses?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
+    if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expense-claims?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
     if (P.view === 'reading') { const s = await api('GET', withBr('/api/pos/shift')); P.cur = s; P.zs = await api('GET', withBr('/api/pos/zreadings')); }
   } catch (e) { if (P.me) toast(e.message, true); }
   if (!sheet.open) render();
@@ -195,10 +195,14 @@ const VIEWS = {
   },
   expenses() {
     const e = P.exp; if (!e) return '<p class="mute">Loading…</p>';
-    return `<div class="grid"><div class="card"><small class="mute">Today's expenses</small><b style="font-size:20px;display:block">${peso(e.today)}</b></div><div class="card"><small class="mute">This month</small><b style="font-size:20px;display:block">${peso(e.month)}</b></div></div>
-    <input id="expq" placeholder="Search description, cashier, barber" value="${esc(P.expQ)}"><select data-a="exprange" style="margin:8px 0 12px">${[['today', 'Today'], ['month', 'This month'], ['all', 'All time']].map(([v, l]) => `<option value="${v}" ${P.expRange === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-    <p class="mute">Filtered total: <b>${peso(e.filtered)}</b> · ${e.rows.length} entries</p>
-    ${e.rows.map(m => `<div class="card"><div class="row between"><b>${esc(m.note || 'Expense')}</b><b>${peso(m.amount)}</b></div><small class="mute">${hm(m.ts)} · ${esc(m.by)}${m.staffName ? ' · ' + esc(m.staffName) : ''}</small></div>`).join('') || '<p class="mute" style="text-align:center">No expenses match the selected filters.</p>'}
+    const st = s => ({ PENDING: 'waiting', APPROVED: 'paid', REJECTED: 'void' }[s] || '');
+    return `<div class="grid"><div class="card"><small class="mute">Today's expenses</small><b style="font-size:20px;display:block">${peso(e.today)}</b></div><div class="card"><small class="mute">Filtered total</small><b style="font-size:20px;display:block">${peso(e.total)}</b></div></div>
+    <input id="expq" placeholder="Search description, category, name" value="${esc(P.expQ)}"><select data-a="exprange" style="margin:8px 0 12px">${[['today', 'Today'], ['month', 'This month'], ['all', 'All time']].map(([v, l]) => `<option value="${v}" ${P.expRange === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <p class="mute">${e.count} entries${e.noReceipt ? ` · <b style="color:var(--bad)">${e.noReceipt} without receipt</b>` : ''}</p>
+    ${e.rows.map(m => `<div class="card" style="padding:14px"><div class="row between" style="flex-wrap:nowrap"><b>${esc(m.description)}</b><b>${peso(m.amount)}</b></div>
+      <small class="mute">${esc(m.category)} · ${esc(m.method)} · ${esc(m.date)} · ${esc(m.submittedBy)}</small>
+      <div class="row" style="margin-top:8px"><span class="tag ${st(m.status)}">${m.status}</span>${m.noReceipt ? '<span class="tag void">NO RECEIPT</span>' : `<button class="ghost sm" data-a="viewfiles" data-ids="${m.receipts.join(',')}">${m.receipts.length} receipt photo${m.receipts.length > 1 ? 's' : ''}</button>`}</div>
+      ${m.noReceipt ? `<small class="mute">Reason: ${esc(m.noReceiptReason)}</small>` : ''}${m.reviewNote ? `<br><small>Owner note: ${esc(m.reviewNote)}</small>` : ''}</div>`).join('') || '<p class="mute" style="text-align:center">No expenses match the selected filters.</p>'}
     <div class="fab"><button data-a="addexp">${ic('plus')} Add Expense</button></div>`;
   },
   attendance() {
@@ -312,6 +316,28 @@ function sessionsBoard() {
   return `<div class="chairsb">${cards || '<p class="mute">No chairs are set up for this branch.</p>'}</div>
     ${waiting.length ? `<div class="sect"><h3>Waiting in line</h3><span class="mute">${waiting.length}</span></div>${waiting.map(o => ticketHtml(o, 'queue')).join('')}` : ''}
     <p class="mute" style="text-align:center;font-size:13px;margin-top:16px">Tap an occupied chair to open its order and check out.</p>`;
+}
+// ---------- expenses with receipts ----------
+const EXP_CATS = ['Supplies', 'Utilities', 'Repairs & Maintenance', 'Food & Meals', 'Transportation', 'Marketing', 'Equipment', 'Staff Welfare', 'Other'], PAY_METHODS = ['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Card', 'Other'];
+function expSheet() {
+  const x = P.ex;
+  openSheet(`<div class="row between"><h2 style="margin:0">Add expense</h2><button class="ghost sm" data-a="closesheet">Cancel</button></div>
+    <label>Category</label><select id="xcat"><option value="">Choose a category</option>${EXP_CATS.map(c => `<option ${x.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+    <label>Description</label><input id="xdesc" value="${esc(x.desc)}" maxlength="300" placeholder="e.g. Towels, clipper oil">
+    <label>Amount (₱)</label><input id="xamt" type="number" inputmode="decimal" value="${esc(x.amount)}">
+    <label>Payment method</label><div class="chips" style="flex-wrap:wrap">${PAY_METHODS.map(m => `<button class="chip ${x.method === m ? 'on' : ''}" data-a="xmethod" data-m="${m}">${m}</button>`).join('')}</div>
+    <label>Receipt photos</label><button type="button" class="ghost block" data-a="xpick">📷 Add receipt photo${x.receipts.length ? ' (' + x.receipts.length + ')' : ''}</button><input type="file" id="xfile" accept="image/*" capture="environment" hidden>
+    ${x.receipts.length ? `<div class="thumbs">${x.receipts.map((r, i) => `<div class="thumb"><img src="${r.preview}" alt=""><button class="rm" data-a="xrm" data-i="${i}" aria-label="Remove">✕</button></div>`).join('')}</div>` : `<div class="notice" style="margin-top:8px"><b>NO RECEIPT</b><br><small>Tell us why there is no receipt. The owner will see this.</small></div><input id="xreason" value="${esc(x.reason)}" maxlength="300" placeholder="Reason (required)">`}
+    <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
+    <button class="block" data-a="xsave" ${x.busy ? 'disabled' : ''}>${x.busy ? 'Saving…' : 'Save expense'}</button>`);
+}
+async function viewFiles(ids, title = 'Photos') {
+  try {
+    const imgs = [];
+    for (const id of ids) { const r = await fetch('/api/files/' + id, { headers: { Authorization: 'Bearer ' + token } }); if (r.ok) imgs.push(URL.createObjectURL(await r.blob())); }
+    if (!imgs.length) throw new Error('Could not load the photos');
+    openSheet(`<div class="row between"><h2 style="margin:0">${esc(title)}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>${imgs.map(u => `<img class="idprev" src="${u}" alt="">`).join('')}`);
+  } catch (x) { toast(x.message, true); }
 }
 function freeBarbers() { const cut = cuttingIds(); return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && !cut.has(s.id)); }
 const chairName = id => P.boot?.chairs.find(c => c.id === id)?.name || '';
@@ -608,12 +634,18 @@ document.addEventListener('click', async e => {
     if (o) { receiptSheet(o); if (P.view === 'pos') P.cart.mode = 'now'; await refresh(); }
     return;
   }
-  if (a === 'addexp') return openSheet(`<h2 style="margin-top:0">Add expense</h2><label>Amount (₱)</label><input id="xamt" type="number" inputmode="decimal"><label>Description</label><input id="xnote" placeholder="e.g. Staff meal, supplies">
-    <label>Barber (optional)</label><select id="xstaff"><option value="">—</option>${P.boot.staff.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><p id="err" style="color:var(--bad)"></p><div class="row"><button data-a="doexp">Save expense</button><button class="ghost" data-a="closesheet">Cancel</button></div>`);
-  if (a === 'doexp') {
-    if (!P.shift) return (document.getElementById('err').textContent = 'Open a shift first (Point of Sale).');
-    const r = await (async () => { try { return await api('POST', '/api/cash', { shiftId: P.shift.id, kind: 'expense', amount: +document.getElementById('xamt').value, note: document.getElementById('xnote').value, staffId: document.getElementById('xstaff').value }); } catch (x) { document.getElementById('err').textContent = x.message; return null; } })();
-    if (r) { closeSheet(); toast('Expense saved'); await refresh(); } return;
+  if (a === 'addexp') { P.ex = { category: '', desc: '', amount: '', method: 'Cash', receipts: [], reason: '', busy: false }; return expSheet(); }
+  if (a === 'xmethod') { P.ex.method = d.m; return expSheet(); }
+  if (a === 'xpick') { document.getElementById('xfile')?.click(); return; }
+  if (a === 'xrm') { P.ex.receipts.splice(+d.i, 1); return expSheet(); }
+  if (a === 'viewfiles') return viewFiles(String(d.ids).split(',').filter(Boolean), 'Receipt photos');
+  if (a === 'xsave') {
+    const x = P.ex, err = document.getElementById('err'); x.busy = true; expSheet();
+    try {
+      await api('POST', '/api/expense-claims', { branchId: P.boot.branch.id, category: x.category, description: x.desc, amount: x.amount, method: x.method, receipts: x.receipts.map(r => r.id), noReceiptReason: x.reason });
+      closeSheet(); toast('Expense saved for approval'); await refresh();
+    } catch (er) { x.busy = false; expSheet(); const e2 = document.getElementById('err'); if (e2) e2.textContent = er.message; }
+    return;
   }
   if (a === 'att') { const r = await guard(() => api('POST', '/api/attendance', { staffId: d.id, action: d.x })); if (r) toast('Saved'); return refresh(); }
   if (a === 'printz') return printHtml(readingHtml(P.lastZ));
@@ -641,6 +673,13 @@ document.addEventListener('change', async e => {
   if (a === 'paydisc') { P.pay.disc = t.value; return renderPay(P.pay); }
   if (a === 'custtier') { P.cust.tier = t.value; refresh().then(render); return; }
   if (a === 'rmdate' || t.id === 'rmdate') { P.rm.date = t.value || ymd(0); P.rm.proofId = ''; P.rm.preview = ''; refresh().then(render); return; }
+  if (t.id === 'xcat') { P.ex.category = t.value; return; }
+  if (t.id === 'xfile') {
+    const file = t.files[0]; if (!file || !P.ex) return;
+    try { const data = await resizeToJpeg(file, 1300); const r = await api('POST', '/api/files', { data, kind: 'receipt', branchId: P.boot.branch.id }); P.ex.receipts.push({ id: r.id, preview: data }); expSheet(); }
+    catch (x) { toast(x.message || 'Could not upload the photo. Please try again.', true); }
+    return;
+  }
   if (t.id === 'rmfile') {
     const file = t.files[0]; if (!file) return;
     try { const data = await resizeToJpeg(file, 1300); const r = await api('POST', '/api/files', { data, kind: 'remit', branchId: P.boot.branch.id }); P.rm.proofId = r.id; P.rm.preview = data; render(); }
@@ -669,6 +708,9 @@ document.addEventListener('input', e => {
     return;
   }  if (t.id === 'expq') { P.expQ = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('expq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
   if (t.id === 'remarks') P.remarks = t.value;
+  if (t.id === 'xdesc') { P.ex.desc = t.value; return; }
+  if (t.id === 'xamt') { P.ex.amount = t.value; return; }
+  if (t.id === 'xreason') { P.ex.reason = t.value; return; }
   if (t.id === 'rmactual' || t.id === 'rmresp' || t.id === 'rmnotes') {
     const m = P.rm; if (t.id === 'rmactual') m.actual = t.value; else if (t.id === 'rmresp') m.resp = t.value; else m.notes = t.value;
     const btn = document.querySelector('[data-a="rmsubmit"]'); if (btn) btn.disabled = !(m.proofId && m.actual !== '' && !m.busy);

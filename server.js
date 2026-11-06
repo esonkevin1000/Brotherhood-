@@ -63,6 +63,9 @@ db.exec('create index if not exists cust_phone on customers(phoneKey); create in
 addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
 addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
 db.exec(`
+create table if not exists expense_claims(id text primary key, branchId text, date text, category text, description text, amount real, method text, receipts text, noReceiptReason text,
+  status text, submittedById text, submittedBy text, staffId text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text, cashMoveId text, history text);
+create index if not exists exp_date on expense_claims(date, branchId);
 create table if not exists files(id text primary key, kind text, branchId text, mime text, data blob, byId text, byName text, createdAt text);
 create table if not exists remittances(id text primary key, branchId text, date text, posSales real, cashSales real, gcashSales real, mayaSales real, otherSales real,
   cashIn real, cashExpenses real, expected real, actual real, variance real, responsible text, proofId text, notes text, status text, flagReason text,
@@ -837,7 +840,7 @@ async function handle(req, res) {
       if (/^\/api\/pos\/queue$/.test(p)) return ['queue', 'pos'];
       if (/^\/api\/pos\/(shift|zreadings)$|^\/api\/shifts\//.test(p)) return 'reading';
       if (/^\/api\/(pos\/)?attendance$/.test(p)) return 'attendance';
-      if (/^\/api\/expenses$/.test(p)) return 'expenses';
+      if (/^\/api\/expenses$/.test(p) || /^\/api\/expense-claims/.test(p)) return 'expenses';
       if (/^\/api\/bookings/.test(p)) return 'bookings';
       if (p === '/api/orders' && method === 'POST') return 'pos';
       if (p === '/api/pos/idphoto') return 'pos';
@@ -1010,6 +1013,49 @@ async function handle(req, res) {
   if (flm && method === 'GET') {
     const f = get('files', flm[1]); if (!f || (isBranchUser(me) && f.branchId !== me.branchId)) bad(404, 'Not found');
     res.writeHead(200, { 'Content-Type': f.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(f.data);
+  }
+  // ----- expenses with receipts -----
+  const EXP_CATS = ['Supplies', 'Utilities', 'Repairs & Maintenance', 'Food & Meals', 'Transportation', 'Marketing', 'Equipment', 'Staff Welfare', 'Other'], PAY_METHODS = ['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Card', 'Other'];
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const expView = x => ({ ...x, receipts: jp(x.receipts), history: jp(x.history), branchName: get('branches', x.branchId)?.name || '', noReceipt: !jp(x.receipts).length });
+  if (p === '/api/expense-claims/options' && method === 'GET') return send(res, 200, { categories: EXP_CATS, methods: PAY_METHODS });
+  if (p === '/api/expense-claims' && method === 'GET') {
+    const t0 = todayStr(), rg = q.range === 'month' ? [t0.slice(0, 8) + '01', t0] : q.range === 'all' ? ['2000-01-01', '2099-12-31'] : q.range === 'today' ? [t0, t0] : [DATE_RE.test(q.from || '') ? q.from : '2000-01-01', DATE_RE.test(q.to || '') ? q.to : '2099-12-31'];
+    const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = ['PENDING', 'APPROVED', 'REJECTED'].includes(q.status) ? q.status : null, cat = EXP_CATS.includes(q.category) ? q.category : null, term = String(q.q || '').toLowerCase();
+    let rows = all(`select * from expense_claims where date>=? and date<=?${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''}${cat ? ' and category=?' : ''} order by date desc, createdAt desc limit 1000`, rg[0], rg[1], ...(br ? [br] : []), ...(st ? [st] : []), ...(cat ? [cat] : [])).map(expView);
+    if (term) rows = rows.filter(x => (x.description + ' ' + x.category + ' ' + x.submittedBy).toLowerCase().includes(term));
+    const live = rows.filter(x => x.status !== 'REJECTED'), byCategory = {}; for (const x of live) byCategory[x.category] = r2((byCategory[x.category] || 0) + x.amount);
+    const out = { rows, total: r2(sum(live, x => x.amount)), count: rows.length, noReceipt: rows.filter(x => x.noReceipt).length, byCategory, today: r2(sum(all("select amount from expense_claims where date=? and status<>'REJECTED'" + (br ? ' and branchId=?' : ''), t0, ...(br ? [br] : [])), x => x.amount)) };
+    if (q.format === 'csv') {
+      adminOnly(); const qt = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="expenses.csv"' });
+      return res.end('﻿' + ['Date,Branch,Category,Description,Amount,Payment method,Receipts,No-receipt reason,Status,Submitted by', ...rows.map(x => [x.date, x.branchName, x.category, x.description, x.amount, x.method, x.receipts.length ? x.receipts.length + ' photo(s)' : 'NO RECEIPT', x.noReceiptReason, x.status, x.submittedBy].map(qt).join(','))].join('\n'));
+    }
+    return send(res, 200, out);
+  }
+  if (p === '/api/expense-claims' && method === 'POST') {
+    const b = await readBody(req), branchId = branchScope(me, b.branchId), date = String(b.date || todayStr());
+    if (!DATE_RE.test(date) || date > todayStr() || date < dOf(new Date(Date.now() - 31 * 864e5))) bad(400, 'The expense date must be today or within the last 31 days');
+    const amount = r2(b.amount); if (!(amount > 0)) bad(400, 'Amount must be more than 0');
+    const category = EXP_CATS.includes(b.category) ? b.category : bad(400, 'Choose a category'), method2 = PAY_METHODS.includes(b.method) ? b.method : bad(400, 'Choose the payment method');
+    const description = String(b.description || '').trim().slice(0, 300); if (description.length < 3) bad(400, 'Enter a description');
+    const receipts = (Array.isArray(b.receipts) ? b.receipts : []).slice(0, 8).map(String); for (const fid of receipts) { const fl = get('files', fid); if (!fl || fl.branchId !== branchId) bad(400, 'A receipt photo was not found. Please attach it again.'); }
+    const reason = String(b.noReceiptReason || '').trim().slice(0, 300); if (!receipts.length && reason.length < 5) bad(400, 'No receipt? Enter the reason (at least a few words).');
+    const id = uid(); let cm = '';
+    const sh = method2 === 'Cash' && date === todayStr() ? openShift(branchId) : null;
+    if (sh) { cm = uid(); run('insert into cash_moves(id,shiftId,branchId,date,kind,amount,note,staffId,ts,by) values(?,?,?,?,?,?,?,?,?,?)', cm, sh.id, branchId, date, 'expense', amount, (category + ': ' + description).slice(0, 200), '', nowISO(), me.name); }
+    run('insert into expense_claims(id,branchId,date,category,description,amount,method,receipts,noReceiptReason,status,submittedById,submittedBy,staffId,createdAt,cashMoveId,history) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      id, branchId, date, category, description, amount, method2, JSON.stringify(receipts), receipts.length ? '' : reason, 'PENDING', me.id, me.name, '', nowISO(), cm, JSON.stringify([{ at: nowISO(), by: me.name, action: 'SUBMITTED', note: receipts.length ? '' : 'NO RECEIPT: ' + reason }]));
+    log(me, 'expense', 'expense_claims', id, `${category} ${amount} ${method2}${receipts.length ? '' : ' NO RECEIPT'}`); return send(res, 201, expView(get('expense_claims', id)));
+  }
+  const exm = p.match(/^\/api\/expense-claims\/(\w+)\/review$/);
+  if (exm && method === 'PUT') {
+    adminOnly(); const x = get('expense_claims', exm[1]); if (!x) bad(404, 'Not found');
+    const b = await readBody(req), act = { approve: 'APPROVED', reject: 'REJECTED' }[b.action], note = String(b.note || '').trim().slice(0, 300);
+    if (!act) bad(400, 'Choose approve or reject'); if (act === 'REJECTED' && !note) bad(400, 'A note is required to reject an expense');
+    const hist = jp(x.history); hist.push({ at: nowISO(), by: me.name, action: act, note });
+    run('update expense_claims set status=?, reviewedBy=?, reviewedAt=?, reviewNote=?, history=? where id=?', act, me.name, nowISO(), note, JSON.stringify(hist), x.id);
+    log(me, 'expense-' + b.action, 'expense_claims', x.id, note); return send(res, 200, expView(get('expense_claims', x.id)));
   }
   // ----- daily sales remittance (separate from expenses) -----
   const remitCalc = (branchId, date) => {

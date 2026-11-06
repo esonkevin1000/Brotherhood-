@@ -30,6 +30,7 @@ async function loadView() {
     if (v === 'dashboard') { [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}&branch=${ui.branch}`)); }
+    else if (v === 'exp') ui.exp = await api('GET', `/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}`);
     else if (v === 'remit') ui.remit = await api('GET', `/api/remittances?${qs()}&status=${ui.rstatus || ''}`);
     else if (v === 'activity') ui.audit = await api('GET', '/api/audit');
     else if (v === 'settings') ui.settings = await api('GET', '/api/settings');
@@ -77,7 +78,7 @@ const ICONS = {
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
@@ -103,13 +104,14 @@ function render() {
     <button class="${on('bookings')}" data-view="bookings">${ic('calendar')}Bookings</button>
     <button class="${on('reviews')}" data-view="reviews">${ic('star')}Reviews</button>
     <button class="${on('remit')}" data-view="remit">${ic('coin')}Daily Remittance</button>
+    <button class="${on('exp')}" data-view="exp">${ic('wallet')}Expenses &amp; Receipts</button>
     <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
     <button class="${on('settings')}" data-view="settings">${ic('gear')}Settings</button>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).trim();
-  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -143,6 +145,19 @@ function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
   return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
+}
+function vExp() {
+  const r = ui.exp, st = ui.estatus || '', ct = ui.ecat || '', cats = ['Supplies', 'Utilities', 'Repairs & Maintenance', 'Food & Meals', 'Transportation', 'Marketing', 'Equipment', 'Staff Welfare', 'Other'];
+  const tag = s => ({ PENDING: ['#b26a00', 'rgba(245,166,35,.16)'], APPROVED: ['var(--ok)', 'rgba(62,207,142,.13)'], REJECTED: ['var(--bad)', 'rgba(255,93,108,.13)'] }[s]);
+  const sel = `<select id="estatus" style="width:auto"><option value="">All statuses</option>${['PENDING', 'APPROVED', 'REJECTED'].map(s => `<option ${st === s ? 'selected' : ''}>${s}</option>`).join('')}</select> <select id="ecat" style="width:auto"><option value="">All categories</option>${cats.map(c => `<option ${ct === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select> <button class="btn ghost sm" data-act="expcsv">⬇ Export CSV</button>`;
+  return `<h2>Expenses &amp; Receipts <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(sel)}
+  ${r ? `<div class="grid"><div class="card stat"><span>Total (not rejected)</span><b>${peso(r.total)}</b></div><div class="card stat"><span>Entries</span><b>${r.count}</b></div><div class="card stat"><span>Without receipt</span><b style="color:${r.noReceipt ? 'var(--bad)' : 'var(--ok)'}">${r.noReceipt}</b></div></div>
+  <div class="card" style="margin-bottom:14px"><h3>By category</h3>${Object.entries(r.byCategory).map(([k, v]) => `<span class="tag" style="margin:0 8px 6px 0">${esc(k)}: ${peso(v)}</span>`).join('') || '<span class="mute">No data in this period.</span>'}</div>
+  <div class="card overflow"><table><tr><th>Date</th><th>Branch</th><th>Category</th><th>Description</th><th>Amount</th><th>Payment</th><th>Receipt</th><th>Submitted by</th><th>Status</th><th></th></tr>
+  ${r.rows.map(x => { const [c, bg] = tag(x.status); return `<tr><td>${esc(x.date)}</td><td>${esc(x.branchName)}</td><td>${esc(x.category)}</td><td style="white-space:normal;min-width:160px">${esc(x.description)}</td><td><b>${peso(x.amount)}</b></td><td>${esc(x.method)}</td>
+    <td>${x.noReceipt ? `<span class="tag" style="color:var(--bad);background:rgba(255,93,108,.13)">NO RECEIPT</span><br><span class="mute" style="font-size:11px;white-space:normal">${esc(x.noReceiptReason)}</span>` : `<a href="#" data-act="viewfiles" data-ids="${x.receipts.join(',')}">${x.receipts.length} photo${x.receipts.length > 1 ? 's' : ''}</a>`}</td>
+    <td>${esc(x.submittedBy)}</td><td><span class="tag" style="color:${c};background:${bg}">${x.status}</span>${x.reviewNote ? `<br><span class="mute" style="font-size:11px">${esc(x.reviewNote)}</span>` : ''}</td>
+    <td style="white-space:normal;min-width:170px"><button class="btn ghost sm" data-act="exphist" data-id="${x.id}">History</button> ${x.status === 'PENDING' ? `<button class="btn sm" data-act="expreview" data-a="approve" data-id="${x.id}">Approve</button> <button class="btn bad sm" data-act="expreview" data-a="reject" data-id="${x.id}">Reject</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="10" class="mute">No expenses in this period.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
 }
 function vRemit() {
   const r = ui.remit, st = ui.rstatus || '';
@@ -331,6 +346,13 @@ function parseCSV(text) {
 }
 
 // ---------- events ----------
+async function showFiles(ids, heading) {
+  try {
+    const imgs = []; for (const id of ids) { const r = await fetch('/api/files/' + id, { headers: { Authorization: 'Bearer ' + token } }); if (r.ok) imgs.push(URL.createObjectURL(await r.blob())); }
+    if (!imgs.length) throw new Error('Could not load the photos');
+    openModal('<h2 style="margin-top:0">' + heading + '</h2>' + imgs.map(u => '<img src="' + u + '" alt="" style="width:100%;border-radius:14px;border:1px solid var(--line);margin-bottom:10px">').join('') + '<button class="btn ghost" data-act="close">Close</button>');
+  } catch (x) { alert(x.message); }
+}
 async function showIdPhoto(id, base = '/api/idphoto/', heading = 'Customer ID photo') {
   try {
     const r = await fetch(base + id, { headers: { Authorization: 'Bearer ' + token } }); if (!r.ok) throw new Error('Could not load the ID photo');
@@ -344,6 +366,14 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
+  if (act === 'viewfiles') { e.preventDefault(); return showFiles(String(d.ids).split(',').filter(Boolean), 'Receipt photos'); }
+  if (act === 'expcsv') return download(`/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}&format=csv`, 'expenses.csv');
+  if (act === 'exphist') { const x = ui.exp.rows.find(r => r.id === d.id); return openModal('<h2 style="margin-top:0">Expense history</h2>' + x.history.map(h => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(h.action)}</b> · ${esc(h.by)}<br><span class="mute" style="font-size:12px">${new Date(h.at).toLocaleString('en-PH')}</span>${h.note ? '<br>' + esc(h.note) : ''}</div>`).join('') + '<br><button class="btn ghost" data-act="close">Close</button>'); }
+  if (act === 'expreview') {
+    const action = d.a, note = action === 'approve' ? '' : prompt('Why is this expense rejected? The submitter will see this note.'); if (note === null) return;
+    if (action !== 'approve' && !String(note).trim()) return alert('A note is required.');
+    try { await api('PUT', '/api/expense-claims/' + d.id + '/review', { action, note }); await loadView(); render(); } catch (x) { alert(x.message); } return;
+  }
   if (act === 'viewfile') { e.preventDefault(); return showIdPhoto(d.id, '/api/files/', 'Remittance proof'); }
   if (act === 'rmhist') { const x = ui.remit.rows.find(r => r.id === d.id); return openModal('<h2 style="margin-top:0">Submission history</h2>' + x.history.map(h => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(h.action)}</b> · ${esc(h.by)}<br><span class="mute" style="font-size:12px">${new Date(h.at).toLocaleString('en-PH')}</span>${h.note ? '<br>' + esc(h.note) : ''}</div>`).join('') + '<br><button class="btn ghost" data-act="close">Close</button>'); }
   if (act === 'rmreview') {
@@ -409,6 +439,8 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.id === 'estatus') { ui.estatus = t.value; await loadView(); return render(); }
+  if (t.id === 'ecat') { ui.ecat = t.value; await loadView(); return render(); }
   if (t.id === 'rstatus') { ui.rstatus = t.value; await loadView(); return render(); }
   if (t.id === 'branchsel') { ui.branch = t.value; render(); await loadView(); return render(); }
   if (t.id === 'tierf') { ui.cust.tier = t.value; ui.cust.page = 1; await loadView(); return render(); }
