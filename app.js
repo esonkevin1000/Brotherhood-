@@ -418,7 +418,7 @@ function vSettings() {
 
   <div class="card overflow" style="margin-top:14px"><h3>Access: what each role can open in the POS</h3>
     <table><tr><th>Section</th><th>Cashier</th><th>Barber</th></tr>
-    ${s.modules.map(m => `<tr><td>${esc(MOD_LABEL[m] || m)}</td>${['cashier', 'barber'].map(r => `<td><input type="checkbox" data-perm="${r}:${m}" ${s.perms[r].includes(m) ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000"></td>`).join('')}</tr>`).join('')}</table>
+    ${s.modules.map(m => `<tr><td>${esc(MOD_LABEL[m] || m)}</td>${['cashier', 'barber'].map(r => r === 'barber' && m === 'queue' ? '<td class="mute">—</td>' : `<td><input type="checkbox" data-perm="${r}:${m}" ${s.perms[r].includes(m) ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000"></td>`).join('')}</tr>`).join('')}</table>
     <p class="mute" style="font-size:12px;margin:10px 0">Owner and admin always have full access. Create barber and cashier logins under Management → Users. Changes apply right away.</p>
     <button class="btn" data-act="saveaccess">Save access</button></div>
 

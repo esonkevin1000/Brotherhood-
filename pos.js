@@ -134,12 +134,14 @@ async function loadChk() {
   const r = await api('GET', withBr('/api/checklists/today')), keep = P.ck;
   P.ck = { template: r.template, runs: r.runs, kind: keep ? keep.kind : 'opening', items: keep && keep.items ? keep.items : [] };
 }
-async function refresh() {
+// refresh(quiet): the 10-second background poll passes quiet=true and does nothing visible when the data has not changed (no re-render, no cache write)
+async function refresh(quiet) {
   if (!P.me) return;
   if (!canOpen(P.view)) P.view = firstView() || P.view;
   try {
     P.boot = await api('GET', withBr('/api/pos/bootstrap')); P.shift = P.boot.shift;
-    if (canOpen('appts')) { P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings(); } else P.bk = [];
+    // barbers only need bookings on the screens that show them; cashiers keep the live new-booking alert
+    if (canOpen('appts') && (P.me.role !== 'barber' || ['appts', 'dashboard'].includes(P.view))) { P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings(); } else if (!canOpen('appts')) P.bk = [];
     if (P.view === 'dashboard') P.dash = await api('GET', withBr('/api/pos/dashboard'));
     if (P.view === 'pos') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
     if (P.view === 'customers') await loadCustomers();
@@ -154,7 +156,9 @@ async function refresh() {
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
     if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expense-claims?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
     if (P.view === 'reading') { const s = await api('GET', withBr('/api/pos/shift')); P.cur = s; P.zs = await api('GET', withBr('/api/pos/zreadings')); }
-    P.offline = false; cacheSave();
+    P.offline = false;
+    if (quiet) { const sig = JSON.stringify([P.view, P.boot, P.bk, P.dash, P.queue, P.att, P.exp, P.adv, P.advBal, P.pr, P.lv, P.cust, P.rm, P.chk, P.mp, P.cur, P.zs, P.inUnread, P.offline]); if (sig === P._sig) return; P._sig = sig; }
+    cacheSave();
   } catch (e) { if (isNet(e)) P.offline = true; else if (P.me) toast(e.message, true); }
   if (!sheet.open) render();
 }
@@ -203,10 +207,10 @@ const VIEWS = {
   dashboard() {
     const d = P.dash; if (!d) return '<p class="mute">Loading…</p>';
     return `<div class="card hero"><small>Today's gross sales</small><div class="num">${peso(d.gross)}</div><span class="mute">${d.completed} completed order${d.completed === 1 ? '' : 's'} · net ${peso(d.net)}</span></div>
-    <div class="kpis"><div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in queue</small><div class="num">${d.waiting}</div><small>${d.cutting} in chair</small></div>
+    <div class="kpis">${canOpen('queue') ? `<div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in queue</small><div class="num">${d.waiting}</div><small>${d.cutting} in chair</small></div>` : ''}
       <div class="card kpi g"><div class="ic">${ic('scissors')}</div><small>Barbers on duty</small><div class="num">${d.onDuty}<span class="mute" style="font-size:18px"> / ${d.totalBarbers}</span></div><small>available for walk-ins</small></div></div>
     ${bookingsCard()}
-    <div class="sect"><h3>Live walk-in floor</h3><span class="mute">${d.queue.length} active</span></div>${d.queue.map(o => ticketHtml(o)).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No customers on the floor right now.</p></div>'}`;
+    ${canOpen('queue') ? `<div class="sect"><h3>Live walk-in floor</h3><span class="mute">${d.queue.length} active</span></div>${d.queue.map(o => ticketHtml(o)).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No customers on the floor right now.</p></div>'}` : ''}`;
   },  pos() {
     const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat), later = P.cart.mode !== 'now';
     const top = `<div class="posh">Fast checkout, discount vouchers, and cash change calculator.</div>
@@ -965,7 +969,7 @@ window.matchMedia('(min-width: 900px)').addEventListener('change', () => { close
   render();
   window.addEventListener('online', () => syncQueue());
   setInterval(() => { if (P.q && P.q.length) syncQueue(); }, 30000); syncQueue();
-  setInterval(() => { if (P.me && !sheet.open && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) refresh(); }, 10000);
+  setInterval(() => { if (P.me && !document.hidden && !sheet.open && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) refresh(true); }, 10000);
 })();
 
 

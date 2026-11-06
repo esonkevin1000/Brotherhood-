@@ -217,8 +217,9 @@ const isAdmin = me => me.role === 'owner' || me.role === 'admin';
 const isBranchUser = me => me.role === 'cashier' || me.role === 'barber';
 // Which parts of the POS each role may open (editable by the owner in Settings → Access)
 const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release', 'problems', 'inbox', 'checklist', 'leave', 'myperf'];
-const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue', 'problems', 'inbox', 'myperf'] };
-const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber }; } catch { return { ...DEFAULT_PERMS }; } };
+// barbers never get the walk-in queue (stripped in permsAll below)
+const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'problems', 'inbox', 'myperf'] };
+const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: (Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber).filter(m => m !== 'queue') }; } catch { return { ...DEFAULT_PERMS }; } };
 const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
 const needAny = (me, mods) => { if (isAdmin(me)) return; const have = modulesFor(me.role); if (![].concat(mods).some(m => have.includes(m))) bad(403, 'Your role is not allowed to open this section'); };
 const hashPw = pw => { const salt = crypto.randomBytes(16).toString('hex'); return salt + ':' + crypto.scryptSync(pw, salt, 32).toString('hex'); };
