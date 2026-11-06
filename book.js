@@ -13,6 +13,7 @@ const ICON = {
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
 const stars = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 
+let G = {};
 let I = null, R = { reviews: [], count: 0, avg: 0, shown: 6 };
 const S = { branch: '', items: [], staff: 'any', date: '', time: '', slots: null, name: '', phone: '', email: '', cut: '', consent: false, terms: null, showTerms: false, err: '', busy: false, done: null,
   rv: { branchId: '', staffId: '', rating: 0, name: '', text: '', busy: false, err: '', thanks: false } };
@@ -34,6 +35,19 @@ async function loadSlots() {
   try { S.slots = (await (await fetch(`/api/public/slots?branch=${S.branch}&date=${S.date}&staff=${S.staff}&items=${S.items.join(',')}`)).json()).slots; } catch (e) { S.slots = []; }
   render();
 }
+async function loadGoogle(id) {
+  const b = id && I ? branch(id) : null; if (!b || !b.google || !b.google.connected || G[id]) return;
+  G[id] = { loading: true }; try { G[id] = await (await fetch('/api/public/google?branch=' + id)).json(); } catch (e) { G[id] = { available: false }; }
+  render();
+}
+function googleHtml() {
+  const b = S.branch ? branch(S.branch) : null; if (!b || !b.google || !(b.google.readUrl || b.google.writeUrl)) return '';
+  const g = G[b.id] || {}, gi = b.google, rows = g.reviews || [];
+  const head = g.available && g.rating ? `<div class="rhead"><span class="rbig">${Number(g.rating).toFixed(1)}</span><div><div class="stars">${stars(g.rating)}</div><span class="mute">${g.count} Google review${g.count === 1 ? '' : 's'} · ${esc(b.name)}</span></div></div>` : '';
+  return `<div class="gblock"><h3><span class="gmark">G</span> Google reviews · ${esc(b.name)}</h3>${head}
+    ${rows.length ? `<div class="rgrid">${rows.map(r => `<div class="rcard"><div class="who"><b>${esc(r.author)}</b><span class="stars" style="font-size:14px">${stars(r.rating)}</span></div><small class="mute">${esc(r.when)}</small>${r.text ? `<p>${esc(r.text)}</p>` : ''}</div>`).join('')}</div>` : (g.loading ? '<p class="mute">Loading Google reviews…</p>' : '')}
+    <div class="glinks">${gi.readUrl ? `<a class="btn2" href="${esc(gi.readUrl)}" target="_blank" rel="noopener">Read all reviews on Google</a>` : ''}${gi.writeUrl ? `<a class="btn2 alt" href="${esc(gi.writeUrl)}" target="_blank" rel="noopener">Write a Google review</a>` : ''}</div></div>`;
+}
 async function loadReviews() {
   try { R = { ...R, ...(await (await fetch('/api/public/reviews' + (S.branch ? '?branch=' + S.branch : ''))).json()) }; } catch (e) { }
   render();
@@ -43,7 +57,7 @@ function branchCards() {
   return `<div class="branches">${I.branches.map(b => {
     const rt = I.ratings?.[b.id];
     return `<div class="bcard ${S.branch === b.id ? 'on' : ''}" data-branch="${b.id}" role="button" tabindex="0"><div class="bimg" style="${b.photo ? `background-image:url('${esc(b.photo)}')` : ''}">${b.photo ? '' : ic('scissors')}<span class="pin">Selected</span></div>
-      <div class="bbody"><b>${esc(b.name)}</b>${rt ? `<span class="rate">★ ${rt.avg} <span class="mute" style="font-weight:500">(${rt.count} review${rt.count === 1 ? '' : 's'})</span></span>` : ''}
+      <div class="bbody"><b>${esc(b.name)}</b>${b.google && b.google.rating ? `<span class="rate">G ★ ${Number(b.google.rating).toFixed(1)} <span class="mute" style="font-weight:500">(${b.google.count} on Google)</span></span>` : ''}${rt ? `<span class="rate">★ ${rt.avg} <span class="mute" style="font-weight:500">(${rt.count} review${rt.count === 1 ? '' : 's'})</span></span>` : ''}
       <small>${ic('pin')} ${esc(b.address || 'Brotherhood Barber')}</small><small>Open ${hours(b)}${b.phone ? ' · ' + esc(b.phone) : ''}</small>
       <div class="bact"><span class="sel">${S.branch === b.id ? '✓ Selected' : 'Select'}</span>${b.mapUrl ? `<a href="${esc(b.mapUrl)}" target="_blank" rel="noopener">Get directions</a>` : ''}</div></div></div>`;
   }).join('')}</div>`;
@@ -63,7 +77,7 @@ function reviewsHtml() {
   const rv = S.rv, rt = R;
   const bsel = `<select id="rv-branch"><option value="">Choose the branch you visited</option>${I.branches.map(b => `<option value="${b.id}" ${rv.branchId === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`;
   const staff = I.staff.filter(s => !rv.branchId || s.branchId === rv.branchId);
-  return `<section class="reviews"><h2>What our customers say</h2>
+  return `${googleHtml()}<section class="reviews"><h2>What our customers say</h2>
     <div class="rhead"><span class="rbig">${rt.count ? rt.avg.toFixed(1) : '—'}</span><div><div class="stars">${rt.count ? stars(rt.avg) : '☆☆☆☆☆'}</div><span class="mute">${rt.count} review${rt.count === 1 ? '' : 's'}${S.branch ? ' · ' + esc(branch(S.branch).name) : ' · all branches'}</span></div></div>
     <div class="rgrid">${rt.reviews.slice(0, rt.shown ?? 6).map(r => `<div class="rcard"><div class="who"><b>${esc(r.name)}</b><span class="stars" style="font-size:14px">${stars(r.rating)}</span></div><small class="mute">${esc(r.branchName)}${r.staffName ? ' · Barber: ' + esc(r.staffName) : ''} · ${new Date(r.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</small>${r.text ? `<p>${esc(r.text)}</p>` : ''}</div>`).join('') || '<p class="mute">No reviews yet. Be the first!</p>'}</div>
     ${rt.reviews.length > (rt.shown ?? 6) ? '<p style="text-align:center"><button class="btn2" data-act="morerev">Show more reviews</button></p>' : ''}
@@ -115,7 +129,7 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-branch],[data-svc],[data-staff],[data-date],[data-time],[data-go],[data-star],[data-act]'); if (!el) return;
   const d = el.dataset;
   if (el.tagName === 'A') e.preventDefault();
-  if (d.branch) { S.branch = d.branch; S.staff = 'any'; S.err = ''; S.rv.branchId ||= d.branch; loadReviews(); return loadSlots(); }
+  if (d.branch) { S.branch = d.branch; S.staff = 'any'; S.err = ''; S.rv.branchId ||= d.branch; loadReviews(); loadGoogle(d.branch); return loadSlots(); }
   if (d.svc) { S.items = S.items.includes(d.svc) ? S.items.filter(x => x !== d.svc) : [...S.items, d.svc]; S.err = ''; return loadSlots(); }
   if (d.staff) { S.staff = d.staff; return loadSlots(); }
   if (d.date) { S.date = d.date; return loadSlots(); }

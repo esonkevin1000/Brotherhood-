@@ -35,6 +35,7 @@ const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: 
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 // which sections this login may open (the owner sets this in Settings → Access)
 const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading' };
+const freshCart = () => ({ items: [], editing: null, mode: (typeof P !== 'undefined' && P.cart && P.cart.mode) || 'later' });
 const isAdminRole = () => P.me && ['owner', 'admin'].includes(P.me.role);
 const canOpen = v => (P.mods || []).includes(VMAP[v]);
 const firstView = () => Object.keys(VMAP).find(canOpen) || '';
@@ -114,7 +115,7 @@ const VIEWS = {
   },  pos() {
     const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat);
     return `${s ? '' : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Open a shift first so you can take payments.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}
-    ${P.cart.editing ? `<div class="card">Editing ticket · <button class="sm ghost" data-a="canceledit">cancel</button></div>` : ''}
+    ${P.cart.editing ? `<div class="card">Editing ticket · <button class="sm ghost" data-a="canceledit">cancel</button></div>` : `<div class="seg"><button class="${P.cart.mode === 'now' ? 'on' : ''}" data-a="mode" data-m="now">Pay As You Order</button><button class="${P.cart.mode !== 'now' ? 'on' : ''}" data-a="mode" data-m="later">Pay Later</button></div>`}
     <div class="chips"><button class="chip ${P.cat === 'all' ? 'on' : ''}" data-a="cat" data-c="all">All</button>${cats.map(c => `<button class="chip ${P.cat === c.id ? 'on' : ''}" data-a="cat" data-c="${c.id}">${esc(c.name)}</button>`).join('')}</div>
     <div class="grid">${items.map(i => `<button class="item ${i.type} ${i.photo ? 'hasphoto' : ''}" data-a="add" data-id="${i.id}">${i.photo ? `<img class="pic" src="${esc(i.photo)}" alt="" loading="lazy">` : `<span class="mono">${ic(i.type === 'service' ? 'scissors' : 'bottle')}</span>`}<span class="body"><span class="nm">${esc(i.name)}</span><small>${i.type === 'service' ? i.mins + ' min' : 'Product'}${i.apptOnly ? ' · Appt only' : ''}</small><b>${peso(i.price)}</b></span><span class="plus">${ic('plus', 'sm')}</span></button>`).join('')}</div>`;
   },
@@ -180,9 +181,9 @@ const VIEWS = {
 function ticketHtml(o, actions) {
   const names = o.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ');
   const live = o.status === 'waiting' || o.status === 'in_chair';
-  return `<div class="ticket ${o.status}"><div class="no">#${String(o.no).padStart(3, '0')}</div><div class="bd"><div class="row between" style="flex-wrap:nowrap"><b>${esc(o.customerName)}</b><span class="tag ${o.status}">${o.status === 'in_chair' ? 'In Chair' : o.status === 'paid' ? 'Paid' : o.status === 'void' ? 'Void' : 'Waiting'}</span></div>
-    <small>${names || 'No items yet'}</small><br><small>${o.barberName ? ic('scissors', 'sm') + ' ' + esc(o.barberName) : 'No barber yet'}${live ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>${o.cust ? `<br><small><span class="${tierCls(o.cust.tier)}">${o.cust.tier}</span> ${o.cust.visits} visit${o.cust.visits === 1 ? '' : 's'}${o.cust.preferredCut ? ' · ✂ ' + esc(o.cust.preferredCut) : ''}</small>` : ''}
-    ${actions && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">Seat</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div></div>`;
+  return `<div class="ticket ${o.status}"><div class="no">#${String(o.no).padStart(3, '0')}</div><div class="bd"><div class="row between" style="flex-wrap:nowrap"><b>${esc(o.customerName)}</b><span class="tag ${o.status}">${o.status === 'in_chair' ? 'In Chair' : o.status === 'paid' ? 'Paid' : o.status === 'void' ? 'Void' : o.barberId ? 'Queued' : 'Waiting'}</span></div>
+    <small>${names || 'No items yet'}</small><br><small>${o.barberName ? ic('scissors', 'sm') + ' ' + esc(o.barberName) + (o.chairId ? ' · ' + esc(chairName(o.chairId)) : '') : 'No barber yet'}${live ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>${o.cust ? `<br><small><span class="${tierCls(o.cust.tier)}">${o.cust.tier}</span> ${o.cust.visits} visit${o.cust.visits === 1 ? '' : 's'}${o.cust.preferredCut ? ' · ✂ ' + esc(o.cust.preferredCut) : ''}</small>` : ''}
+    ${actions && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div></div>`;
 }
 function bookingsCard() {
   const t = ymd(0), list = (P.bk || []).filter(b => b.date === t && b.status === 'booked').sort((a, b) => a.time.localeCompare(b.time)), next = list[0];
@@ -218,14 +219,22 @@ function addItem(id) {
 }
 function freeBarbers() { const cut = cuttingIds(); return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && !cut.has(s.id)); }
 const chairName = id => P.boot?.chairs.find(c => c.id === id)?.name || '';
-function assignSheet(id) {
-  const as = P.as && P.as.id === id ? P.as : (P.as = { id, barberId: '', chairId: '' });
-  const free = freeBarbers(), used = new Set((P.boot.queue || []).filter(o => o.status === 'in_chair').map(o => o.chairId)), chairs = P.boot.chairs.filter(ch => !used.has(ch.id));
-  openSheet(`<div class="row between"><h2 style="margin:0">Assign Chair &amp; Barber</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
-    <label>Barber</label>${free.map(s => `<button class="opt ${as.barberId === s.id ? 'on' : ''}" data-a="asbarber" data-id="${s.id}">${av(s.name, s.photo)}<span><b>${esc(s.name)}</b><small>${esc(chairName(s.chairId) || 'No chair')}</small></span><span class="ck">${as.barberId === s.id ? ic('plus', 'sm') : ''}</span></button>`).join('') || '<p class="mute">No barber is available right now. Time in the barbers under Barber Attendance, or wait for someone to finish.</p>'}
-    <label>Chair</label><div class="chips" style="flex-wrap:wrap">${chairs.map(ch => `<button class="chip ${as.chairId === ch.id ? 'on' : ''}" data-a="aschair" data-id="${ch.id}">${esc(ch.name)}</button>`).join('') || '<span class="mute">No free chairs</span>'}</div>
-    <p id="err" style="color:var(--bad)"></p>
-    <div class="row" style="flex-wrap:nowrap"><button class="ghost block" data-a="closesheet">Wait in queue</button><button class="block" data-a="asgo" ${as.barberId && as.chairId ? '' : 'disabled'}>Assign &amp; Start</button></div>`);
+// "Assign to Chair": each chair is a card with its barber. Free chair = seated now; busy chair = joins that barber's line.
+function chairState(ch, orderId) {
+  const barber = P.boot.staff.find(s => s.chairId === ch.id);
+  const q = (P.boot.queue || []).filter(o => o.chairId === ch.id && o.id !== orderId && ['in_chair', 'waiting'].includes(o.status)).length;
+  if (!barber) return { barber: null, cls: 'off', label: 'No barber assigned', ok: false };
+  if (!['present', 'late'].includes(barber.state)) return { barber, cls: 'off', label: barber.state === 'break' ? 'Barber on break' : 'Barber not on duty', ok: false };
+  return q ? { barber, cls: 'busy', label: 'Add to Queue (' + q + ')', ok: true } : { barber, cls: 'free', label: 'Available', ok: true };
+}
+function assignSheet(id, payAfter) {
+  P.as = { id, payAfter: !!payAfter };
+  openSheet(`<h2 style="margin:0 0 12px;text-align:center">Assign to Chair</h2><div class="chairs">${P.boot.chairs.map(ch => {
+    const s = chairState(ch, id);
+    return `<button class="chair ${s.cls}" data-a="aspick" data-id="${ch.id}" ${s.ok ? '' : 'disabled'}><b>${esc(ch.name)}</b><span class="who">${s.barber ? ic('scissors', 'sm') + ' ' + esc(s.barber.name) : '—'}</span><span class="st">${s.label}</span></button>`;
+  }).join('') || '<p class="mute">No chairs are set up for this branch. Add them in the back office under Chairs.</p>'}</div>
+    <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
+    <button class="ghost block" data-a="closesheet" style="margin-top:10px">Cancel</button>`);
 }
 function customerSheet(pending) {
   P.pendingItem = pending || null;
@@ -246,10 +255,10 @@ function cartSheet() {
     <div class="custchip"><span class="av">${esc(initials(u.name || '?'))}</span><div style="flex:1;min-width:0"><b>${esc(u.name || 'No customer yet')}</b><br><small class="mute">${card ? `${esc(card.tier)} · ${card.visits} visits` : (u.phone || u.email ? 'New customer · joins the directory' : 'Walk-in · not in the directory')}</small></div><button class="ghost sm" data-a="changecust">Change</button></div>
     ${c.items.map((i, n) => `<div class="cartrow"><div style="flex:1;min-width:0"><b>${esc(i.name)}</b><br><small class="mute">${peso(i.price)} each</small></div><div class="qty"><button class="ghost sm" data-a="q" data-n="${n}" data-d="-1">−</button><b>${i.qty}</b><button class="ghost sm" data-a="q" data-n="${n}" data-d="1">＋</button></div><b style="min-width:76px;text-align:right">${peso(i.price * i.qty)}</b><button class="ghost sm" data-a="rm" data-n="${n}" aria-label="Remove">✕</button></div>`).join('') || '<p class="mute">Your cart is empty.</p>'}
     <div class="totals"><div class="row between"><span class="mute">Subtotal</span><span>${peso(sub)}</span></div>${disc ? `<div class="row between"><span class="mute">Discount${dn ? ' (' + esc(dn.name) + ')' : ''}</span><span>−${peso(disc)}</span></div>` : ''}<div class="row between" style="margin-top:6px"><b>Total Amount</b><b style="font-size:22px;font-family:Oswald">${peso(sub - disc)}</b></div></div>
-    ${svc && !c.editing ? `<div class="notice"><b>Chair assignment required before payment</b><br><small>Service items (${esc(sv)}) must be charged later on a chair and barber. Settle the payment afterwards from the Walk-in Queue.</small></div>` : ''}
+    ${svc && !c.editing && c.mode !== 'now' ? `<div class="notice"><b>Chair assignment required before payment</b><br><small>Service items (${esc(sv)}) must be charged later on a chair and barber. Settle the payment afterwards from the Walk-in Queue.</small></div>` : ''}
     <div class="row" style="flex-wrap:nowrap"><button class="ghost block" data-a="discount">${ic('tag', 'sm')} Discount${dn ? ': ' + esc(dn.name) : ''}</button><button class="ghost block" data-a="clearcart">Clear</button></div>
     <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
-    <button class="block" data-a="${c.editing ? 'saveticket' : svc ? 'chargelater' : 'paynow'}" ${c.items.length ? '' : 'disabled'}>${c.editing ? 'Save ticket' : svc ? 'Charge Later — Assign Chair &amp; Barber' : 'Pay Now'}</button>`);
+    <button class="block" data-a="${c.editing ? 'saveticket' : svc ? 'chargelater' : 'paynow'}" ${c.items.length ? '' : 'disabled'}>${c.editing ? 'Save ticket' : svc ? (c.mode === 'now' ? 'Assign Chair &amp; Barber, then Pay' : 'Charge Later — Assign Chair &amp; Barber') : 'Pay Now'}</button>`);
 }
 
 // ----- customer details: full name, phone, email, preferred haircut, T&C consent -----
@@ -398,6 +407,7 @@ document.addEventListener('click', async e => {
     } catch (x) { n.err = x.message; if (/no longer/.test(x.message)) return naSlots(); apptSheet(); }
     return;
   }
+  if (a === 'mode') { P.cart.mode = d.m; return render(); }
   if (a === 'cat') { P.cat = d.c; return render(); }
   if (a === 'add') return addItem(d.id);
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
@@ -412,19 +422,19 @@ document.addEventListener('click', async e => {
   if (a === 'discount') return discountSheet();
   if (a === 'pickdisc') { P.cart.discountId = d.id; return cartSheet(); }
   if (a === 'cartback') return cartSheet();
-  if (a === 'clearcart') { if (!confirm('Clear the cart and the customer?')) return; P.cart = { items: [], editing: null }; closeSheet(); return render(); }
+  if (a === 'clearcart') { if (!confirm('Clear the cart and the customer?')) return; P.cart = freshCart(); closeSheet(); return render(); }
   if (a === 'q') { const it = P.cart.items[+d.n]; it.qty += +d.d; if (it.qty <= 0) P.cart.items.splice(+d.n, 1); cartSheet(); return render(); }
   if (a === 'pickcust') { const h = P.custHits.find(x => x.id === d.id); P.custHits = []; if (h) { const u = cu(); u.name = h.name; u.phone = ''; u.email = ''; u.cut = ''; applyCard({ id: h.id, name: h.name, phone: h.phone, email: h.email, preferredCut: h.preferredCut, consent: h.consent, visits: h.visits, spent: h.spent, lastVisit: h.lastVisit, tier: h.tier, next: null }); } return customerSheet(P.pendingItem); }
   if (a === 'terms') { e.preventDefault(); return termsSheet('termsback'); }
   if (a === 'termsback') return customerSheet(P.pendingItem);
-  if (a === 'canceledit') { P.cart = { items: [], editing: null }; return render(); }
-  if (a === 'newticket') { P.cart = { items: [], editing: null }; P.view = 'pos'; await refresh(); return render(); }
+  if (a === 'canceledit') { P.cart = freshCart(); return render(); }
+  if (a === 'newticket') { P.cart = freshCart(); P.view = 'pos'; await refresh(); return render(); }
   if (a === 'openshift') return openSheet(`<h2 style="margin-top:0">Open shift</h2><label>Opening float (₱)</label><input id="float" type="number" inputmode="decimal" value="0"><p id="err" style="color:var(--bad)"></p><div class="row"><button data-a="doopen">Open shift</button><button class="ghost" data-a="closesheet">Cancel</button></div>`);
   if (a === 'doopen') { const r = await guard(() => api('POST', '/api/shifts/open', { branchId: P.branch, terminal: 'Terminal 1', openingFloat: +document.getElementById('float').value || 0 })); if (r) { closeSheet(); toast('Shift opened'); await refresh(); } return; }
   if (a === 'chargelater' || a === 'paynow' || a === 'saveticket') {
     const c = P.cart, err = document.getElementById('err');
     try {
-      const customer = customerPayload(), items = c.items.map(i => ({ itemId: i.itemId, qty: i.qty })), fresh = { items: [], editing: null };
+      const customer = customerPayload(), items = c.items.map(i => ({ itemId: i.itemId, qty: i.qty })), fresh = freshCart();
       if (a === 'saveticket') {
         await api('PUT', '/api/orders/' + c.editing, { items, customer, discountId: c.discountId || '' }); toast('Ticket saved');
         P.cart = fresh; closeSheet(); P.view = 'queue'; await refresh(); return render();
@@ -432,23 +442,23 @@ document.addEventListener('click', async e => {
       const o = await api('POST', '/api/orders', { customer, items, discountId: c.discountId || '' });
       P.cart = fresh; await refresh();
       if (a === 'paynow') return paySheet(o);
-      toast('Ticket #' + o.no + ' created'); closeSheet(); P.view = 'queue'; await refresh(); render(); return assignSheet(o.id);
+      toast('Ticket #' + o.no + ' created'); closeSheet(); P.view = 'queue'; await refresh(); render(); return assignSheet(o.id, c.mode === 'now');
     } catch (x) { if (err) err.textContent = x.message; else toast(x.message, true); }
     return;
   }
   if (a === 'seat') { await refresh(); return assignSheet(d.id); }
-  if (a === 'asbarber') {
-    const s = P.boot.staff.find(x => x.id === d.id), used = new Set((P.boot.queue || []).filter(o => o.status === 'in_chair').map(o => o.chairId));
-    P.as.barberId = d.id; if (s?.chairId && !used.has(s.chairId)) P.as.chairId = s.chairId; return assignSheet(P.as.id);
+  if (a === 'aspick') {
+    const as = P.as, r = await guard(() => api('PUT', '/api/orders/' + as.id, { chairId: d.id })); if (!r) return;
+    const who = P.boot.staff.find(s => s.id === r.barberId)?.name || 'the barber', cn = chairName(r.chairId);
+    closeSheet(); toast(r.queued ? 'Added to queue for ' + cn + ' · ' + who : 'Seated at ' + cn + ' with ' + who);
+    P.view = 'queue'; await refresh(); render();
+    if (as.payAfter) { const o = await guard(() => api('GET', '/api/orders/' + as.id)); if (o) paySheet(o); }
+    return;
   }
-  if (a === 'aschair') { P.as.chairId = d.id; return assignSheet(P.as.id); }
-  if (a === 'asgo') {
-    const as = P.as, r = await guard(() => api('PUT', '/api/orders/' + as.id, { barberId: as.barberId, chairId: as.chairId }));
-    if (r) { closeSheet(); toast('Customer seated'); P.view = 'queue'; await refresh(); render(); } return;
-  }  if (a === 'checkout') { const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (o) paySheet(o); return; }
+    if (a === 'checkout') { const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (o) paySheet(o); return; }
   if (a === 'editticket') {
     const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (!o) return;
-    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id };
+    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id, mode: 'later' };
     P.view = 'pos'; await refresh(); render(); return cartSheet();
   }
   if (a === 'void') { const reason = prompt('Reason for void?'); if (reason === null) return; const r = await guard(() => api('POST', `/api/orders/${d.id}/void`, { reason })); if (r) toast('Ticket voided'); return refresh(); }

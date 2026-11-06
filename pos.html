@@ -126,6 +126,12 @@ label.consent input{width:22px;height:22px;flex:none;margin-top:1px;accent-color
 .opt{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px;margin:0 0 8px;border-radius:14px;background:var(--s2);border:2px solid transparent;color:var(--text);font-weight:500}
 .opt b{display:block;font-size:15px}.opt small{display:block;color:var(--mute);font-weight:500;font-size:12px}.opt.on{border-color:#000;background:#fff}.opt .ck{margin-left:auto;width:24px;height:24px;border-radius:50%;background:#000;color:#fff;display:grid;place-items:center}
 .opt:not(.on) .ck{display:none}
+.chairs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.chair{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:16px;background:#fff;border:1px solid var(--line);color:var(--text);text-align:center}
+.chair b{font-size:16px}.chair .who{display:flex;align-items:center;gap:5px;color:var(--mute);font-size:13px;font-weight:500}
+.chair .st{width:100%;padding:9px 6px;border-radius:12px;font-size:13px;font-weight:700;color:#fff}
+.chair.free .st{background:var(--info)}.chair.busy .st{background:#e89a0c}.chair.off{opacity:.5}.chair.off .st{background:var(--mute)}
+.tag.waiting{white-space:nowrap}
 .custchip{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;background:var(--s2);border:1px solid var(--line);margin:10px 0 6px}
 .cartrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .totals{padding:12px 0 4px;margin-top:4px}

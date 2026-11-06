@@ -226,12 +226,15 @@ function vSettings() {
 
   <div class="card" style="margin-top:14px"><h3>Booking site: branch pictures and contact details</h3>
     <p class="mute" style="font-size:13px;margin:0 0 12px">This is what customers see on your booking page (<b>${esc(location.origin)}/book</b>). Upload a picture of the shop front so people can find it, then add the phone number, address and a Google Maps link. Click <b>Save</b> on each branch.</p>
+    <div class="notice" style="margin:0 0 12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#f7f7f8;font-size:13px"><b>Google reviews:</b> ${s.google && s.google.configured ? '<span style="color:var(--ok)">Live ratings are ON.</span> The booking site shows each branch\'s Google rating and latest reviews.' : 'Live ratings are OFF (no <code>GOOGLE_PLACES_API_KEY</code> set on the server). The booking site still shows <b>Read</b> and <b>Write a review</b> buttons that open Google.'}<br>Paste each branch's <b>Place ID</b> (find it with Google's "Place ID Finder") or its Google review link. Leave blank to hide the Google block for that branch.</div>
     <div class="bgrid">${S.branches.map(b => `<div class="binfo"><div class="row" style="flex-wrap:nowrap;gap:14px;align-items:flex-start">
       <div class="bpv" id="bp-${b.id}">${b.photo ? `<img src="${esc(b.photo)}" alt="">` : '<span>No picture yet</span>'}</div>
       <div style="flex:1;min-width:0"><b style="font:600 18px Oswald;text-transform:uppercase">${esc(b.name)}</b><label>Picture</label><input type="file" accept="image/*" data-bphoto="${b.id}" style="padding:8px"><small class="mute" id="bm-${b.id}">JPG or PNG. It is resized automatically. A wide photo of the shop front works best.</small></div></div>
       <label>Phone number</label><input id="bi-${b.id}-phone" value="${esc(b.phone || '')}" placeholder="09XX XXX XXXX">
       <label>Address</label><input id="bi-${b.id}-address" value="${esc(b.address || '')}" placeholder="Street, town, province">
       <label>Google Maps link (optional)</label><input id="bi-${b.id}-map" value="${esc(b.mapUrl || '')}" placeholder="https://maps.google.com/...">
+      <label>Google Place ID (optional)</label><input id="bi-${b.id}-gpid" value="${esc(b.googlePlaceId || '')}" placeholder="ChIJ...">
+      <label>Google reviews link (optional)</label><input id="bi-${b.id}-gurl" value="${esc(b.googleUrl || '')}" placeholder="https://g.page/r/.../review">
       <div class="row" style="margin-top:12px"><button class="btn sm" data-act="savebinfo" data-id="${b.id}">Save</button>${b.photo ? `<button class="btn ghost sm" data-act="rmbphoto" data-id="${b.id}">Remove picture</button>` : ''}<a class="btn ghost sm" href="/book" target="_blank" style="text-decoration:none">View booking site</a></div></div>`).join('')}</div></div>
 
   <div class="card overflow" style="margin-top:14px"><h3>Access: what each role can open in the POS</h3>
@@ -323,7 +326,7 @@ document.addEventListener('click', async e => {
     return;
   }
   if (act === 'savebinfo' || act === 'rmbphoto') {
-    const v = k => document.getElementById(`bi-${d.id}-${k}`).value.trim(), body = { phone: v('phone'), address: v('address'), mapUrl: v('map') };
+    const v = k => document.getElementById(`bi-${d.id}-${k}`).value.trim(), body = { phone: v('phone'), address: v('address'), mapUrl: v('map'), googlePlaceId: v('gpid'), googleUrl: v('gurl') };
     if (act === 'rmbphoto') { if (!confirm('Remove this branch picture?')) return; body.photo = ''; } else if (ui.bphoto && ui.bphoto[d.id]) body.photo = ui.bphoto[d.id];
     try { await api('PUT', `/api/branches/${d.id}`, body); if (ui.bphoto) delete ui.bphoto[d.id]; await load(false); await loadView(); render(); alert(act === 'rmbphoto' ? 'Picture removed.' : 'Saved. The booking site now shows these details.'); } catch (x) { alert(x.message); }
     return;

@@ -59,7 +59,7 @@ create index if not exists orders_cust on orders(customerId);
 addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'integer'); addCol('customers', 'consentAt', 'text'); addCol('customers', 'welcomedAt', 'text');
 addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
 db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
-addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
+addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
 db.exec(`
 create table if not exists reviews(id text primary key, branchId text, staffId text, name text, rating integer, text text, createdAt text);
 create index if not exists reviews_branch on reviews(branchId, createdAt);
@@ -68,7 +68,7 @@ db.exec("create table if not exists settings(k text primary key, v text)");
 db.exec("create unique index if not exists users_pin on users(pinKey) where pinKey is not null and pinKey<>''");
 
 const COLS = {
-  branches: ['name', 'phone', 'address', 'openTime', 'graceMins', 'closeTime', 'photo', 'mapUrl', 'defaultPct'],
+  branches: ['name', 'phone', 'address', 'openTime', 'graceMins', 'closeTime', 'photo', 'mapUrl', 'defaultPct', 'googlePlaceId', 'googleUrl'],
   chairs: ['branchId', 'name', 'sort', 'active'],
   staff: ['name', 'branchId', 'chairId', 'pct', 'allowance', 'active', 'photo'],
   categories: ['name', 'type'],
@@ -226,6 +226,16 @@ function staffState(staffId, date) {
   if (a.timeOut) return { state: 'out', timeIn: a.timeIn, timeOut: a.timeOut };
   const first = one('select lateMins from attendance where staffId=? and date=? order by timeIn limit 1', staffId, date);
   return { state: a.breakStartedAt ? 'break' : (first.lateMins > 0 ? 'late' : 'present'), timeIn: a.timeIn, lateMins: first.lateMins || 0 };
+}
+// When a chair becomes free, the next customer queued on that chair sits down (if its barber is on duty and not on break).
+function promoteNext(branchId, chairId) {
+  if (!chairId) return;
+  if (one("select 1 x from orders where status='in_chair' and chairId=?", chairId)) return;
+  const nxt = one("select * from orders where status='waiting' and branchId=? and chairId=? and date=? and ifnull(barberId,'')<>'' order by no limit 1", branchId, chairId, todayStr());
+  if (!nxt) return;
+  const d = onDuty(nxt.barberId, todayStr()); if (!d || d.breakStartedAt) return;
+  if (one("select 1 x from orders where status='in_chair' and barberId=?", nxt.barberId)) return;
+  run("update orders set status='in_chair', startedAt=? where id=?", nowISO(), nxt.id);
 }
 function checkAssign(order, b, orderId) {
   const barber = get('staff', b.barberId);
@@ -408,6 +418,27 @@ async function processEmails() {
 setInterval(() => processEmails().catch(() => { }), 60_000).unref();
 for (const c of all('select id,phone,email from customers where phoneKey is null and emailKey is null')) {
   const pk = normPhone(c.phone), ek = normEmail(c.email); if (pk || ek) run('update customers set phoneKey=?, emailKey=? where id=?', pk || null, ek || null, c.id);
+}
+
+// ---------- Google reviews (links always; live rating + latest reviews when a Places API key is set) ----------
+const G_KEY = process.env.GOOGLE_PLACES_API_KEY || '', G_BASE = process.env.GOOGLE_PLACES_URL || 'https://places.googleapis.com/v1/places/';
+const gEnc = s => encodeURIComponent(s);
+function gInfo(b) {
+  const pid = b.googlePlaceId || '', cached = getSetting('g:' + b.id); let c = null; try { c = cached ? JSON.parse(cached).data : null; } catch { }
+  return { readUrl: b.googleUrl || (pid ? `https://search.google.com/local/reviews?placeid=${gEnc(pid)}` : b.mapUrl || ''), writeUrl: b.googleUrl || (pid ? `https://search.google.com/local/writereview?placeid=${gEnc(pid)}` : ''),
+    connected: !!(G_KEY && pid), rating: c?.rating || null, count: c?.count || 0 };
+}
+async function googleData(b) {
+  if (!G_KEY || !b.googlePlaceId) return null;
+  const key = 'g:' + b.id; let cached = null; try { cached = JSON.parse(getSetting(key) || 'null'); } catch { }
+  if (cached && Date.now() - cached.at < 12 * 3600e3) return cached.data;
+  try {
+    const r = await fetch(G_BASE + gEnc(b.googlePlaceId), { headers: { 'X-Goog-Api-Key': G_KEY, 'X-Goog-FieldMask': 'rating,userRatingCount,reviews' } });
+    if (!r.ok) throw new Error('Google returned ' + r.status);
+    const j = await r.json();
+    const data = { rating: j.rating || null, count: j.userRatingCount || 0, reviews: (j.reviews || []).slice(0, 5).map(v => ({ author: v.authorAttribution?.displayName || 'Google user', photo: v.authorAttribution?.photoUri || '', rating: v.rating || 0, when: v.relativePublishTimeDescription || '', text: v.text?.text || v.originalText?.text || '' })) };
+    setSetting(key, JSON.stringify({ at: Date.now(), data })); return data;
+  } catch (e) { return cached?.data || null; }   // keep showing the last good copy if Google is unreachable
 }
 
 // ---------- online / phone bookings ----------
@@ -689,10 +720,15 @@ async function handle(req, res) {
   if (!p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
   if (p === '/api/public/terms' && method === 'GET') return send(res, 200, { terms: getTerms() });
 
+  // ----- public: Google reviews of a branch -----
+  if (p === '/api/public/google' && method === 'GET') {
+    const br = get('branches', String(q.branch || '')); if (!br) bad(400, 'Pick a branch');
+    const g = await googleData(br); return send(res, 200, { ...gInfo(br), ...(g || {}), available: !!g?.reviews });
+  }
   // ----- public booking (customers, no login) -----
   if (p === '/api/public/info' && method === 'GET') {
     return send(res, 200, {
-      shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime,photo,mapUrl from branches order by rowid'),
+      shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime,photo,mapUrl,googlePlaceId,googleUrl from branches order by rowid').map(({ googlePlaceId, googleUrl, ...b }) => ({ ...b, google: gInfo({ ...b, googlePlaceId, googleUrl }) })),
       ratings: Object.fromEntries(all('select branchId, count(*) n, avg(rating) a from reviews group by branchId').map(s => [s.branchId, { count: s.n, avg: Math.round(s.a * 10) / 10 }])),
       services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price"),
       categories: all("select id,name from categories where type='service'"),
@@ -856,7 +892,7 @@ async function handle(req, res) {
   // ----- settings: terms, email (admin) -----
   if (p === '/api/settings' && method === 'GET') {
     adminOnly();
-    return send(res, 200, { perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+    return send(res, 200, { google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
       log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
   }
   if (p === '/api/settings' && method === 'PUT') {
@@ -1028,19 +1064,28 @@ async function handle(req, res) {
     if (method === 'GET' && !act) return send(res, 200, withCust(o));
     if (method === 'PUT' && !act) {
       if (!['waiting', 'in_chair'].includes(o.status)) bad(409, 'Order is already closed');
-      const b = await readBody(req); const upd = {};
+      const b = await readBody(req); const upd = {}; let queued = false;
       if (!admin && Object.keys(b).some(k => !['barberId', 'chairId'].includes(k))) needAny(me, 'pos');
       if ('items' in b) { const items = priceItems(b.items), tt = totals(items, null); upd.items = JSON.stringify(items); upd.subtotal = tt.subtotal; upd.total = tt.total; }
       if ('discountId' in b) upd.discountId = b.discountId && get('discounts', String(b.discountId))?.active ? String(b.discountId) : '';
       if ('customer' in b || 'customerName' in b || 'customerId' in b) {
         const c = resolveCustomer({ ...b, customerName: b.customerName || o.customerName }, 'pos', o.branchId); upd.customerId = c.id; upd.customerName = c.name.slice(0, 200) || o.customerName;
       }
-      if ('barberId' in b) {
+      if (!('barberId' in b) && b.chairId) {
+        // Assign to a chair (the chair's barber takes the customer). A busy chair queues the customer behind the one in the chair.
+        const ch = get('chairs', String(b.chairId)); if (!ch || ch.branchId !== o.branchId || !ch.active) bad(409, 'That chair is not available in this branch');
+        const barber = all('select * from staff where chairId=? and active=1 and branchId=? order by name', ch.id, o.branchId).find(s => { const d = onDuty(s.id, todayStr()); return d && !d.breakStartedAt; });
+        if (!barber) bad(409, `No barber is on duty at ${ch.name}`);
+        const busy = one("select 1 x from orders where status='in_chair' and id<>? and (chairId=? or barberId=?)", o.id, ch.id, barber.id);
+        upd.barberId = barber.id; upd.chairId = ch.id;
+        if (busy) { upd.status = 'waiting'; upd.startedAt = null; queued = true; } else { upd.status = 'in_chair'; upd.startedAt = nowISO(); }
+      } else if ('barberId' in b) {
         if (!b.barberId) { upd.barberId = ''; upd.chairId = ''; upd.status = 'waiting'; upd.startedAt = null; }
         else { const a = checkAssign(o, b, o.id); upd.barberId = a.barber.id; upd.chairId = a.chairId; if (o.status !== 'in_chair') { upd.status = 'in_chair'; upd.startedAt = nowISO(); } }
       }
       const keys = Object.keys(upd); if (keys.length) run(`update orders set ${keys.map(k => k + '=?').join(',')} where id=?`, ...keys.map(k => upd[k]), o.id);
-      return send(res, 200, parseOrder(get('orders', o.id)));
+      if (o.status === 'in_chair' && upd.status === 'waiting') promoteNext(o.branchId, o.chairId);   // the chair this customer left is free again
+      return send(res, 200, { ...parseOrder(get('orders', o.id)), queued });
     }
     if (method === 'POST' && act === 'pay') {
       if (!['waiting', 'in_chair'].includes(o.status)) bad(409, 'Order is already closed');
@@ -1057,6 +1102,7 @@ async function handle(req, res) {
       const si = (one('select max(si) m from orders').m || 0) + 1;
       run("update orders set status='paid', si=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId=?, paidAt=?, date=? where id=?",
         si, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify(tenders), me.id, shift.id, nowISO(), todayStr(), o.id);
+      promoteNext(o.branchId, o.chairId);
       log(me, 'sale', 'orders', o.id, `SI-${si} ₱${tt.total}`);
       return send(res, 200, { ...parseOrder(get('orders', o.id)), change });
     }
@@ -1065,6 +1111,7 @@ async function handle(req, res) {
       if (o.status === 'paid' && !admin) bad(403, 'Only an admin can void a paid sale');
       if (o.status === 'void') bad(409, 'Already void');
       run("update orders set status='void', voidReason=? where id=?", String(b.reason || '').slice(0, 200), o.id);
+      if (o.status === 'in_chair') promoteNext(o.branchId, o.chairId);
       log(me, 'void', 'orders', o.id, `#${o.no} ${b.reason || ''}`); return send(res, 200, { ok: true });
     }
     bad(405, 'Method not allowed');
@@ -1079,6 +1126,7 @@ async function handle(req, res) {
       run("delete from attendance where staffId=? and date=? and status='off'", s.id, t);
       const prior = one('select 1 x from attendance where staffId=? and date=?', s.id, t);
       run('insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins) values(?,?,?,?,?,?,?)', uid(), s.id, s.branchId, t, nowISO(), null, prior ? 0 : late);
+      promoteNext(s.branchId, s.chairId);
     } else if (b.action === 'out') {
       if (!open) bad(409, `${s.name} is not clocked in`);
       if (one("select 1 x from orders where barberId=? and status='in_chair'", s.id)) bad(409, `${s.name} still has a customer in the chair`);
@@ -1091,6 +1139,7 @@ async function handle(req, res) {
     } else if (b.action === 'break_end') {
       if (!open?.breakStartedAt) bad(409, 'Not on break');
       run('update attendance set breakStartedAt=null, breakMins=ifnull(breakMins,0)+? where id=?', Math.round((Date.now() - new Date(open.breakStartedAt)) / 60000), open.id);
+      promoteNext(s.branchId, s.chairId);
     } else if (b.action === 'off') {
       if (one('select 1 x from attendance where staffId=? and date=?', s.id, t)) bad(409, `${s.name} already has attendance today`);
       run("insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins,status) values(?,?,?,?,?,?,?,'off')", uid(), s.id, s.branchId, t, nowISO(), null, 0);
