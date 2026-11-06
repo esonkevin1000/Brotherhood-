@@ -950,7 +950,7 @@ async function handle(req, res) {
   // ----- admin data -----
   if (p === '/api/state' && method === 'GET') {
     if (admin) rememberOrigin(req);
-    if (!admin) return send(res, 200, { shop: SHOP, me, modules: modulesFor(me.role) });
+    if (!admin) { const su = get('users', me.id), sp = su && su.staffId ? get('staff', su.staffId) : null; return send(res, 200, { shop: SHOP, me: sp ? { ...me, photo: sp.photo || '' } : me, modules: modulesFor(me.role) }); }   // a barber's own profile picture
     return send(res, 200, {
       shop: SHOP, me, branches: all('select * from branches order by rowid'), chairs: all('select * from chairs order by branchId, sort'), staff: all('select * from staff order by name'),
       categories: all('select * from categories order by name'), items: all('select * from items order by name'), discounts: all('select * from discounts order by name'),
@@ -1399,7 +1399,7 @@ async function handle(req, res) {
     const mine = dayRows(from, t, s.branchId).filter(d => d.staffId === sid), unpaid = mine.filter(d => !d.paidAt), today = mine.find(d => d.date === t);
     const cuts = one("select count(*) n from orders where status='paid' and date=? and barberId=?", t, sid).n;
     const pay = r2(sum(unpaid, d => d.commission + d.topup)), adv = r2(sum(unpaid, d => d.advance)), bonus = adjTotal(sid, t), ded = planDeductions(sid, t, r2(pay + bonus - adv)).total;
-    return send(res, 200, { name: s.name, allowance: s.allowance || 0, pct: s.pct, today: { present: !!today, cuts, commission: today ? today.commission : 0, topup: today ? today.topup : 0, pay: today ? today.pay : 0 },
+    return send(res, 200, { name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', allowance: s.allowance || 0, pct: s.pct, today: { present: !!today, cuts, commission: today ? today.commission : 0, topup: today ? today.topup : 0, pay: today ? today.pay : 0 },
       unpaid: { days: unpaid.length, since: unpaid.length ? unpaid[0].date : null, commission: r2(sum(unpaid, d => d.commission)), topup: r2(sum(unpaid, d => d.topup)), bonus, advance: adv, deductions: ded, net: r2(pay + bonus - adv - ded), list: unpaid.slice(-14).map(d => ({ date: d.date, commission: d.commission, topup: d.topup, pay: d.pay })) } });
   }
   // ----- what needs the owner's attention (drives the red badges and the bell) -----
