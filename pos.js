@@ -35,7 +35,7 @@ const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: 
   cart: { items: [], barberId: '', mode: 'later', editing: null }, q: [], sf: null, offline: false, cust: { q: '', tier: '', rows: [], total: 0 }, rm: { date: '', calc: null, list: [], proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 // which sections this login may open (the owner sets this in Settings → Access)
-const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance', release: 'release' };
+const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance', release: 'release', problems: 'problems', inbox: 'inbox' };
 const freshCart = () => ({ items: [], editing: null, mode: (typeof P !== 'undefined' && P.cart && P.cart.mode) || 'later' });
 const isAdminRole = () => P.me && ['owner', 'admin'].includes(P.me.role);
 const canOpen = v => (P.mods || []).includes(VMAP[v]);
@@ -130,6 +130,8 @@ async function refresh() {
     if (P.view === 'pos') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
     if (P.view === 'customers') await loadCustomers();
     if (P.view === 'remit') await loadRemit();
+    if (P.view === 'problems') P.pr = await api('GET', withBr('/api/problems'));
+    if (canOpen('inbox') && window.Inbox) { Inbox.setOpt({ token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); try { P.inUnread = await Inbox.refreshUnread(); } catch (x) { } }
     if (P.view === 'release') { P.adv = await api('GET', withBr('/api/advances')); if (P.advBal) P.advBal = await api('GET', '/api/advances/balance?staffId=' + P.advBal.staffId); }
     if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
@@ -155,7 +157,7 @@ async function afterLogin(j) {
 }
 
 // ---------- shell ----------
-const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay' };
+const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay', problems: 'Report a Problem', inbox: 'Inbox' };
 function render() {
   if (!P.me) {
     app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
@@ -165,14 +167,16 @@ function render() {
   const b = P.boot; app.classList.toggle('in', !!P.me);
   if (!canOpen(P.view)) P.view = firstView();
   if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
-  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay']];
+  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Problems'], ['inbox', 'users', 'Inbox']];
   const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
-  app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
+  app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.inUnread && P.view !== 'inbox' ? `<span class="shiftchip" style="color:#e5384a" data-a="go" data-v="inbox">✉ ${P.inUnread}</span>` : ''}${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
     <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
     ${P.view === 'pos' && P.cart.mode !== 'now' && !isWide() && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
     <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`;
 }
+const _render = render;
+render = function () { _render(); const h = document.getElementById('inbox-host'); if (h && window.Inbox && P.me) Inbox.mount(h, { token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); };
 const staffById = id => P.boot?.staff.find(s => s.id === id);
 const cuttingIds = () => new Set((P.boot?.queue || []).filter(o => o.status === 'in_chair').map(o => o.barberId));
 const stateLabel = { present: 'Present', late: 'Late', break: 'On break', off: 'Off duty', out: 'Timed out', none: 'Not timed in' };
@@ -226,6 +230,17 @@ const VIEWS = {
       <div class="row" style="margin-top:8px;gap:18px"><div><div class="num" style="font-size:30px;line-height:1">${h.visits}</div><small class="mute">points</small></div><div style="flex:1;min-width:0"><small class="mute">${nt ? nt.need + ' more visit' + (nt.need === 1 ? '' : 's') + ' to reach ' + nt.name : 'Top tier reached'}</small>${nt ? `<div style="height:6px;border-radius:6px;background:var(--s3);margin-top:6px;overflow:hidden"><div style="height:100%;width:${Math.min(100, Math.round(h.visits / (h.visits + nt.need) * 100))}%;background:#000"></div></div>` : ''}</div></div>
       <small class="mute" style="display:block;margin-top:8px">${esc(h.phone || '')}${h.phone && h.email ? ' · ' : ''}${esc(h.email || '')}</small>
       <small class="mute">Last visit: ${h.lastVisit ? new Date(h.lastVisit).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : 'none yet'} · Spent ${peso(h.spent)}${h.preferredCut ? ' · ✂ ' + esc(h.preferredCut) : ''}</small></div>`; }).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No customers found for this branch.</p></div>'}`;
+  },
+  inbox() { return '<div id="inbox-host"></div>'; },
+  problems() {
+    const l = P.pr; if (!l) return '<p class="mute">Loading…</p>';
+    const st = s => ({ SUBMITTED: 'waiting', ACKNOWLEDGED: 'in_chair', 'IN PROGRESS': 'in_chair', RESOLVED: 'paid', CLOSED: 'paid' }[s] || '');
+    return `<button class="block" data-a="newprob" style="margin-bottom:12px;padding:16px">${ic('plus')} Report a problem</button>
+    <p class="mute" style="margin:0 2px 10px">${l.open} open report${l.open === 1 ? '' : 's'}</p>
+    ${l.rows.map(x => `<div class="card" style="padding:14px"><div class="row between" style="flex-wrap:nowrap"><b>${esc(x.category)}</b><span class="tag ${st(x.status)}">${x.status}</span></div>
+      <small class="mute">${esc(x.priority)} priority · ${esc(x.submittedBy)} · ${esc(x.createdAt.slice(0, 10))}${x.assignedTo ? ' · Assigned: ' + esc(x.assignedTo) : ''}</small><p style="margin:6px 0">${esc(x.description)}</p>
+      ${x.comments.map(c => `<small style="display:block;border-left:3px solid var(--line);padding-left:8px;margin:4px 0"><b>${esc(c.by)}</b>: ${esc(c.text)}</small>`).join('')}
+      <div class="row" style="margin-top:8px">${x.photos.length ? `<button class="ghost sm" data-a="viewfiles" data-ids="${x.photos.join(',')}">${x.photos.length} photo${x.photos.length > 1 ? 's' : ''}</button>` : ''}<button class="ghost sm" data-a="pbcomment" data-id="${x.id}">Add comment</button></div></div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No problem reports yet.</p></div>'}`;
   },
   release() {
     const l = P.adv; if (!l) return '<p class="mute">Loading…</p>';
@@ -421,6 +436,17 @@ function advSheet() {
     <label class="consent"><input type="checkbox" id="avconsent" ${x.consent ? 'checked' : ''}><span>The employee has agreed in writing that this amount will be deducted from their wages on the schedule above.</span></label>
     <p id="err" style="color:var(--bad);margin:8px 0 0"></p><button class="block" data-a="avsave" ${x.busy ? 'disabled' : ''}>${x.busy ? 'Sending…' : 'Send request'}</button>`);
 }
+const PROB_CATS = ['Equipment malfunction', 'Air conditioning', 'Electrical', 'Internet', 'POS', 'Maintenance', 'Customer complaint', 'Employee concern', 'Inventory shortage', 'Other'];
+function probSheet() {
+  const x = P.pb;
+  openSheet(`<div class="row between"><h2 style="margin:0">Report a problem</h2><button class="ghost sm" data-a="closesheet">Cancel</button></div>
+    <label>Category</label><select id="pbcat"><option value="">Choose a category</option>${PROB_CATS.map(c => `<option ${x.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
+    <label>Priority</label><div class="chips">${['Low', 'Normal', 'High', 'Urgent'].map(p => `<button class="chip ${x.priority === p ? 'on' : ''}" data-a="pbprio" data-p="${p}">${p}</button>`).join('')}</div>
+    <label>What is wrong?</label><textarea id="pbdesc" rows="3" maxlength="1000" placeholder="Describe the problem">${esc(x.desc)}</textarea>
+    <label>Photos (optional)</label><button type="button" class="ghost block" data-a="pbpick">📷 Add photo${x.photos.length ? ' (' + x.photos.length + ')' : ''}</button><input type="file" id="pbfile" accept="image/*" capture="environment" hidden>
+    ${x.photos.length ? `<div class="thumbs">${x.photos.map((r, i) => `<div class="thumb"><img src="${r.preview}" alt=""><button class="rm" data-a="pbrm" data-i="${i}">✕</button></div>`).join('')}</div>` : ''}
+    <p id="err" style="color:var(--bad);margin:8px 0 0"></p><button class="block" data-a="pbsave" ${x.busy ? 'disabled' : ''}>${x.busy ? 'Sending…' : 'Send report'}</button>`);
+}
 function freeBarbers() { const cut = cuttingIds(); return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && !cut.has(s.id)); }
 const chairName = id => P.boot?.chairs.find(c => c.id === id)?.name || '';
 // "Assign to Chair": each chair is a card with its barber. Free chair = seated now; busy chair = joins that barber's line.
@@ -589,7 +615,7 @@ document.addEventListener('click', async e => {
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
-      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Report a Problem'], ['inbox', 'users', 'Inbox'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
@@ -622,6 +648,17 @@ document.addEventListener('click', async e => {
   if (a === 'add') return addItem(d.id);
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
   if (a === 'rm') { P.cart.items.splice(+d.n, 1); syncId(); cartSheet(); return render(); }
+  if (a === 'newprob') { P.pb = { category: '', priority: 'Normal', desc: '', photos: [], busy: false }; return probSheet(); }
+  if (a === 'pbprio') { P.pb.priority = d.p; return probSheet(); }
+  if (a === 'pbpick') { document.getElementById('pbfile')?.click(); return; }
+  if (a === 'pbrm') { P.pb.photos.splice(+d.i, 1); return probSheet(); }
+  if (a === 'pbsave') {
+    const x = P.pb; x.busy = true; probSheet();
+    try { await api('POST', '/api/problems', { branchId: P.boot.branch.id, category: x.category, priority: x.priority, description: x.desc, photos: x.photos.map(r => r.id) }); closeSheet(); toast('Report sent to the owner'); await refresh(); }
+    catch (er) { x.busy = false; probSheet(); const e2 = document.getElementById('err'); if (e2) e2.textContent = er.message; }
+    return;
+  }
+  if (a === 'pbcomment') { const text = prompt('Write your comment'); if (!text || !text.trim()) return; await guard(() => api('POST', '/api/problems/' + d.id + '/comment', { text })); return refresh(); }
   if (a === 'newadv') { P.av = { staffId: '', type: 'Cash Advance', amount: '', inst: 1, reason: '', consent: false, busy: false }; return advSheet(); }
   if (a === 'avsave') {
     const x = P.av; x.busy = true; advSheet();
@@ -777,6 +814,13 @@ document.addEventListener('change', async e => {
   if (t.id === 'avconsent') { P.av.consent = t.checked; return; }
   if (a === 'rmdate' || t.id === 'rmdate') { P.rm.date = t.value || ymd(0); P.rm.proofId = ''; P.rm.preview = ''; refresh().then(render); return; }
   if (t.id === 'sffile') { const file = t.files[0]; if (!file || !P.sf) return; try { P.sf.data = await resizeToJpeg(file, 900); selfieSheet(); } catch (x) { toast('Could not read that photo. Please try again.', true); } return; }
+  if (t.id === 'pbcat') { P.pb.category = t.value; return; }
+  if (t.id === 'pbfile') {
+    const file = t.files[0]; if (!file || !P.pb) return;
+    try { const data = await resizeToJpeg(file, 1300); const r = await api('POST', '/api/files', { data, kind: 'problem', branchId: P.boot.branch.id }); P.pb.photos.push({ id: r.id, preview: data }); probSheet(); }
+    catch (x) { toast(x.message || 'Could not upload the photo.', true); }
+    return;
+  }
   if (t.id === 'xcat') { P.ex.category = t.value; return; }
   if (t.id === 'xfile') {
     const file = t.files[0]; if (!file || !P.ex) return;
@@ -812,6 +856,7 @@ document.addEventListener('input', e => {
     return;
   }  if (t.id === 'expq') { P.expQ = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('expq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
   if (t.id === 'remarks') P.remarks = t.value;
+  if (t.id === 'pbdesc') { P.pb.desc = t.value; return; }
   if (t.id === 'avamt') { P.av.amount = t.value; return; }
   if (t.id === 'avreason') { P.av.reason = t.value; return; }
   if (t.id === 'xdesc') { P.ex.desc = t.value; return; }

@@ -69,6 +69,11 @@ db.exec(`
 create table if not exists expense_claims(id text primary key, branchId text, date text, category text, description text, amount real, method text, receipts text, noReceiptReason text,
   status text, submittedById text, submittedBy text, staffId text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text, cashMoveId text, history text);
 create index if not exists exp_date on expense_claims(date, branchId);
+create table if not exists problems(id text primary key, branchId text, category text, description text, priority text, photos text, status text, assignedTo text, submittedById text, submittedBy text, createdAt text, updatedAt text, history text, comments text);
+create table if not exists channels(id text primary key, kind text, name text, branchId text, announceOnly integer, members text, createdBy text, createdAt text);
+create table if not exists messages(id text primary key, channelId text, authorId text, authorName text, text text, attachments text, replyTo text, pinned integer, reactions text, createdAt text);
+create index if not exists msg_chan on messages(channelId, createdAt);
+create table if not exists chat_reads(channelId text, userId text, at text, primary key(channelId, userId));
 create table if not exists advances(id text primary key, branchId text, staffId text, staffName text, type text, amount real, reason text, installments integer, status text, approvedAmt real, firstDue text,
   releasedAmt real, method text, proofId text, requestedById text, requestedBy text, createdAt text, consentAt text, reviewedBy text, reviewedAt text, reviewNote text, releasedBy text, releasedAt text, cashMoveId text, history text);
 create table if not exists advance_deductions(id text primary key, advanceId text, staffId text, branchId text, amount real, dueDate text, status text, seq integer, appliedAt text, payrollDate text);
@@ -205,8 +210,8 @@ function whoami(req) {
 const isAdmin = me => me.role === 'owner' || me.role === 'admin';
 const isBranchUser = me => me.role === 'cashier' || me.role === 'barber';
 // Which parts of the POS each role may open (editable by the owner in Settings → Access)
-const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release'];
-const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue'] };
+const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release', 'problems', 'inbox'];
+const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue', 'problems', 'inbox'] };
 const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber }; } catch { return { ...DEFAULT_PERMS }; } };
 const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
 const needAny = (me, mods) => { if (isAdmin(me)) return; const have = modulesFor(me.role); if (![].concat(mods).some(m => have.includes(m))) bad(403, 'Your role is not allowed to open this section'); };
@@ -712,7 +717,7 @@ const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
 });
-const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/': 'landing.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
+const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/': 'landing.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace(/:\d+$/, '').replace(/^www\./, '');
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST);
 const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/logo.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/.well-known/assetlinks.json']);
@@ -864,6 +869,8 @@ async function handle(req, res) {
       if (p === '/api/pos/idphoto') return 'pos';
       if (/^\/api\/remittances/.test(p)) return 'remittance';
       if (/^\/api\/advances/.test(p)) return 'release';
+      if (/^\/api\/problems/.test(p)) return 'problems';
+      if (/^\/api\/inbox/.test(p)) return 'inbox';
       if (/^\/api\/files/.test(p)) return ['remittance', 'expenses', 'pos'];
       if (/^\/api\/orders\/\w+\/(pay|void)$/.test(p)) return 'pos';
       if (/^\/api\/orders\/\w+$/.test(p) && method === 'PUT') return ['pos', 'queue'];
@@ -1032,7 +1039,7 @@ async function handle(req, res) {
   }
   const flm = p.match(/^\/api\/files\/(\w+)$/);
   if (flm && method === 'GET') {
-    const f = get('files', flm[1]); if (!f || (isBranchUser(me) && f.branchId !== me.branchId)) bad(404, 'Not found');
+    const f = get('files', flm[1]); if (!f || (isBranchUser(me) && f.kind !== 'chat' && f.branchId !== me.branchId)) bad(404, 'Not found');
     res.writeHead(200, { 'Content-Type': f.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(f.enc ? decBuf(f.data) : f.data);
   }
   // ----- expenses with receipts -----
@@ -1132,6 +1139,107 @@ async function handle(req, res) {
       } catch (e) { db.exec('rollback'); throw e; }
     }
     log(me, 'advance-' + act, 'advances', a.id, note); return send(res, 200, advView(get('advances', a.id)));
+  }
+  // ----- problem reports -----
+  const PROB_CATS = ['Equipment malfunction', 'Air conditioning', 'Electrical', 'Internet', 'POS', 'Maintenance', 'Customer complaint', 'Employee concern', 'Inventory shortage', 'Other'], PROB_FLOW = ['SUBMITTED', 'ACKNOWLEDGED', 'IN PROGRESS', 'RESOLVED', 'CLOSED'], PRIOS = ['Low', 'Normal', 'High', 'Urgent'];
+  const probView = x => ({ ...x, photos: jp(x.photos), history: jp(x.history), comments: jp(x.comments), branchName: get('branches', x.branchId)?.name || '' });
+  if (p === '/api/problems/options' && method === 'GET') return send(res, 200, { categories: PROB_CATS, flow: PROB_FLOW, priorities: PRIOS });
+  if (p === '/api/problems' && method === 'GET') {
+    const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = PROB_FLOW.includes(q.status) ? q.status : null;
+    const rows = all(`select * from problems where 1=1${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''}${q.open === '1' ? " and status<>'CLOSED'" : ''} order by case status when 'CLOSED' then 1 else 0 end, case priority when 'Urgent' then 0 when 'High' then 1 when 'Normal' then 2 else 3 end, createdAt desc limit 500`, ...(br ? [br] : []), ...(st ? [st] : [])).map(probView);
+    return send(res, 200, { rows, open: rows.filter(r => r.status !== 'CLOSED' && r.status !== 'RESOLVED').length });
+  }
+  if (p === '/api/problems' && method === 'POST') {
+    const b = await readBody(req), branchId = branchScope(me, b.branchId), category = PROB_CATS.includes(b.category) ? b.category : bad(400, 'Choose a category'), priority = PRIOS.includes(b.priority) ? b.priority : 'Normal';
+    const description = String(b.description || '').trim().slice(0, 1000); if (description.length < 5) bad(400, 'Describe the problem');
+    const photos = (Array.isArray(b.photos) ? b.photos : []).slice(0, 6).map(String); for (const fid of photos) { const fl = get('files', fid); if (!fl || fl.branchId !== branchId) bad(400, 'A photo was not found. Please attach it again.'); }
+    const id = uid(), n = nowISO();
+    run('insert into problems(id,branchId,category,description,priority,photos,status,assignedTo,submittedById,submittedBy,createdAt,updatedAt,history,comments) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', id, branchId, category, description, priority, JSON.stringify(photos), 'SUBMITTED', '', me.id, me.name, n, n, JSON.stringify([{ at: n, by: me.name, action: 'SUBMITTED', note: '' }]), '[]');
+    log(me, 'problem', 'problems', id, `${category} (${priority})`); return send(res, 201, probView(get('problems', id)));
+  }
+  const pbm = p.match(/^\/api\/problems\/(\w+)\/(status|comment|assign)$/);
+  if (pbm && (method === 'PUT' || method === 'POST')) {
+    const x = get('problems', pbm[1]); if (!x || (isBranchUser(me) && x.branchId !== me.branchId)) bad(404, 'Not found'); const b = await readBody(req), n = nowISO();
+    if (pbm[2] === 'comment') {
+      const text = String(b.text || '').trim().slice(0, 600); if (!text) bad(400, 'Write a comment'); const cs = jp(x.comments); cs.push({ at: n, by: me.name, text });
+      run('update problems set comments=?, updatedAt=? where id=?', JSON.stringify(cs), n, x.id);
+    } else {
+      adminOnly();
+      if (pbm[2] === 'assign') { const who = String(b.assignedTo || '').trim().slice(0, 80); const h = jp(x.history); h.push({ at: n, by: me.name, action: 'ASSIGNED', note: who || 'Unassigned' }); run('update problems set assignedTo=?, history=?, updatedAt=? where id=?', who, JSON.stringify(h), n, x.id); }
+      else {
+        const to = String(b.status || ''), i = PROB_FLOW.indexOf(to), cur = PROB_FLOW.indexOf(x.status); if (i < 0) bad(400, 'Unknown status'); if (i !== cur + 1 && !(to === 'IN PROGRESS' && cur < 2)) bad(409, `Next step after ${x.status} is ${PROB_FLOW[cur + 1] || 'none'}`);
+        const h = jp(x.history); h.push({ at: n, by: me.name, action: to, note: String(b.note || '').slice(0, 300) }); run('update problems set status=?, history=?, updatedAt=? where id=?', to, JSON.stringify(h), n, x.id);
+      }
+    }
+    log(me, 'problem-' + pbm[2], 'problems', x.id, String(b.status || b.assignedTo || '')); return send(res, 200, probView(get('problems', x.id)));
+  }
+  // ----- internal inbox -----
+  const INBOX_FILES = /^data:((?:image\/(?:jpeg|png|webp|gif))|(?:audio\/(?:webm|ogg|mp4|mpeg|wav|x-m4a))|(?:video\/(?:mp4|webm|quicktime))|application\/pdf);(?:codecs=[^;]*;)?base64,([A-Za-z0-9+/=]+)$/;
+  const meId = me.id, isOwnerOrAdmin = isAdmin(me);
+  const chanOk = c => c.kind === 'all' || (c.kind === 'branch' && (isOwnerOrAdmin || c.branchId === me.branchId)) || (['dm', 'group'].includes(c.kind) && jp(c.members).includes(meId));
+  const ensureChannels = () => {
+    if (!one("select 1 x from channels where kind='all' and name='Announcements'")) run("insert into channels(id,kind,name,branchId,announceOnly,members,createdBy,createdAt) values(?,?,?,?,?,?,?,?)", uid(), 'all', 'Announcements', '', 1, '[]', 'system', nowISO());
+    if (!one("select 1 x from channels where kind='all' and name='All Barbers'")) run("insert into channels(id,kind,name,branchId,announceOnly,members,createdBy,createdAt) values(?,?,?,?,?,?,?,?)", uid(), 'all', 'All Barbers', '', 0, '[]', 'system', nowISO());
+    for (const b of all('select id,name from branches')) if (!one("select 1 x from channels where kind='branch' and branchId=?", b.id)) run("insert into channels(id,kind,name,branchId,announceOnly,members,createdBy,createdAt) values(?,?,?,?,?,?,?,?)", uid(), 'branch', b.name + ' Branch Chat', b.id, 0, '[]', 'system', nowISO());
+  };
+  const personName = id => id === 'owner' ? 'Owner' : (get('users', id)?.name || 'Unknown');
+  const chanView = c => {
+    const last = one('select * from messages where channelId=? order by createdAt desc limit 1', c.id), rd = one('select at from chat_reads where channelId=? and userId=?', c.id, meId)?.at || '1970-01-01';
+    const unread = one('select count(*) n from messages where channelId=? and createdAt>? and authorId<>?', c.id, rd, meId).n, members = jp(c.members);
+    const title = c.kind === 'dm' ? personName(members.find(m => m !== meId) || meId) : c.name;
+    return { id: c.id, kind: c.kind, name: title, branchId: c.branchId, announceOnly: !!c.announceOnly, members: members.map(m => ({ id: m, name: personName(m) })), unread, last: last ? { text: last.text || (jp(last.attachments).length ? '📎 Attachment' : ''), by: last.authorName, at: last.createdAt } : null };
+  };
+  const msgView = m => ({ ...m, attachments: jp(m.attachments), reactions: jp(m.reactions) });
+  if (p === '/api/inbox/people' && method === 'GET') {
+    const us = all('select id,name,role,branchId from users where active=1').filter(u => u.id !== meId && (isOwnerOrAdmin || u.role === 'admin' || u.branchId === me.branchId)).map(u => ({ id: u.id, name: u.name, role: u.role, branch: get('branches', u.branchId || '')?.name || '' }));
+    if (me.id !== 'owner') us.unshift({ id: 'owner', name: 'Owner', role: 'owner', branch: '' });
+    return send(res, 200, us);
+  }
+  if (p === '/api/inbox/channels' && method === 'GET') { ensureChannels(); return send(res, 200, all('select * from channels order by case kind when \'all\' then 0 when \'branch\' then 1 else 2 end, name').filter(chanOk).map(chanView)); }
+  if (p === '/api/inbox/channels' && method === 'POST') {
+    const b = await readBody(req), kind = b.kind === 'group' ? 'group' : 'dm', ids = [...new Set((Array.isArray(b.members) ? b.members : []).map(String))].filter(i => i !== meId);
+    const people = new Set(all('select id from users where active=1').map(u => u.id).concat(['owner'])); if (!ids.length || ids.some(i => !people.has(i))) bad(400, 'Choose who to message');
+    const members = [meId, ...ids].sort();
+    if (kind === 'dm') { if (ids.length !== 1) bad(400, 'A direct message is between two people'); const ex = all("select * from channels where kind='dm'").find(c => jp(c.members).slice().sort().join() === members.join()); if (ex) return send(res, 200, chanView(ex)); }
+    const id = uid(); run('insert into channels(id,kind,name,branchId,announceOnly,members,createdBy,createdAt) values(?,?,?,?,?,?,?,?)', id, kind, kind === 'group' ? String(b.name || 'Group').trim().slice(0, 60) || 'Group' : '', '', 0, JSON.stringify(members), meId, nowISO());
+    return send(res, 201, chanView(get('channels', id)));
+  }
+  const chm = p.match(/^\/api\/inbox\/channels\/(\w+)(?:\/(messages|read))?$/);
+  if (chm) {
+    const c = get('channels', chm[1]); if (!c || !chanOk(c)) bad(404, 'Not found');
+    if (!chm[2] && method === 'PUT') { adminOnly(); const b = await readBody(req); run('update channels set announceOnly=? where id=?', b.announceOnly ? 1 : 0, c.id); log(me, 'inbox-mode', 'channels', c.id, String(!!b.announceOnly)); return send(res, 200, chanView(get('channels', c.id))); }
+    if (chm[2] === 'read' && method === 'POST') { run('insert into chat_reads(channelId,userId,at) values(?,?,?) on conflict(channelId,userId) do update set at=excluded.at', c.id, meId, nowISO()); return send(res, 200, { ok: true }); }
+    if (chm[2] === 'messages' && method === 'GET') {
+      const after = String(q.after || ''), rows = after ? all('select * from messages where channelId=? and createdAt>? order by createdAt limit 200', c.id, after) : all('select * from (select * from messages where channelId=? order by createdAt desc limit 150) order by createdAt', c.id);
+      const readers = all('select userId, at from chat_reads where channelId=?', c.id).filter(r => r.userId !== meId).map(r => ({ id: r.userId, name: personName(r.userId), at: r.at }));
+      return send(res, 200, { rows: rows.map(msgView), readers, pinned: all('select * from messages where channelId=? and pinned=1 order by createdAt desc limit 5', c.id).map(msgView), channel: chanView(c) });
+    }
+    if (chm[2] === 'messages' && method === 'POST') {
+      if (c.announceOnly && !isOwnerOrAdmin) bad(403, 'Only management can post in this channel');
+      const b = await readBody(req), text = String(b.text || '').trim().slice(0, 2000), att = (Array.isArray(b.attachments) ? b.attachments : []).slice(0, 6).filter(a => a && get('files', String(a.id)));
+      if (!text && !att.length) bad(400, 'Write a message or attach a file'); const rep = b.replyTo && one('select id from messages where id=? and channelId=?', String(b.replyTo), c.id) ? String(b.replyTo) : '';
+      const id = uid(); run('insert into messages(id,channelId,authorId,authorName,text,attachments,replyTo,pinned,reactions,createdAt) values(?,?,?,?,?,?,?,?,?,?)', id, c.id, meId, me.name, text, JSON.stringify(att.map(a => ({ id: String(a.id), name: String(a.name || 'file').slice(0, 80), type: String(a.type || '').slice(0, 40) }))), rep, 0, '{}', nowISO());
+      run('insert into chat_reads(channelId,userId,at) values(?,?,?) on conflict(channelId,userId) do update set at=excluded.at', c.id, meId, nowISO());
+      return send(res, 201, msgView(get('messages', id)));
+    }
+  }
+  const mgm = p.match(/^\/api\/inbox\/messages\/(\w+)\/(react|pin)$/);
+  if (mgm && method === 'PUT') {
+    const m = get('messages', mgm[1]), c = m && get('channels', m.channelId); if (!m || !c || !chanOk(c)) bad(404, 'Not found'); const b = await readBody(req);
+    if (mgm[2] === 'pin') { adminOnly(); run('update messages set pinned=? where id=?', b.pinned ? 1 : 0, m.id); }
+    else { const em = String(b.emoji || ''); if (!['👍', '❤️', '😂', '✅', '🙏'].includes(em)) bad(400, 'Unknown reaction'); const rx = JSON.parse(m.reactions || '{}'); const arr = rx[em] || []; rx[em] = arr.includes(meId) ? arr.filter(i => i !== meId) : [...arr, meId]; if (!rx[em].length) delete rx[em]; run('update messages set reactions=? where id=?', JSON.stringify(rx), m.id); }
+    return send(res, 200, msgView(get('messages', m.id)));
+  }
+  if (p === '/api/inbox/search' && method === 'GET') {
+    const term = String(q.q || '').trim().toLowerCase(); if (term.length < 2) return send(res, 200, []);
+    const chans = new Map(all('select * from channels').filter(chanOk).map(c => [c.id, c]));
+    return send(res, 200, all('select * from messages order by createdAt desc limit 3000').filter(m => chans.has(m.channelId) && (m.text || '').toLowerCase().includes(term)).slice(0, 40).map(m => ({ ...msgView(m), channelName: chanView(chans.get(m.channelId)).name })));
+  }
+  if (p === '/api/inbox/upload' && method === 'POST') {
+    const b = await readBody(req, 6_500_000), m = INBOX_FILES.exec(String(b.data || '')); if (!m) bad(400, 'This file type is not allowed. Use a photo, video, voice message or PDF.');
+    const buf = Buffer.from(m[2], 'base64'); if (buf.length > 4_500_000) bad(413, 'The file is too large (max about 4 MB)');
+    const id = uid() + uid(); run('insert into files(id,kind,branchId,mime,data,byId,byName,createdAt,enc) values(?,?,?,?,?,?,?,?,1)', id, 'chat', me.branchId || '', m[1], encBuf(buf), me.id, me.name, nowISO());
+    return send(res, 201, { id, type: m[1], name: String(b.name || '').slice(0, 80) });
   }
   // ----- daily sales remittance (separate from expenses) -----
   const remitCalc = (branchId, date) => {

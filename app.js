@@ -30,6 +30,7 @@ async function loadView() {
     if (v === 'dashboard') { [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}&branch=${ui.branch}`)); }
+    else if (v === 'prob') ui.prob = await api('GET', `/api/problems?branch=${ui.branch}&status=${ui.pstatus || ''}`);
     else if (v === 'att') ui.att = await api('GET', `/api/attendance/log?${qs()}&flagged=${ui.aflag ? 1 : 0}`);
     else if (v === 'adv') ui.adv = await api('GET', `/api/advances?branch=${ui.branch}&status=${ui.astatus || ''}`);
     else if (v === 'exp') ui.exp = await api('GET', `/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}`);
@@ -80,9 +81,11 @@ const ICONS = {
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view === 'prob' ? 'Problem Reports' : ui.view === 'inbox' ? 'Inbox' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
-function render() {
+const inboxOpts = () => ({ token: () => token, isAdmin: true, meId: S.me ? S.me.id : 'owner' });
+const render = (() => { const base = renderBase; return function () { base(); const h = document.getElementById('inbox-host'); if (h && window.Inbox && loggedIn) Inbox.mount(h, inboxOpts()); }; })();
+function renderBase() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
   document.getElementById('mtop').hidden = true;
   if (!loggedIn) {
@@ -109,13 +112,15 @@ function render() {
     <button class="${on('exp')}" data-view="exp">${ic('wallet')}Expenses &amp; Receipts</button>
     <button class="${on('adv')}" data-view="adv">${ic('tag')}Release Pay</button>
     <button class="${on('att')}" data-view="att">${ic('clock')}Attendance</button>
+    <button class="${on('prob')}" data-view="prob">${ic('gear')}Problem Reports</button>
+    <button class="${on('inbox')}" data-view="inbox">${ic('users')}Inbox${ui.inUnread ? ` <span class="tag" style="color:#fff;background:#e5384a">${ui.inUnread}</span>` : ''}</button>
     <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
     <button class="${on('settings')}" data-view="settings">${ic('gear')}Settings</button>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).trim();
-  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -150,6 +155,19 @@ function vReport() {
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
   return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
 }
+function vProb() {
+  const r = ui.prob, st = ui.pstatus || '', FLOW = ['SUBMITTED', 'ACKNOWLEDGED', 'IN PROGRESS', 'RESOLVED', 'CLOSED'];
+  const tag = s => ({ SUBMITTED: ['#b26a00', 'rgba(245,166,35,.16)'], ACKNOWLEDGED: ['#2b7de9', 'rgba(90,167,255,.13)'], 'IN PROGRESS': ['#7c4dff', 'rgba(181,140,255,.14)'], RESOLVED: ['var(--ok)', 'rgba(62,207,142,.13)'], CLOSED: ['#6b6b76', '#ececef'] }[s]);
+  const pr = p => ({ Urgent: 'var(--bad)', High: '#b26a00' }[p] || 'inherit');
+  const sel = `<select id="pstatus" style="width:auto"><option value="">All statuses</option>${FLOW.map(s => `<option ${st === s ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
+  return `<h2>Problem Reports <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2><div class="row" style="margin-bottom:14px">${sel}</div>
+  ${r ? `<div class="grid"><div class="card stat"><span>Open reports</span><b>${r.open}</b></div><div class="card stat"><span>Urgent / High</span><b style="color:var(--bad)">${r.rows.filter(x => ['Urgent', 'High'].includes(x.priority) && x.status !== 'CLOSED' && x.status !== 'RESOLVED').length}</b></div></div>
+  <div class="card overflow"><table><tr><th>Date</th><th>Branch</th><th>Category</th><th>Priority</th><th>Description</th><th>Photos</th><th>By</th><th>Assigned</th><th>Status</th><th></th></tr>
+  ${r.rows.map(x => { const [c, bg] = tag(x.status), nx = FLOW[FLOW.indexOf(x.status) + 1]; return `<tr><td>${esc(x.createdAt.slice(0, 10))}</td><td>${esc(x.branchName)}</td><td>${esc(x.category)}</td><td style="color:${pr(x.priority)};font-weight:700">${esc(x.priority)}</td><td style="white-space:normal;min-width:200px">${esc(x.description)}${x.comments.length ? `<br><span class="mute" style="font-size:11px">${x.comments.length} comment${x.comments.length > 1 ? 's' : ''}</span>` : ''}</td>
+    <td>${x.photos.length ? `<a href="#" data-act="viewfiles" data-ids="${x.photos.join(',')}">${x.photos.length} photo${x.photos.length > 1 ? 's' : ''}</a>` : '—'}</td><td>${esc(x.submittedBy)}</td><td>${esc(x.assignedTo) || '—'}</td><td><span class="tag" style="color:${c};background:${bg}">${x.status}</span></td>
+    <td style="white-space:normal;min-width:230px"><button class="btn ghost sm" data-act="probhist" data-id="${x.id}">Details</button> ${nx ? `<button class="btn sm" data-act="probnext" data-id="${x.id}" data-to="${nx}">${{ ACKNOWLEDGED: 'Acknowledge', 'IN PROGRESS': 'Start work', RESOLVED: 'Mark resolved', CLOSED: 'Close' }[nx]}</button>` : ''} <button class="btn ghost sm" data-act="probassign" data-id="${x.id}">Assign</button> <button class="btn ghost sm" data-act="probcomment" data-id="${x.id}">Comment</button></td></tr>`; }).join('') || '<tr><td colspan="10" class="mute">No problem reports.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
+}
+function vInbox() { return '<h2>Inbox</h2><div id="inbox-host"></div>'; }
 function vAtt() {
   const r = ui.att, fl = !!ui.aflag, hm = iso => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' }) : '—', mm = n => n ? (n >= 60 ? Math.floor(n / 60) + 'h ' + (n % 60) + 'm' : n + 'm') : '—';
   const extra = `<label class="chk" style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:500;margin:0"><input type="checkbox" id="aflag" ${fl ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Flagged only</label><button class="btn ghost sm" data-act="attcsv">⬇ Export CSV</button>`;
@@ -399,6 +417,14 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
+  if (act === 'probhist') {
+    const x = ui.prob.rows.find(r => r.id === d.id);
+    return openModal(`<h2 style="margin-top:0">${esc(x.category)} · ${esc(x.branchName)}</h2><p>${esc(x.description)}</p><h3>Comments</h3>${x.comments.map(c => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${esc(c.by)}</b> <span class="mute" style="font-size:12px">${new Date(c.at).toLocaleString('en-PH')}</span><br>${esc(c.text)}</div>`).join('') || '<p class="mute">No comments yet.</p>'}
+      <h3 style="margin-top:14px">History</h3>${x.history.map(h => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${esc(h.action)}</b> · ${esc(h.by)} <span class="mute" style="font-size:12px">${new Date(h.at).toLocaleString('en-PH')}</span>${h.note ? '<br>' + esc(h.note) : ''}</div>`).join('')}<br><button class="btn ghost" data-act="close">Close</button>`);
+  }
+  if (act === 'probnext') { const note = d.to === 'RESOLVED' ? (prompt('What was done? (optional)') || '') : ''; try { await api('PUT', '/api/problems/' + d.id + '/status', { status: d.to, note }); await loadView(); render(); } catch (x) { alert(x.message); } return; }
+  if (act === 'probassign') { const who = prompt('Assign to (name of the person or the technician)'); if (who === null) return; try { await api('PUT', '/api/problems/' + d.id + '/assign', { assignedTo: who }); await loadView(); render(); } catch (x) { alert(x.message); } return; }
+  if (act === 'probcomment') { const text = prompt('Write your comment'); if (!text || !text.trim()) return; try { await api('POST', '/api/problems/' + d.id + '/comment', { text }); await loadView(); render(); } catch (x) { alert(x.message); } return; }
   if (act === 'attcsv') {
     const r = ui.att, rows = [['Date', 'Barber', 'Branch', 'Time in', 'Time out', 'Late mins', 'Undertime mins', 'Overtime mins', 'Flagged', 'Reason', 'Offline', 'Corrected'], ...r.rows.map(a => [a.date, a.staffName, a.branchName, a.timeIn || '', a.timeOut || '', a.lateMins || 0, a.undertimeMins || 0, a.overtimeMins || 0, a.flagged ? 'YES' : '', a.flagReason || '', a.offline ? 'YES' : '', a.corrected ? 'YES' : ''])];
     const csv = '﻿' + rows.map(x => x.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `attendance-${ui.from}_${ui.to}.csv`; a.click(); return;
@@ -525,6 +551,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.id === 'pstatus') { ui.pstatus = t.value; await loadView(); return render(); }
   if (t.id === 'aflag') { ui.aflag = t.checked; await loadView(); return render(); }
   if (t.id === 'astatus') { ui.astatus = t.value; await loadView(); return render(); }
   if (t.id === 'estatus') { ui.estatus = t.value; await loadView(); return render(); }
@@ -580,5 +607,6 @@ document.addEventListener('submit', e => {
 });
 
 fetch('/api/public/login-hint').then(r => r.json()).then(j => { ui.ownerNamed = !!j.ownerNamed; if (!loggedIn) render(); }).catch(() => { });
+setInterval(async () => { if (!loggedIn || !window.Inbox || document.hidden) return; Inbox.setOpt(inboxOpts()); try { const n = await Inbox.refreshUnread(); if (n !== ui.inUnread) { ui.inUnread = n; if (!modal.open && ui.view !== 'inbox' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) render(); } } catch (e) { } }, 15000);
 load().then(() => setInterval(() => { if (loggedIn && !modal.open && ui.view === 'dashboard' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) load(); }, 15000));
 render();
