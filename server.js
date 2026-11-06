@@ -1392,6 +1392,16 @@ async function handle(req, res) {
     const mineRow = scoreData(from, to, s.branchId, sid)[0], peers = scoreData(from, to, s.branchId, null).sort((a, b) => b.sales - a.sales), clean = r => ({ ...r, s: undefined, name: r.s.name });
     return send(res, 200, { me: clean(mineRow), rank: peers.findIndex(r => r.s.id === sid) + 1, of: peers.length, branchAvg: { sales: peers.length ? sum(peers, r => r.sales) / peers.length : 0, haircuts: peers.length ? sum(peers, r => r.n) / peers.length : 0 }, from, to });
   }
+  // The logged-in barber's own earnings so far: today, and everything earned but not yet paid in payroll. Always their own profile (never taken from the request).
+  if (p === '/api/me/earnings' && method === 'GET') {
+    const sid = myStaff(); if (!sid) bad(404, 'Your login is not linked to a barber profile yet. Ask the owner.');
+    const s = get('staff', sid), t = todayStr(), from = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+    const mine = dayRows(from, t, s.branchId).filter(d => d.staffId === sid), unpaid = mine.filter(d => !d.paidAt), today = mine.find(d => d.date === t);
+    const cuts = one("select count(*) n from orders where status='paid' and date=? and barberId=?", t, sid).n;
+    const pay = r2(sum(unpaid, d => d.commission + d.topup)), adv = r2(sum(unpaid, d => d.advance)), bonus = adjTotal(sid, t), ded = planDeductions(sid, t, r2(pay + bonus - adv)).total;
+    return send(res, 200, { name: s.name, allowance: s.allowance || 0, pct: s.pct, today: { present: !!today, cuts, commission: today ? today.commission : 0, topup: today ? today.topup : 0, pay: today ? today.pay : 0 },
+      unpaid: { days: unpaid.length, since: unpaid.length ? unpaid[0].date : null, commission: r2(sum(unpaid, d => d.commission)), topup: r2(sum(unpaid, d => d.topup)), bonus, advance: adv, deductions: ded, net: r2(pay + bonus - adv - ded), list: unpaid.slice(-14).map(d => ({ date: d.date, commission: d.commission, topup: d.topup, pay: d.pay })) } });
+  }
   // ----- what needs the owner's attention (drives the red badges and the bell) -----
   if (p === '/api/notifications' && method === 'GET') {
     const chats = all('select * from channels').filter(chanOk).reduce((s, c) => s + (chanView(c).unread || 0), 0), items = [];

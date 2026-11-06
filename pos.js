@@ -142,7 +142,7 @@ async function refresh(quiet) {
     P.boot = await api('GET', withBr('/api/pos/bootstrap')); P.shift = P.boot.shift;
     // barbers only need bookings on the screens that show them; cashiers keep the live new-booking alert
     if (canOpen('appts') && (P.me.role !== 'barber' || ['appts', 'dashboard'].includes(P.view))) { P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings(); } else if (!canOpen('appts')) P.bk = [];
-    if (P.view === 'dashboard') P.dash = await api('GET', withBr('/api/pos/dashboard'));
+    if (P.view === 'dashboard') { P.dash = await api('GET', withBr('/api/pos/dashboard')); if (P.me.role === 'barber') { try { P.earn = await api('GET', '/api/me/earnings'); P.earnErr = ''; } catch (e) { if (isNet(e)) throw e; P.earn = null; P.earnErr = e.message; } } }
     if (P.view === 'pos') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
     if (P.view === 'customers') await loadCustomers();
     if (P.view === 'remit') await loadRemit();
@@ -157,7 +157,7 @@ async function refresh(quiet) {
     if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expense-claims?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
     if (P.view === 'reading') { const s = await api('GET', withBr('/api/pos/shift')); P.cur = s; P.zs = await api('GET', withBr('/api/pos/zreadings')); }
     P.offline = false;
-    if (quiet) { const sig = JSON.stringify([P.view, P.boot, P.bk, P.dash, P.queue, P.att, P.exp, P.adv, P.advBal, P.pr, P.lv, P.cust, P.rm, P.chk, P.mp, P.cur, P.zs, P.inUnread, P.offline]); if (sig === P._sig) return; P._sig = sig; }
+    if (quiet) { const sig = JSON.stringify([P.view, P.boot, P.bk, P.dash, P.queue, P.att, P.exp, P.adv, P.advBal, P.pr, P.lv, P.cust, P.rm, P.chk, P.mp, P.cur, P.zs, P.inUnread, P.earn, P.offline]); if (sig === P._sig) return; P._sig = sig; }
     cacheSave();
   } catch (e) { if (isNet(e)) P.offline = true; else if (P.me) toast(e.message, true); }
   if (!sheet.open) render();
@@ -203,10 +203,21 @@ const cuttingIds = () => new Set((P.boot?.queue || []).filter(o => o.status === 
 const stateLabel = { present: 'Present', late: 'Late', break: 'On break', off: 'Off duty', out: 'Timed out', none: 'Not timed in' };
 
 // ---------- views ----------
+// A barber's own earnings (only ever their own account: the server picks the profile from the login)
+function earningsCard() {
+  if (!P.me || P.me.role !== 'barber') return '';
+  if (!P.earn) return P.earnErr ? `<div class="card"><b>My earnings</b><p class="mute" style="margin:6px 0 0">${esc(P.earnErr)}</p></div>` : '';
+  const e = P.earn, t = e.today, u = e.unpaid, row = (l, v, c) => `<div class="row between" style="padding:5px 0;border-bottom:1px solid var(--line)"><span>${l}</span><b style="${c ? 'color:' + c : ''}">${v}</b></div>`;
+  return `<div class="card" style="margin-bottom:14px"><div class="row between"><b>My earnings</b><button class="ghost sm" data-a="go" data-v="myperf">Payslips</button></div>
+    <div class="paybox" style="margin:10px 0"><small>Earned today${t.present ? '' : ' (not timed in yet)'}</small><div class="num">${peso(t.pay)}</div><small>${t.cuts} haircut${t.cuts === 1 ? '' : 's'} · commission ${peso(t.commission)}${t.topup ? ' + allowance top-up ' + peso(t.topup) : ''}</small></div>
+    <p style="margin:10px 0 4px"><b>Not yet paid${u.since ? ' · since ' + esc(u.since) : ''}</b></p>
+    ${row('Commission (' + u.days + ' day' + (u.days === 1 ? '' : 's') + ')', peso(u.commission))}${u.topup ? row('Allowance top-up', peso(u.topup)) : ''}${u.bonus ? row('Bonus / incentive', peso(u.bonus)) : ''}${u.advance ? row('Cash advance taken', '−' + peso(u.advance), 'var(--bad)') : ''}${u.deductions ? row('Scheduled deductions', '−' + peso(u.deductions), 'var(--bad)') : ''}
+    <div class="row between" style="padding-top:8px"><b>Estimated take-home</b><b style="font-size:20px">${peso(u.net)}</b></div><small class="mute">An estimate until the owner pays it. The final amount is on your payslip.</small></div>`;
+}
 const VIEWS = {
   dashboard() {
     const d = P.dash; if (!d) return '<p class="mute">Loading…</p>';
-    return `<div class="card hero"><small>Today's gross sales</small><div class="num">${peso(d.gross)}</div><span class="mute">${d.completed} completed order${d.completed === 1 ? '' : 's'} · net ${peso(d.net)}</span></div>
+    return `${earningsCard()}<div class="card hero"><small>Today's gross sales</small><div class="num">${peso(d.gross)}</div><span class="mute">${d.completed} completed order${d.completed === 1 ? '' : 's'} · net ${peso(d.net)}</span></div>
     <div class="kpis">${canOpen('queue') ? `<div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in queue</small><div class="num">${d.waiting}</div><small>${d.cutting} in chair</small></div>` : ''}
       <div class="card kpi g"><div class="ic">${ic('scissors')}</div><small>Barbers on duty</small><div class="num">${d.onDuty}<span class="mute" style="font-size:18px"> / ${d.totalBarbers}</span></div><small>available for walk-ins</small></div></div>
     ${bookingsCard()}
