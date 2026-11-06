@@ -14,7 +14,9 @@ const OPEN = 540, CLOSE = 1260;
 if (!process.env.ADMIN_PASSWORD) console.warn('⚠  Using default admin password "admin123". Set ADMIN_PASSWORD before going live.');
 
 // ---------- database ----------
-const db = new DatabaseSync(process.env.DB_FILE || path.join(DIR, 'barber.db'));
+const DB_FILE = process.env.DB_FILE || path.join(DIR, 'barber.db');
+fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+const db = new DatabaseSync(DB_FILE);
 db.exec(`
 create table if not exists barbers(id text primary key, name text, pct real);
 create table if not exists services(id text primary key, name text, price real, mins integer);
