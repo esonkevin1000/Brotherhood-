@@ -222,7 +222,7 @@ function payslipHtml(x) {
   return `<div style="text-align:center"><img src="/logo.png" width="76" style="border-radius:50%"><h2 style="margin:6px 0 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
     <p><b>${esc(x.staffName)}</b><br>${esc(x.branchName)}<br>Pay period: ${esc(x.period)} (${x.days.length} day${x.days.length > 1 ? 's' : ''})<br>Paid on ${esc(x.paidAt.slice(0, 10))}</p>
     <table style="width:100%;border-collapse:collapse">
-    ${hd('EARNINGS')}${x.dayItems.map(d => row('Haircut commission · ' + esc(d.date), peso(d.commission))).join('')}${x.topup ? row('Daily allowance top-up', peso(x.topup)) : ''}${x.earningItems.map(e => row(esc(e.kind) + ': ' + esc(e.note), peso(e.amount))).join('')}${row('GROSS EARNINGS', peso(x.gross), 1)}
+    ${hd('EARNINGS')}${x.dayItems.map(d => row('Haircut commission · ' + esc(d.date), peso(d.commission))).join('')}${x.topup ? row('Daily allowance top-up', peso(x.topup)) : ''}${x.lunch ? row('Free lunch allowance', peso(x.lunch)) : ''}${x.earningItems.map(e => row(esc(e.kind) + ': ' + esc(e.note), peso(e.amount))).join('')}${row('GROSS EARNINGS', peso(x.gross), 1)}
     ${hd('DEDUCTIONS')}${adv.map(a => row(esc(a.label), '−' + peso(a.amount), 0, '#b00')).join('')}${ded.map(a => row(esc(a.label), '−' + peso(a.amount), 0, '#b00')).join('')}${!adv.length && !ded.length ? row('None', peso(0)) : ''}${row('TOTAL DEDUCTIONS', '−' + peso(x.totalDeductions), 1)}
     <tr><td colspan="2"><hr></td></tr>${row('NET SALARY', peso(x.net), 1)}</table>
     <p style="font-size:11px;color:#666;margin-top:20px">Prepared by ${esc(x.paidBy || '')}. Deductions were authorized in writing by the employee.</p>`;
@@ -233,7 +233,7 @@ function vSlip() {
   <p class="mute" style="font-size:13px">A payslip is created every time you mark a barber as paid in Payroll, and every one is kept here. Barbers can see their own in the POS app when their login is linked to their barber profile (Users).</p>
   ${adj && adj.rows.some(a => !a.payrollDate) ? `<div class="card" style="margin-bottom:14px"><h3>Waiting for the next payroll</h3>${adj.rows.filter(a => !a.payrollDate).map(a => `<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span><b>${esc(a.staffName)}</b> · ${esc(a.kind)} · ${esc(a.note)} <span class="mute">(${esc(a.date)})</span></span><span><b>${peso(a.amount)}</b> <button class="btn ghost sm" data-act="rmadj" data-id="${a.id}">Remove</button></span></div>`).join('')}</div>` : ''}
   ${r ? `<div class="card overflow"><table><tr><th>Paid on</th><th>Employee</th><th>Branch</th><th>Period</th><th>Commission</th><th>Top-up</th><th>Bonuses</th><th>Gross</th><th>Deductions</th><th>Net salary</th><th></th></tr>
-  ${r.rows.map((x, i) => `<tr><td>${esc(x.paidAt.slice(0, 10))}</td><td><b>${esc(x.staffName)}</b></td><td>${esc(x.branchName)}</td><td>${esc(x.period)}</td><td>${peso(x.commission)}</td><td>${peso(x.topup)}</td><td>${peso(x.bonus)}</td><td>${peso(x.gross)}</td><td>${peso(x.totalDeductions)}</td><td><b>${peso(x.net)}</b></td><td><button class="btn ghost sm" data-act="slipview" data-i="${i}">View / print</button></td></tr>`).join('') || '<tr><td colspan="11" class="mute">No payroll paid in this period.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
+  ${r.rows.map((x, i) => `<tr><td>${esc(x.paidAt.slice(0, 10))}</td><td><b>${esc(x.staffName)}</b></td><td>${esc(x.branchName)}</td><td>${esc(x.period)}</td><td>${peso(x.commission)}</td><td>${peso(x.topup + (x.lunch || 0))}</td><td>${peso(x.bonus)}</td><td>${peso(x.gross)}</td><td>${peso(x.totalDeductions)}</td><td><b>${peso(x.net)}</b></td><td><button class="btn ghost sm" data-act="slipview" data-i="${i}">View / print</button></td></tr>`).join('') || '<tr><td colspan="11" class="mute">No payroll paid in this period.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
 }
 function vChkToday() {
   const c = ui.chkToday; if (!c) return '';
@@ -384,6 +384,11 @@ function vSettings() {
     <div class="card"><h3>Attendance</h3><label class="chk" style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:500"><input type="checkbox" id="at-photo" ${s.attPhoto ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Require a selfie for every time in and time out</label>
       <label class="chk" style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:500"><input type="checkbox" id="at-geo" ${s.attGeo ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Also record the location (optional, needs location permission on the phone)</label>
       <p class="mute" style="font-size:12px;margin:8px 0 10px">Tell your staff that selfies and location are recorded for attendance only. Photos are encrypted and visible only to you and your branch staff. Attendance works without internet: it is saved on the phone and uploaded automatically.</p><button class="btn sm" data-act="saveatt">Save</button></div>
+    ${s.payRules ? `<div class="card"><h3>Pay rules (late arrival)</h3><p class="mute" style="font-size:13px;margin:0 0 8px">Pay is always built on the barber's commission. Lateness is counted from the branch opening time (9:00) to the real time-in.</p>
+      <label>Free lunch money per day (₱)</label><input id="pr-lunch" type="number" min="0" value="${s.payRules.lunchAmount}">
+      <label>No free lunch when this many minutes late or more</label><input id="pr-ll" type="number" min="0" value="${s.payRules.lunchLateMins}">
+      <label>No daily allowance (and no lunch) when this many minutes late or more</label><input id="pr-al" type="number" min="0" value="${s.payRules.allowLateMins}">
+      <button class="btn sm" data-act="saverules" style="margin-top:10px">Save pay rules</button></div>` : ''}
     ${owner ? `<div class="card"><h3>Owner login</h3>
       <p style="margin:0 0 8px">Your username: <b>${s.ownerUser ? esc(s.ownerUser) : '<span class="mute">not set (you log in with a blank username)</span>'}</b></p>
       <label>New owner username</label><input id="ou-name" value="${esc(s.ownerUser || '')}" placeholder="e.g. kevin" autocapitalize="none" autocomplete="off">
@@ -541,7 +546,7 @@ document.addEventListener('click', async e => {
     const row = (l, v, b) => `<tr><td>${l}</td><td style="text-align:right">${b ? '<b>' + v + '</b>' : v}</td></tr>`;
     w.document.write(`<!doctype html><title>Payslip</title><body style="font:14px Arial;max-width:420px;margin:24px auto"><div style="text-align:center"><img src="/logo.png" width="80" style="border-radius:50%"><h2 style="margin:6px 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
       <p><b>${esc(x.staffName)}</b><br>${esc(x.branchName)}<br>Paid on ${esc(x.paidAt.slice(0, 10))} · Days: ${esc(x.days[0])}${x.days.length > 1 ? ' to ' + esc(x.days[x.days.length - 1]) : ''} (${x.days.length} day${x.days.length > 1 ? 's' : ''})</p>
-      <table style="width:100%;border-collapse:collapse">${row('Commission', peso(x.commission))}${row('Daily allowance top-up', peso(x.topup))}${row('Gross pay', peso(x.gross), 1)}${row('Less: advances taken during the day', '−' + peso(x.advance))}${x.deductionItems.map(d => row('Less: release pay installment ' + d.seq + ' (' + esc(d.type) + ')', '−' + peso(d.amount))).join('')}${row('NET PAY', peso(x.net), 1)}</table>
+      <table style="width:100%;border-collapse:collapse">${row('Commission', peso(x.commission))}${row('Daily allowance top-up', peso(x.topup))}${x.lunch ? row('Free lunch allowance', peso(x.lunch)) : ''}${row('Gross pay', peso(x.gross), 1)}${row('Less: advances taken during the day', '−' + peso(x.advance))}${x.deductionItems.map(d => row('Less: release pay installment ' + d.seq + ' (' + esc(d.type) + ')', '−' + peso(d.amount))).join('')}${row('NET PAY', peso(x.net), 1)}</table>
       <p style="font-size:11px;color:#666;margin-top:24px">Prepared by ${esc(x.paidBy || '')}. Deductions were authorized in writing by the employee.</p><script>window.print()<\/script>`);
     w.document.close(); return;
   }
@@ -567,6 +572,7 @@ document.addEventListener('click', async e => {
     const v = i => document.getElementById(i).value;
     try { await api('PUT', '/api/attendance/' + d.id + '/correct', { timeIn: v('fx-in'), timeOut: v('fx-out') || undefined, reason: v('fx-reason') }); closeModal(); await loadView(); render(); } catch (x) { document.getElementById('fx-err').textContent = x.message; } return;
   }
+  if (act === 'saverules') { try { await api('PUT', '/api/settings', { payRules: { lunchAmount: document.getElementById('pr-lunch').value, lunchLateMins: document.getElementById('pr-ll').value, allowLateMins: document.getElementById('pr-al').value } }); await loadView(); render(); alert('Pay rules saved. They apply to attendance from now on and to unpaid days.'); } catch (x) { alert(x.message); } return; }
   if (act === 'saveatt') { try { await api('PUT', '/api/settings', { attPhoto: document.getElementById('at-photo').checked, attGeo: document.getElementById('at-geo').checked }); await loadView(); render(); alert('Attendance settings saved.'); } catch (x) { alert(x.message); } return; }
   if (act === 'advhist') {
     const a = ui.adv.rows.find(r => r.id === d.id);

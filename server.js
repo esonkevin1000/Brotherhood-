@@ -62,7 +62,7 @@ addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'int
 addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
 db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
 addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
-addCol('payroll_days', 'deduction', 'real'); addCol('payroll_days', 'extra', 'real'); addCol('users', 'staffId', 'text');
+addCol('payroll_days', 'deduction', 'real'); addCol('payroll_days', 'extra', 'real'); addCol('payroll_days', 'lunch', 'real'); addCol('attendance', 'lateRaw', 'integer'); addCol('users', 'staffId', 'text');
 for (const c of ['inPhoto', 'outPhoto', 'deviceIn', 'deviceOut', 'receivedIn', 'receivedOut', 'geoIn', 'geoOut', 'flagReason', 'corrections']) addCol('attendance', c, 'text');
 for (const c of ['undertimeMins', 'overtimeMins', 'flagged', 'offline', 'corrected']) addCol('attendance', c, 'integer');
 db.exec(`create table if not exists attendance_events(id text primary key, clientId text unique, staffId text, branchId text, action text, deviceAt text, receivedAt text, effectiveAt text, photoId text, flag text, byName text);`); addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
@@ -558,9 +558,14 @@ function createTicket(me, branchId, customerId, name, items, barberId) {
 }
 
 // ---------- payroll / reports ----------
-// daily pay = commission earned that day, topped up to the barber's daily allowance when they showed up
+// Pay rules (owner can change them in Settings). Daily pay is always built on the barber's commission:
+//   commission + (daily allowance top-up, only if on time enough) + (free lunch money, only if on time)
+// Lateness is counted from the branch opening time (9:00) to the real time-in, with no grace.
+const ruleNum = (k, d) => { const v = getSetting(k); return v === undefined || v === null || v === '' || isNaN(+v) ? d : Math.max(0, +v); };
+const payRules = () => ({ lunchAmount: ruleNum('lunchAmount', 60), lunchLateMins: ruleNum('lunchLateMins', 15), allowLateMins: ruleNum('allowLateMins', 60) });
 function dayRows(from, to, br) {
-  const att = all(`select a.staffId, a.date, a.branchId, min(a.timeIn) timeIn, max(a.timeOut) timeOut, max(a.lateMins) lateMins, s.name, s.pct, s.allowance, s.chairId
+  const R = payRules();
+  const att = all(`select a.staffId, a.date, a.branchId, min(a.timeIn) timeIn, max(a.timeOut) timeOut, max(a.lateMins) lateMins, max(a.lateRaw) lateRawDb, s.name, s.pct, s.allowance, s.chairId
     from attendance a join staff s on s.id=a.staffId where a.date>=? and a.date<=? and ifnull(a.status,'present')='present'${br ? ' and a.branchId=?' : ''} group by a.staffId, a.date`, ...(br ? [from, to, br] : [from, to]));
   const ords = all(`select * from orders where status='paid' and date>=? and date<=?${br ? ' and branchId=?' : ''}`, ...(br ? [from, to, br] : [from, to])).map(parseOrder);
   const mv = all(`select * from cash_moves where kind='advance' and date>=? and date<=?${br ? ' and branchId=?' : ''}`, ...(br ? [from, to, br] : [from, to]));
@@ -568,9 +573,11 @@ function dayRows(from, to, br) {
   const paid = new Map(paidRows.map(p => [p.staffId + '|' + p.date, p.paidAt]));
   return att.map(a => {
     const commission = r2(sum(ords.filter(o => o.barberId === a.staffId && o.date === a.date), o => commissionOf(o, a.pct)));
-    const topup = r2(Math.max(0, (a.allowance || 0) - commission));
+    const bo = get('branches', a.branchId), lateRaw = a.lateRawDb != null ? a.lateRawDb : a.timeIn ? Math.max(0, minsOfDay(new Date(a.timeIn)) - toMin(bo?.openTime || '09:00')) : 0;   // stored at time-in; older records are worked out from the time-in
+    const allowLost = lateRaw >= R.allowLateMins, lunchLost = lateRaw >= R.lunchLateMins || allowLost;
+    const topup = allowLost ? 0 : r2(Math.max(0, (a.allowance || 0) - commission)), lunch = lunchLost ? 0 : r2(R.lunchAmount);
     const advance = r2(sum(mv.filter(m => m.staffId === a.staffId && m.date === a.date), m => m.amount));
-    return { ...a, commission, topup, advance, pay: r2(commission + topup), due: r2(commission + topup - advance), paidAt: paid.get(a.staffId + '|' + a.date) || null };
+    return { ...a, commission, topup, lunch, lateRaw, allowLost, lunchLost, advance, pay: r2(commission + topup + lunch), due: r2(commission + topup + lunch - advance), paidAt: paid.get(a.staffId + '|' + a.date) || null };
   });
 }
 const cashierName = id => (id && get('users', id)?.name) || '';
@@ -648,27 +655,27 @@ const REPORTS = {
     const st = all(`select s.*, b.name branchName, c.name chairName from staff s left join branches b on b.id=s.branchId left join chairs c on c.id=s.chairId${f.br ? ' where s.branchId=?' : ''} order by b.name, s.name`, ...(f.br ? [f.br] : []));
     const rows = st.map(s => {
       const mine = os.filter(o => o.barberId === s.id), d = days.filter(x => x.staffId === s.id), a = one('select * from attendance where staffId=? and date=? order by timeIn limit 1', s.id, t);
-      const comm = sum(mine, o => commissionOf(o, s.pct)), top = sum(d, x => x.topup);
+      const comm = sum(mine, o => commissionOf(o, s.pct)), top = sum(d, x => x.topup + x.lunch);
       return { s, n: sum(mine, o => sum(o.items.filter(i => i.type === 'service'), i => i.qty)), net: sum(mine, o => o.total), comm, top, pay: comm + top, att: a ? (a.status === 'off' ? 'Off duty' : a.lateMins > 0 ? 'Late' : 'Present') : '—' };
     }).filter(r => r.s.active || r.n);
     const net = sum(os, o => o.total), pay = sum(rows, r => r.pay);
     return {
       cards: [{ label: 'Services rendered', value: sum(rows, r => r.n), t: 'num' }, { label: 'Net sales', value: net, t: 'peso' }, { label: 'Commission earned', value: sum(rows, r => r.comm), t: 'peso' },
-        { label: 'Total payout', value: pay, t: 'peso', sub: 'Incl. allowance top-up ' + '₱' + sum(rows, r => r.top).toFixed(2) }, { label: 'Shop share', value: net - pay, t: 'peso', sub: 'Net sales − payout' }],
-      tables: [{ title: 'Barber commissions', cols: [['Barber'], ['Chair'], ['Branch'], ['Today'], ['Services', 'num'], ['Net sales', 'peso'], ['Rate'], ['Commission', 'peso'], ['Top-up', 'peso'], ['Payout', 'peso']],
+        { label: 'Total payout', value: pay, t: 'peso', sub: 'Incl. allowance top-up & lunch ' + '₱' + sum(rows, r => r.top).toFixed(2) }, { label: 'Shop share', value: net - pay, t: 'peso', sub: 'Net sales − payout' }],
+      tables: [{ title: 'Barber commissions', cols: [['Barber'], ['Chair'], ['Branch'], ['Today'], ['Services', 'num'], ['Net sales', 'peso'], ['Rate'], ['Commission', 'peso'], ['Top-up & lunch', 'peso'], ['Payout', 'peso']],
         rows: rows.map(r => [r.s.name, r.s.chairName || '', r.s.branchName, r.att, r.n, r.net, r.s.pct + '%', r.comm, r.top, r.pay]) }]
     };
   },
   payroll(f) {
     const days = dayRows('2000-01-01', f.to, f.br), unpaid = days.filter(d => !d.paidAt).sort((a, b) => a.date.localeCompare(b.date));
     const by = new Map(); for (const d of unpaid) { const r = by.get(d.staffId) || { d: [], name: d.name, branchId: d.branchId }; r.d.push(d); by.set(d.staffId, r); }
-    const rows = [...by.entries()].map(([id, r]) => ({ id, ...r, comm: sum(r.d, x => x.commission), top: sum(r.d, x => x.topup), adv: sum(r.d, x => x.advance) })).map(r => { const bon = adjTotal(r.id, f.to); return { ...r, bon, ded: planDeductions(r.id, f.to, r2(r.comm + r.top + bon - r.adv)).total }; });
+    const rows = [...by.entries()].map(([id, r]) => ({ id, ...r, comm: sum(r.d, x => x.commission), top: sum(r.d, x => x.topup + x.lunch), adv: sum(r.d, x => x.advance) })).map(r => { const bon = adjTotal(r.id, f.to); return { ...r, bon, ded: planDeductions(r.id, f.to, r2(r.comm + r.top + bon - r.adv)).total }; });
     const paidP = all('select * from payroll_days where date>=? and date<=?', f.from, f.to);
     return {
       cards: [{ label: 'Payroll due', value: sum(rows, r => r.comm + r.top + r.bon - r.adv - r.ded), t: 'peso', sub: 'Unpaid days up to ' + f.to }, { label: 'Barbers', value: rows.length, t: 'num' },
-        { label: 'Released during the day', value: sum(rows, r => r.adv), t: 'peso', sub: 'Already deducted' }, { label: 'Paid in period', value: sum(paidP, p => p.commission + p.topup + (p.extra || 0) - p.advance - (p.deduction || 0)), t: 'peso' }],
+        { label: 'Released during the day', value: sum(rows, r => r.adv), t: 'peso', sub: 'Already deducted' }, { label: 'Paid in period', value: sum(paidP, p => p.commission + p.topup + (p.lunch || 0) + (p.extra || 0) - p.advance - (p.deduction || 0)), t: 'peso' }],
       tables: [{
-        title: 'Payroll', selectable: true, ids: rows.map(r => r.id), cols: [['Barber'], ['Branch'], ['Days', 'num'], ['Dates'], ['Commission', 'peso'], ['Top-up', 'peso'], ['Bonuses & incentives', 'peso'], ['Advances', 'peso'], ['Release pay deductions', 'peso'], ['Net due', 'peso']],
+        title: 'Payroll', selectable: true, ids: rows.map(r => r.id), cols: [['Barber'], ['Branch'], ['Days', 'num'], ['Dates'], ['Commission', 'peso'], ['Top-up & lunch', 'peso'], ['Bonuses & incentives', 'peso'], ['Advances', 'peso'], ['Release pay deductions', 'peso'], ['Net due', 'peso']],
         rows: rows.map(r => [r.name, get('branches', r.branchId)?.name || '', r.d.length, r.d[0].date + (r.d.length > 1 ? ' → ' + r.d[r.d.length - 1].date : ''), r.comm, r.top, r.bon, r.adv, r.ded, r.comm + r.top + r.bon - r.adv - r.ded])
       }]
     };
@@ -1036,13 +1043,14 @@ async function handle(req, res) {
   // ----- settings: terms, email (admin) -----
   if (p === '/api/settings' && method === 'GET') {
     adminOnly();
-    return send(res, 200, { attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+    return send(res, 200, { payRules: payRules(), attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
       log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
   }
   if (p === '/api/settings' && method === 'PUT') {
     adminOnly(); const b = await readBody(req, 50_000);
     if ('attPhoto' in b) setSetting('attPhoto', b.attPhoto ? '1' : '0');
     if ('attGeo' in b) setSetting('attGeo', b.attGeo ? '1' : '0');
+    if (b.payRules) { for (const k of ['lunchAmount', 'lunchLateMins', 'allowLateMins']) if (k in b.payRules) { const v = Number(b.payRules[k]); if (!(v >= 0 && v <= 100000)) bad(400, 'Enter a valid number'); setSetting(k, String(v)); } log(me, 'pay-rules', 'settings', '', JSON.stringify(payRules())); }
     if ('terms' in b) setSetting('terms', String(b.terms || '').trim().slice(0, 8000));
     if (b.perms && typeof b.perms === 'object') {
       const cur = permsAll(), next = {}; for (const role of ['cashier', 'barber']) next[role] = Array.isArray(b.perms[role]) ? b.perms[role].filter(m => MODULES.includes(m)) : cur[role];
@@ -1372,13 +1380,13 @@ async function handle(req, res) {
   // ----- digital payslips: every payroll payment, with a full breakdown -----
   const payslipRows = (from, to, br, staffId) => {
     const days = all(`select pd.*, s.name staffName from payroll_days pd join staff s on s.id=pd.staffId where substr(pd.paidAt,1,10)>=? and substr(pd.paidAt,1,10)<=?${br ? ' and pd.branchId=?' : ''}${staffId ? ' and pd.staffId=?' : ''} order by pd.paidAt desc, pd.date`, from, to, ...(br ? [br] : []), ...(staffId ? [staffId] : [])), by = new Map();
-    for (const d of days) { const k = d.staffId + '|' + d.paidAt.slice(0, 16); const r = by.get(k) || { staffId: d.staffId, staffName: d.staffName, branchName: get('branches', d.branchId)?.name || '', paidAt: d.paidAt, paidBy: d.paidBy, days: [], dayItems: [], commission: 0, topup: 0, bonus: 0, advance: 0, deduction: 0 }; r.days.push(d.date); r.dayItems.push({ date: d.date, commission: d.commission, topup: d.topup }); r.commission = r2(r.commission + d.commission); r.topup = r2(r.topup + d.topup); r.bonus = r2(r.bonus + (d.extra || 0)); r.advance = r2(r.advance + d.advance); r.deduction = r2(r.deduction + (d.deduction || 0)); by.set(k, r); }
+    for (const d of days) { const k = d.staffId + '|' + d.paidAt.slice(0, 16); const r = by.get(k) || { staffId: d.staffId, staffName: d.staffName, branchName: get('branches', d.branchId)?.name || '', paidAt: d.paidAt, paidBy: d.paidBy, days: [], dayItems: [], commission: 0, topup: 0, lunch: 0, bonus: 0, advance: 0, deduction: 0 }; r.days.push(d.date); r.dayItems.push({ date: d.date, commission: d.commission, topup: d.topup, lunch: d.lunch || 0 }); r.commission = r2(r.commission + d.commission); r.topup = r2(r.topup + d.topup); r.lunch = r2(r.lunch + (d.lunch || 0)); r.bonus = r2(r.bonus + (d.extra || 0)); r.advance = r2(r.advance + d.advance); r.deduction = r2(r.deduction + (d.deduction || 0)); by.set(k, r); }
     const cat = t => t === 'Partial Salary Release' ? 'Partial salary release' : t === 'Other Authorized Deduction' ? 'Other authorized deduction' : 'Cash advance';
     return [...by.values()].map(r => {
       const ph = r.days.map(() => '?').join(','), last = r.days[r.days.length - 1];
       const earnings = all(`select kind, amount, note, date from staff_adjustments where staffId=? and payrollDate=?`, r.staffId, last), cashAdv = all(`select date, amount, note from cash_moves where kind='advance' and staffId=? and date in (${ph})`, r.staffId, ...r.days);
       const deds = all(`select d.amount, d.seq, a.type, a.installments from advance_deductions d join advances a on a.id=d.advanceId where d.staffId=? and d.status='APPLIED' and d.payrollDate=?`, r.staffId, last);
-      const gross = r2(r.commission + r.topup + r.bonus), totalDed = r2(r.advance + r.deduction);
+      const gross = r2(r.commission + r.topup + r.lunch + r.bonus), totalDed = r2(r.advance + r.deduction);
       return { ...r, period: r.days[0] + (r.days.length > 1 ? ' to ' + last : ''), earningItems: earnings, gross, advanceItems: cashAdv.map(c => ({ label: 'Cash advance taken on ' + c.date, amount: c.amount })), deductionItems: deds.map(d => ({ label: `${cat(d.type)} (installment ${d.seq} of ${d.installments})`, category: cat(d.type), amount: d.amount })), totalDeductions: totalDed, net: r2(gross - totalDed) };
     });
   };
@@ -1398,9 +1406,9 @@ async function handle(req, res) {
     const s = get('staff', sid), t = todayStr(), from = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
     const mine = dayRows(from, t, s.branchId).filter(d => d.staffId === sid), unpaid = mine.filter(d => !d.paidAt), today = mine.find(d => d.date === t);
     const cuts = one("select count(*) n from orders where status='paid' and date=? and barberId=?", t, sid).n;
-    const pay = r2(sum(unpaid, d => d.commission + d.topup)), adv = r2(sum(unpaid, d => d.advance)), bonus = adjTotal(sid, t), ded = planDeductions(sid, t, r2(pay + bonus - adv)).total;
-    return send(res, 200, { name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', allowance: s.allowance || 0, pct: s.pct, today: { present: !!today, cuts, commission: today ? today.commission : 0, topup: today ? today.topup : 0, pay: today ? today.pay : 0 },
-      unpaid: { days: unpaid.length, since: unpaid.length ? unpaid[0].date : null, commission: r2(sum(unpaid, d => d.commission)), topup: r2(sum(unpaid, d => d.topup)), bonus, advance: adv, deductions: ded, net: r2(pay + bonus - adv - ded), list: unpaid.slice(-14).map(d => ({ date: d.date, commission: d.commission, topup: d.topup, pay: d.pay })) } });
+    const pay = r2(sum(unpaid, d => d.commission + d.topup + d.lunch)), adv = r2(sum(unpaid, d => d.advance)), bonus = adjTotal(sid, t), ded = planDeductions(sid, t, r2(pay + bonus - adv)).total;
+    return send(res, 200, { name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', allowance: s.allowance || 0, pct: s.pct, today: { present: !!today, cuts, commission: today ? today.commission : 0, topup: today ? today.topup : 0, lunch: today ? today.lunch : 0, lateMins: today ? today.lateRaw : 0, lunchLost: !!today && today.lunchLost, allowLost: !!today && today.allowLost, pay: today ? today.pay : 0 }, rules: payRules(),
+      unpaid: { days: unpaid.length, since: unpaid.length ? unpaid[0].date : null, commission: r2(sum(unpaid, d => d.commission)), topup: r2(sum(unpaid, d => d.topup)), lunch: r2(sum(unpaid, d => d.lunch)), bonus, advance: adv, deductions: ded, net: r2(pay + bonus - adv - ded), list: unpaid.slice(-14).map(d => ({ date: d.date, commission: d.commission, topup: d.topup, pay: d.pay })) } });
   }
   // ----- what needs the owner's attention (drives the red badges and the bell) -----
   if (p === '/api/notifications' && method === 'GET') {
@@ -1514,10 +1522,10 @@ async function handle(req, res) {
     adminOnly(); const b = await readBody(req), to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : todayStr(); let n = 0;
     for (const sid of Array.isArray(b.staffIds) ? b.staffIds : []) {
       const days = dayRows('2000-01-01', to, null).filter(x => x.staffId === sid && !x.paidAt).sort((x, y) => x.date.localeCompare(y.date)); if (!days.length) continue;
-      const bonus = adjTotal(sid, to), plan = planDeductions(sid, to, r2(sum(days, x => x.commission + x.topup - x.advance) + bonus)), last = days[days.length - 1].date;
+      const bonus = adjTotal(sid, to), plan = planDeductions(sid, to, r2(sum(days, x => x.commission + x.topup + x.lunch - x.advance) + bonus)), last = days[days.length - 1].date;
       db.exec('begin');
       try {
-        for (const d of days) { run('insert or ignore into payroll_days(staffId,date,branchId,commission,topup,advance,paidAt,paidBy) values(?,?,?,?,?,?,?,?)', sid, d.date, d.branchId, d.commission, d.topup, d.advance, nowISO(), me.name); n++; }
+        for (const d of days) { run('insert or ignore into payroll_days(staffId,date,branchId,commission,topup,lunch,advance,paidAt,paidBy) values(?,?,?,?,?,?,?,?,?)', sid, d.date, d.branchId, d.commission, d.topup, d.lunch || 0, d.advance, nowISO(), me.name); n++; }
         let applied = 0;
         for (const d of plan.list) { if (Number(run("update advance_deductions set status='APPLIED', appliedAt=?, payrollDate=? where id=? and status='SCHEDULED'", nowISO(), last, d.id).changes) === 1) applied = r2(applied + d.amount); }
         if (bonus) run('update staff_adjustments set payrollDate=? where staffId=? and payrollDate is null and date<=?', last, sid, to);
@@ -1690,10 +1698,10 @@ async function handle(req, res) {
     let attId = '';
     if (b.action === 'in') {
       if (open) bad(409, `${s.name} is already clocked in`);
-      const late = Math.max(0, minsOfDay(at) - (toMin(br.openTime) + (br.graceMins || 0)));
+      const late = Math.max(0, minsOfDay(at) - (toMin(br.openTime) + (br.graceMins || 0))), lateRaw = Math.max(0, minsOfDay(at) - toMin(br.openTime));   // lateRaw = minutes after opening time with no grace (used for the lunch/allowance pay rules)
       run("delete from attendance where staffId=? and date=? and status='off'", s.id, t);
       const prior = one('select 1 x from attendance where staffId=? and date=?', s.id, t); attId = uid();
-      run('insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins,inPhoto,deviceIn,receivedIn,geoIn,flagged,flagReason,offline) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', attId, s.id, s.branchId, t, atIso, null, prior ? 0 : late, photo?.id || '', b.deviceAt || '', recvIso, geo ? JSON.stringify(geo) : '', flag ? 1 : 0, flag, offlineMin > 2 ? 1 : 0);
+      run('insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins,lateRaw,inPhoto,deviceIn,receivedIn,geoIn,flagged,flagReason,offline) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', attId, s.id, s.branchId, t, atIso, null, prior ? 0 : late, prior ? 0 : lateRaw, photo?.id || '', b.deviceAt || '', recvIso, geo ? JSON.stringify(geo) : '', flag ? 1 : 0, flag, offlineMin > 2 ? 1 : 0);
       promoteNext(s.branchId, s.chairId);
     } else if (b.action === 'out') {
       if (!open) bad(409, `${s.name} is not clocked in`);
@@ -1736,9 +1744,9 @@ async function handle(req, res) {
     const parse = v => { if (!v) return null; const s = /^\d{2}:\d{2}$/.test(v) ? `${a.date}T${v}:00` : String(v); const d = new Date(s); if (isNaN(d)) bad(400, 'Invalid time'); return d; };
     const tin = b.timeIn ? parse(b.timeIn) : new Date(a.timeIn), tout = b.timeOut === '' || b.timeOut === undefined ? (a.timeOut ? new Date(a.timeOut) : null) : parse(b.timeOut);
     if (tout && tout < tin) bad(400, 'The time out cannot be earlier than the time in');
-    const br = get('branches', a.branchId), close = toMin(br.closeTime || '21:00'), late = Math.max(0, minsOfDay(tin) - (toMin(br.openTime) + (br.graceMins || 0)));
+    const br = get('branches', a.branchId), close = toMin(br.closeTime || '21:00'), late = Math.max(0, minsOfDay(tin) - (toMin(br.openTime) + (br.graceMins || 0))), lateRaw = Math.max(0, minsOfDay(tin) - toMin(br.openTime));
     const log2 = jp(a.corrections); log2.push({ at: nowISO(), by: me.name, reason, before: { timeIn: a.timeIn, timeOut: a.timeOut, lateMins: a.lateMins }, after: { timeIn: tin.toISOString(), timeOut: tout ? tout.toISOString() : null } });
-    run('update attendance set timeIn=?, timeOut=?, lateMins=?, undertimeMins=?, overtimeMins=?, corrections=?, corrected=1 where id=?', tin.toISOString(), tout ? tout.toISOString() : null, late, tout ? Math.max(0, close - minsOfDay(tout)) : 0, tout ? Math.max(0, minsOfDay(tout) - close) : 0, JSON.stringify(log2), a.id);
+    run('update attendance set timeIn=?, timeOut=?, lateMins=?, lateRaw=?, undertimeMins=?, overtimeMins=?, corrections=?, corrected=1 where id=?', tin.toISOString(), tout ? tout.toISOString() : null, late, lateRaw, tout ? Math.max(0, close - minsOfDay(tout)) : 0, tout ? Math.max(0, minsOfDay(tout) - close) : 0, JSON.stringify(log2), a.id);
     log(me, 'attendance-correction', 'attendance', a.id, reason); return send(res, 200, { ok: true });
   }
   if (p === '/api/shifts/open' && method === 'POST') {
