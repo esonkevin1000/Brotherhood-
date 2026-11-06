@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -10,7 +10,7 @@
 body{margin:0;font:14px/1.45 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
 nav{width:200px;background:var(--panel);border-right:1px solid var(--line);padding:16px 10px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
 nav h1{font-size:18px;margin:0 8px 14px;color:var(--gold);letter-spacing:.5px}
-nav button{background:none;border:0;color:var(--mute);text-align:left;padding:10px 12px;border-radius:8px;font:inherit;cursor:pointer}
+nav button{background:none;border:0;color:var(--mute);text-align:left;padding:7px 12px;border-radius:8px;font:inherit;cursor:pointer}
 nav button:hover{background:var(--panel2);color:var(--text)}
 nav button.on{background:var(--gold);color:#111;font-weight:600}
 main{flex:1;padding:24px;min-width:0}
@@ -52,6 +52,7 @@ dialog::backdrop{background:#000a}
 .overflow{overflow-x:auto}
 .online{max-width:520px;margin:0 auto}
 @media(max-width:700px){body{flex-direction:column}nav{width:100%;height:auto;position:static;flex-direction:row;overflow-x:auto}nav h1{display:none}main{padding:14px}}
+nav{overflow-y:auto}.navh{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.8px;margin:12px 12px 2px}.stat small{display:block;margin-top:2px;font-size:11px}button:disabled{opacity:.4;cursor:default}
 </style>
 </head>
 <body>
