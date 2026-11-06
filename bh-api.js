@@ -2,7 +2,7 @@
 // Mounted from server.js under /api/bh/*. Shares the same database, staff, branches, bookings and reviews as the POS.
 export function mountBH(c) {
   const { db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor,
-    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
+    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
 
   // ---------- schema ----------
   db.exec(`
@@ -25,7 +25,7 @@ create table if not exists bh_notifs(id text primary key, userId text, kind text
 create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
 create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
-  addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
+  addCol('bh_users', 'styles', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
 
   // ---------- helpers ----------
@@ -52,7 +52,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   };
   const needUser = req => userOf(req) || bad(401, 'Please log in');
   const tokenOf = u => makeToken('c:' + u.id, u.passHash.slice(-8));
-  const pubUser = u => ({ id: u.id, name: u.name, email: u.email, phone: u.phone, city: u.city || '', bio: u.bio || '' });
+  const pubUser = u => ({ id: u.id, name: u.name, email: u.email, phone: u.phone, city: u.city || '', bio: u.bio || '', styles: jp(u.styles) });
   const short = n => { const w = String(n || '').trim().split(/\s+/); return w.length > 1 ? `${w[0]} ${w[w.length - 1][0]}.` : w[0] || 'Customer'; };
   const clip = (s, n) => String(s ?? '').trim().slice(0, n);
   const url = s => { s = clip(s, 200); return /^(https?:\/\/|@?[\w.]+$)/i.test(s) ? s : ''; };
@@ -105,6 +105,10 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       run('update bh_users set name=?, phone=?, city=?, bio=? where id=?', name, phone, clip(b.city ?? u.city, 60), clip(b.bio ?? u.bio, 300), u.id);
       return send(res, 200, { user: pubUser(get('bh_users', u.id)) });
     }
+    if (sub === '/me/styles' && method === 'PUT') {   // saved hairstyle ideas from the Style Finder (ids come from the app's catalog)
+      const u = needUser(req), b = await readBody(req), ids = [...new Set((Array.isArray(b.styles) ? b.styles : []).map(x => String(x)).filter(x => /^[a-z0-9-]{2,30}$/.test(x)))].slice(0, 12);
+      run('update bh_users set styles=? where id=?', JSON.stringify(ids), u.id); return send(res, 200, { styles: ids });
+    }
     if (sub === '/me/password' && method === 'PUT') {
       const u = needUser(req), b = await readBody(req);
       if (!checkPw(String(b.current || ''), u.passHash)) bad(403, 'Current password is wrong');
@@ -154,6 +158,15 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         branch: { id: br.id, name: br.name, address: br.address || '', phone: br.phone || '', openTime: br.openTime || '09:00', closeTime: br.closeTime || '21:00', mapUrl: br.mapUrl || '' },
         portfolio: all('select id,url,caption from bh_portfolio where staffId=? order by createdAt desc limit 60', s.id), reviews,
         services: servicesList(), favorite: !!(u && one('select 1 x from bh_favorites where userId=? and staffId=?', u.id, s.id)) });
+    }
+    const shm = sub.match(/^\/shops\/(\w+)$/);
+    if (shm && method === 'GET') {
+      const b = get('branches', shm[1]); if (!b) bad(404, 'Shop not found');
+      const bm2 = new Map(all('select * from branches').map(x => [x.id, x])), rm = ratingMap(), pc = portCount(), rv = one('select count(*) n, avg(rating) a from reviews where branchId=?', b.id);
+      const barbers = all('select * from staff where branchId=? and active=1', b.id).map(s => barberCard(s, rm, pc, bm2)).sort((x, y) => y.score - x.score);
+      const gallery = siteGallery(b.name), reviews = all('select r.id,r.name,r.rating,r.text,r.createdAt,coalesce(r.verified,0) verified, s.name staffName from reviews r left join staff s on s.id=r.staffId where r.branchId=? order by r.createdAt desc limit 20', b.id);
+      return send(res, 200, { shop: { id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '', photo: b.photo || siteCover(b.name) || '',
+        rating: rv.n ? Math.round(rv.a * 10) / 10 : 0, reviews: rv.n }, gallery: b.photo ? [b.photo, ...gallery.filter(g => g !== b.photo)] : gallery, barbers, reviews, services: servicesList() });
     }
     const fm = sub.match(/^\/favorites\/(\w+)$/);
     if (fm && (method === 'PUT' || method === 'DELETE')) {

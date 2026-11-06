@@ -55,6 +55,7 @@ function vHome() {
   const D = S.D, up = (S.mine || []).filter(b => b.status === 'booked' && b.date >= ymd(new Date())).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
   return header() + `<div class="hero pop"><h1>More than a haircut.<br>It's a brotherhood.</h1><p>Find your barber. Book in seconds. Always free for customers.</p><button class="btn" data-go="/discover">${ic('search')} Find a barber</button></div>
   ${up ? `<div class="card pop" style="margin-bottom:6px"><div class="sm mute">YOUR NEXT CUT</div><div class="nm" style="margin-top:4px">${fmtDate(up.date)} · ${t12(up.time)}</div><div class="sm mute">${esc(up.items.map(i => i.name).join(' + '))} with ${esc(up.staffName)} · ${esc(up.branchName)}</div></div>` : ''}
+  <button class="bcard" data-go="/style" style="margin-top:6px"><span class="av" style="background:var(--s2)">${ic('scissors')}</span><div class="sp"><div class="nm">Find your cut</div><div class="sm mute">Pick your face shape and get cut ideas to show your barber</div></div></button>
   <div class="sec-h"><h2>Top barbers</h2><button class="link" data-go="/discover">See all</button></div>
   <div class="list">${D ? D.barbers.slice(0, 5).map(barberRow).join('') || '<div class="empty">No barbers yet.</div>' : '<div class="empty">Loading…</div>'}</div>
   <div class="sec-h"><h2>Our shops</h2></div><div class="list">${D ? D.shops.map(shopCard).join('') : ''}</div>`;
@@ -88,7 +89,7 @@ async function vBarber(id) {
 
 // ----- booking -----
 function startBooking(branchId, staffId) {
-  S.bk = { branchId, staffId: staffId || 'any', items: [], date: ymd(new Date()), time: '', slots: null, notes: '', err: '', busy: false, done: null };
+  S.bk = { branchId, staffId: staffId || 'any', items: [], date: ymd(new Date()), time: '', slots: null, notes: S.styleNote || '', err: '', busy: false, done: null };
   nav('/book');
 }
 async function loadSlots() {
@@ -107,13 +108,14 @@ function vBook() {
   <div class="sec-h"><h2>2 · Service</h2></div><div class="list">${D.services.map(s => `<button class="svc ${k.items.includes(s.id) ? 'on' : ''}" data-bsvc="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="">` : ''}<div class="sp" style="text-align:left"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num">${peso(s.price)}</b><span class="chk">${k.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('')}</div>
   <div class="sec-h"><h2>3 · Date</h2></div><div class="days">${days.map(d => `<button class="day ${k.date === ymd(d) ? 'on' : ''}" data-bday="${ymd(d)}"><span class="sm">${d.toLocaleDateString('en-PH', { weekday: 'short' })}</span><b>${d.getDate()}</b><span class="sm">${d.toLocaleDateString('en-PH', { month: 'short' })}</span></button>`).join('')}</div>
   <div class="sec-h"><h2>4 · Time</h2></div>${!k.items.length ? '<div class="mute sm">Pick a service first.</div>' : k.slots === null ? '<div class="mute sm">Checking availability…</div>' : k.slots.length ? `<div class="slots">${k.slots.map(t => `<button class="slot ${k.time === t ? 'on' : ''}" data-btime="${t}">${t12(t)}</button>`).join('')}</div>` : '<div class="card empty">No open slots that day. Try another date or barber.</div>'}
+  ${(S.user?.styles || []).length ? `<div class="sm mute" style="margin-top:14px">Add a saved style to your notes</div><div class="chips">${S.user.styles.map(cutById).filter(Boolean).map(c => `<button class="chip" data-snote="${c.id}">${esc(c.name)}</button>`).join('')}</div>` : ''}
   <label class="f">Notes for your barber (optional)<textarea id="bnotes" rows="2" maxlength="300" placeholder="Reference cut, allergies, anything we should know">${esc(k.notes)}</textarea></label>
   ${k.err ? `<div class="err">${esc(k.err)}</div>` : ''}
   <div class="foot"><div><div class="sp"><div class="sm mute">Total · pay at the shop</div><b class="num" style="font-size:22px">${peso(total)}</b></div><button class="btn" data-confirm style="min-width:160px" ${k.items.length && k.time && !k.busy ? '' : 'disabled'}>${k.busy ? 'Booking…' : 'Confirm booking'}</button></div></div>`;
 }
 async function confirmBooking() {
   const k = S.bk; k.busy = true; k.err = ''; render();
-  try { const j = await api('/book', { method: 'POST', body: { branchId: k.branchId, staffId: k.staffId, itemIds: k.items, date: k.date, time: k.time, notes: k.notes } }); k.done = j.booking; S.mine = null; }
+  try { const j = await api('/book', { method: 'POST', body: { branchId: k.branchId, staffId: k.staffId, itemIds: k.items, date: k.date, time: k.time, notes: k.notes } }); k.done = j.booking; S.mine = null; S.styleNote = ''; }
   catch (e) { k.err = e.message; if (/no longer available/i.test(e.message)) loadSlots(); }
   k.busy = false; render();
 }
@@ -146,6 +148,7 @@ function vMe() {
   const u = S.user, favs = S.D ? S.D.barbers.filter(b => S.favs.includes(b.id)) : [];
   return header('Profile', '/') + `<div class="card row"><span class="av">${esc(initials(u.name))}</span><div class="sp"><b>${esc(u.name)}</b><div class="sm mute">${esc(u.email)}</div></div></div>
   <div class="sec-h"><h2>Favorite barbers</h2></div><div class="list">${favs.map(barberRow).join('') || '<div class="card empty">Tap the heart on a barber to save them.</div>'}</div>
+  <div class="sec-h"><h2>Saved styles</h2><button class="link" data-go="/style">Style finder</button></div><div class="pill-row">${(u.styles || []).map(id => cutById(id)).filter(Boolean).map(c => `<span class="tag">${esc(c.name)}</span>`).join('') || '<span class="mute sm">None yet. Try the Style finder.</span>'}</div>
   <div class="sec-h"><h2>My details</h2></div><form id="mef">${S.meMsg ? `<div class="${S.meMsg.ok ? 'ok' : 'err'}">${esc(S.meMsg.t)}</div>` : ''}<label class="f">Name<input name="name" value="${esc(u.name)}" required></label><label class="f">Mobile<input name="phone" type="tel" value="${esc(u.phone)}" required></label><label class="f">City<input name="city" value="${esc(u.city)}" placeholder="e.g. San Pablo"></label><button class="btn block" style="margin-top:14px">Save</button></form>
   <div class="sec-h"><h2>For barbers & owners</h2></div><div class="card"><p class="mute sm" style="margin-top:0">Manage your professional profile and portfolio with your Brotherhood staff login.</p><button class="btn sec block" data-go="/pro">Open pro tools</button></div>
   <div class="sec-h"><h2>Account</h2></div><div class="list"><button class="btn ghost block" data-logout>Log out</button><details class="card"><summary>Delete my account</summary><p class="sm mute">This removes your account and favorites. Shop booking records stay with the shop but are unlinked from you.</p><input id="delpw" type="password" placeholder="Confirm password"><button class="btn danger block" style="margin-top:10px" data-delete>Delete account</button></details></div>`;
@@ -187,6 +190,73 @@ async function loadDash() {
   render();
 }
 
+
+
+// ----- Style Finder (rule-based recommendations; not AI and not a guaranteed result) -----
+const FACES = [['oval', 'Oval', 'Face is longer than wide, jaw slightly narrower than the forehead. Most cuts work.'], ['round', 'Round', 'Width and length are similar, soft jaw and full cheeks.'], ['square', 'Square', 'Strong, angular jaw; forehead and jaw about the same width.'],
+  ['heart', 'Heart', 'Wide forehead, narrower chin.'], ['oblong', 'Oblong', 'Long face, forehead, cheeks and jaw similar width.'], ['diamond', 'Diamond', 'Cheekbones widest, narrower forehead and jaw.']];
+const HAIRS = [['straight', 'Straight'], ['wavy', 'Wavy'], ['curly', 'Curly'], ['coily', 'Coily / very thick']];
+const CUTS = [
+  { id: 'low-fade', name: 'Low Fade', face: ['oval', 'square', 'oblong', 'heart'], hair: ['straight', 'wavy', 'curly', 'coily'], care: 1, top: 'Short to medium', sides: 'Low fade, starts above the ears', style: 'Matte clay or light pomade', every: '3-4 weeks', note: 'Clean and easy. A safe first fade.' },
+  { id: 'mid-fade', name: 'Mid Fade', face: ['oval', 'round', 'square', 'diamond'], hair: ['straight', 'wavy', 'curly', 'coily'], care: 2, top: 'Short to medium', sides: 'Mid fade at the temple', style: 'Texture powder or clay', every: '2-3 weeks', note: 'Balanced contrast that suits most faces.' },
+  { id: 'high-fade', name: 'High Fade', face: ['oval', 'oblong', 'diamond'], hair: ['straight', 'wavy', 'curly', 'coily'], care: 3, top: 'Medium, kept on top', sides: 'High fade, tight on the sides', style: 'Pomade or matte paste', every: '2 weeks', note: 'Sharp, strong contrast. Needs frequent upkeep.' },
+  { id: 'taper-fade', name: 'Taper Fade', face: ['oval', 'round', 'square', 'heart', 'oblong', 'diamond'], hair: ['straight', 'wavy', 'curly', 'coily'], care: 1, top: 'Medium', sides: 'Gradual taper at sideburns and neckline', style: 'Matte finish', every: '3 weeks', note: 'Neat and office-friendly, grows out gracefully.' },
+  { id: 'skin-fade', name: 'Skin Fade', face: ['oval', 'square', 'round', 'diamond'], hair: ['straight', 'wavy', 'curly', 'coily'], care: 3, top: 'Short to medium', sides: 'Fades down to bare skin', style: 'Light pomade', every: '2 weeks', note: 'The cleanest look; shows every regrowth.' },
+  { id: 'burst-fade', name: 'Burst Fade', face: ['oval', 'square', 'heart'], hair: ['wavy', 'curly', 'coily'], care: 2, top: 'Medium to long, textured', sides: 'Fade curves around the ear', style: 'Curl cream or sea salt spray', every: '3 weeks', note: 'Great with curls and a mohawk-style top.' },
+  { id: 'french-crop', name: 'French Crop', face: ['round', 'oval', 'oblong', 'diamond'], hair: ['straight', 'wavy'], care: 1, top: 'Short, forward fringe', sides: 'Short, can be faded', style: 'Matte clay', every: '3-4 weeks', note: 'Low maintenance; the fringe softens a long forehead.' },
+  { id: 'textured-crop', name: 'Textured Crop', face: ['oval', 'round', 'square', 'heart', 'diamond'], hair: ['straight', 'wavy', 'curly'], care: 1, top: 'Short to medium, choppy', sides: 'Tapered', style: 'Sea salt spray or texture powder', every: '3-4 weeks', note: 'Messy-on-purpose volume with minimal effort.' },
+  { id: 'buzz-cut', name: 'Buzz Cut', face: ['oval', 'square', 'diamond'], hair: ['straight', 'wavy', 'curly', 'coily'], care: 1, top: 'Very short, one guard length', sides: 'Same length or lightly tapered', style: 'None', every: '2-3 weeks', note: 'Fastest routine. Best for balanced head shapes.' },
+  { id: 'pompadour', name: 'Pompadour', face: ['oval', 'square', 'round', 'diamond'], hair: ['straight', 'wavy'], care: 3, top: 'Long, swept up and back', sides: 'Faded or tapered short', style: 'Strong pomade and blow dry', every: '3 weeks', note: 'Adds height to round faces; needs daily styling.' },
+  { id: 'slick-back', name: 'Slick Back', face: ['oval', 'square', 'oblong', 'heart'], hair: ['straight', 'wavy'], care: 2, top: 'Medium to long, combed back', sides: 'Tapered or faded', style: 'Medium-hold pomade', every: '3-4 weeks', note: 'Classic and sharp; works best with thicker hair.' },
+  { id: 'two-block', name: 'Two Block', face: ['round', 'oval', 'heart', 'oblong'], hair: ['straight', 'wavy'], care: 2, top: 'Medium, longer than the sides', sides: 'Short, disconnected from the top', style: 'Light wax', every: '4 weeks', note: 'Popular and easy to style; flatters round faces.' },
+  { id: 'scissor-cut', name: 'Classic Scissor Cut', face: ['oval', 'round', 'square', 'heart', 'oblong', 'diamond'], hair: ['straight', 'wavy', 'curly'], care: 1, top: 'Medium, natural', sides: 'Scissor-over-comb, soft taper', style: 'Light cream or none', every: '4-5 weeks', note: 'Natural look that grows out evenly.' },
+  { id: 'long-flow', name: 'Long Hairstyle', face: ['oval', 'square', 'heart', 'diamond'], hair: ['straight', 'wavy', 'curly'], care: 2, top: 'Long, layered', sides: 'Long, tapered neckline', style: 'Leave-in cream, air dry', every: '6-8 weeks', note: 'Long layers frame the face; regular trims keep it healthy.' }
+];
+const CARES = [[1, 'Low', 'Wash and go'], [2, 'Medium', 'A few minutes daily'], [3, 'High', 'I enjoy styling']];
+const SF = { face: '', hair: '', care: 0, done: false };
+const cutById = id => CUTS.find(c => c.id === id);
+function recommend() {
+  return CUTS.map(c => { let sc = (c.face.includes(SF.face) ? 50 : 0) + (c.hair.includes(SF.hair) ? 30 : 0); sc += 20 - Math.abs(c.care - (SF.care || 2)) * 10; return { c, sc }; }).filter(x => x.sc >= 50).sort((a, b) => b.sc - a.sc).slice(0, 3);
+}
+function vStyle() {
+  const saved = (S.user?.styles || []), pick = (k, v) => SF[k] === v ? 'on' : '';
+  if (SF.done) {
+    const rec = recommend(), face = FACES.find(f => f[0] === SF.face)[1];
+    return header('Your style', '/') + `<div class="card"><div class="sm mute">Based on</div><b>${esc(face)} face · ${esc(HAIRS.find(h => h[0] === SF.hair)[1])} hair · ${CARES.find(c => c[0] === (SF.care || 2))[1]} upkeep</b></div>
+    <div class="list" style="margin-top:12px">${rec.map(({ c }, i) => `<div class="card pop">${i === 0 ? '<span class="tag on">Best match</span> ' : ''}<h3 style="font-size:22px;margin:6px 0 4px">${esc(c.name)}</h3><div class="mute sm" style="margin-bottom:8px">${esc(c.note)}</div>
+      ${[['Face shape', face], ['Top', c.top], ['Sides', c.sides], ['Styling', c.style], ['Maintenance', 'Every ' + c.every]].map(([k, v]) => `<div class="row sm" style="padding:5px 0;border-top:1px solid var(--line)"><span class="mute" style="width:100px">${k}</span><span>${esc(v)}</span></div>`).join('')}
+      <div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn sm ${saved.includes(c.id) ? 'sec' : ''}" data-ssave="${c.id}">${saved.includes(c.id) ? '♥ Saved' : 'Save'}</button><button class="btn sec sm" data-sbook="${c.id}">${ic('cal')} Book with this cut</button></div></div>`).join('') || '<div class="card empty">No strong matches. Try a different upkeep level.</div>'}</div>
+    <p class="mute sm" style="margin-top:14px">These are suggestions from simple grooming rules, not an AI scan or a guaranteed result. Show it to your barber and they will adjust it to your head shape, hairline and hair growth.</p>
+    <button class="btn ghost block" data-sagain>Start over</button>`;
+  }
+  const ready = SF.face && SF.hair;
+  return header('Style finder', '/') + `<p class="mute" style="margin-top:0">Answer three quick questions and get cuts that suit you. You will not need to upload a photo.</p>
+  <div class="sec-h" style="margin-top:8px"><h2>1 · Face shape</h2></div><div class="list">${FACES.map(([id, n, d]) => `<button class="svc ${pick('face', id)}" data-sface="${id}"><div class="sp" style="text-align:left"><div class="nm">${n}</div><div class="sm mute">${d}</div></div><span class="chk">${SF.face === id ? ic('check') : ''}</span></button>`).join('')}</div>
+  <div class="sec-h"><h2>2 · Hair type</h2></div><div class="chips" style="flex-wrap:wrap">${HAIRS.map(([id, n]) => `<button class="chip ${pick('hair', id)}" data-shair="${id}">${n}</button>`).join('')}</div>
+  <div class="sec-h"><h2>3 · Daily upkeep</h2></div><div class="chips" style="flex-wrap:wrap">${CARES.map(([id, n, d]) => `<button class="chip ${SF.care === id ? 'on' : ''}" data-scare="${id}">${n} · ${d}</button>`).join('')}</div>
+  <button class="btn block" style="margin-top:20px" data-sgo ${ready ? '' : 'disabled'}>Show my cuts</button>
+  ${saved.length ? `<div class="sec-h"><h2>Saved styles</h2></div><div class="pill-row">${saved.map(id => cutById(id) ? `<span class="tag">${esc(cutById(id).name)}</span>` : '').join('')}</div>` : ''}`;
+}
+async function saveStyle(id) {
+  if (!S.token) return nav('/auth');
+  const cur = S.user.styles || [], next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
+  try { S.user.styles = (await api('/me/styles', { method: 'PUT', body: { styles: next } })).styles; render(); } catch (x) { toast(x.message); }
+}
+
+
+// ----- shop page -----
+async function vShop(id) {
+  let j; try { j = await api('/shops/' + id); } catch (e) { return header('', '/discover') + `<div class="err">${esc(e.message)}</div>`; }
+  const s = j.shop; S.curShop = s;
+  return header('', '/discover') + `<h1 style="font-size:28px">${esc(s.name)}</h1><div class="mute sm">${esc(s.address || 'Brotherhood Barbershop')}</div>
+  <div style="margin:6px 0 12px">${rate(s.rating, s.reviews)} <span class="tag ok">Open ${t12(s.openTime)}–${t12(s.closeTime)}</span></div>
+  ${j.gallery.length ? `<div class="chips" style="margin:0 -16px;padding:0 16px">${j.gallery.map(g => `<img src="${esc(g)}" alt="${esc(s.name)} shop photo" data-lb="${esc(g)}" loading="lazy" style="height:170px;width:auto;border-radius:14px;flex:none;cursor:zoom-in;background:var(--s2)">`).join('')}</div>` : ''}
+  <div class="row" style="margin:12px 0;flex-wrap:wrap">${s.phone ? `<a class="btn sec sm" href="tel:${esc(s.phone)}">Call</a>` : ''}${s.mapUrl ? `<a class="btn sec sm" href="${esc(s.mapUrl)}" target="_blank" rel="noopener">${ic('pin')} Directions</a>` : ''}</div>
+  <div class="sec-h"><h2>Barbers · ${j.barbers.length}</h2></div><div class="list">${j.barbers.map(barberRow).join('') || '<div class="card empty">Barber profiles are coming soon. You can still book any available barber.</div>'}</div>
+  <div class="sec-h"><h2>Prices</h2></div><div class="list">${j.services.map(x => `<div class="card row">${x.photo ? `<img src="${esc(x.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(x.name)}</div><div class="sm mute">${x.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(x.price)}</b></div>`).join('')}</div>
+  <div class="sec-h"><h2>Reviews</h2></div><div class="list">${j.reviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? '<span class="tag ok">Verified visit</span>' : ''}<span class="sp"></span>${stars(r.rating)}</div>${r.staffName ? `<div class="sm mute">Haircut by ${esc(r.staffName)}</div>` : ''}${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}</div>`).join('') || '<div class="card empty">No reviews for this shop yet.</div>'}</div>
+  <div class="foot"><div><div class="sp"><div class="sm mute">Book at</div><b>${esc(s.name)}</b></div><button class="btn" data-bookshop="${s.id}" style="min-width:150px">${ic('cal')} Book here</button></div></div>`;
+}
 
 // ----- notifications -----
 const NICON = { booking: 'cal', rate: 'heart', like: 'heart', comment: 'chat', follow: 'team' };
@@ -245,17 +315,17 @@ let rendering = 0;
 async function render() {
   const my = ++rendering, r = route(); let html = '';
   if (r.a === 'home') html = vHome(); else if (r.a === 'discover') html = vDiscover(); else if (r.a === 'barber') html = await vBarber(r.b);
-  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else html = vHome();
+  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else if (r.a === 'style') html = vStyle(); else if (r.a === 'shop') html = await vShop(r.b); else html = vHome();
   if (my !== rendering) return;
   const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart, sy = window.scrollY;
-  const showNav = !['barber', 'book', 'auth', 'pro', 'notifications'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
+  const showNav = !['barber', 'book', 'auth', 'pro', 'notifications', 'style', 'shop'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
   app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'home' && r.a === 'home') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
   if (focus === 'q') { const el = document.getElementById('q'); el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
-  if (r.a === 'barber' || r.a === 'book') window.scrollTo(0, r.a === 'book' ? sy : 0);
+  if (r.a === 'barber' || r.a === 'book' || r.a === 'shop') window.scrollTo(0, r.a === 'book' ? sy : 0);
 }
 async function onRoute() {
   const r = route(); window.scrollTo(0, 0);
-  if (['discover', 'home', 'book', 'barber'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
+  if (['discover', 'home', 'book', 'barber', 'shop'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; loadDash(); }
   if (r.a === 'bookings' && S.token) loadBookings().then(render);
@@ -300,10 +370,11 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-ngo],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-ngo],[data-bookshop],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
-  if (D.shop) { S.branch = D.shop; S.tab = 'barbers'; await loadDiscover(); return nav('/discover'); }
+  if (D.shop) return nav('/shop/' + D.shop);
+  if (D.bookshop) { startBooking(D.bookshop, 'any'); if (!S.token) nav('/auth'); return; }
   if (D.avail != null) { S.avail = !S.avail; await loadDiscover(); return render(); }
   if (D.branchf != null) { S.branch = D.branchf; await loadDiscover(); return render(); }
   if (D.spec) { S.specialty = S.specialty === D.spec ? '' : D.spec; await loadDiscover(); return render(); }
@@ -368,6 +439,14 @@ app.addEventListener('click', async e => {
     try { await api('/posts/' + D.pdel, { method: 'DELETE' }); await loadFeed(); toast('Post deleted'); } catch (x) { toast(x.message); } return render();
   }
   if (D.pdel) { if (!confirm('Remove this photo?')) return; try { await api('/pro/portfolio/' + D.pdel, { method: 'DELETE' }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
+  if (D.snote) { const c = cutById(D.snote); S.bk.notes = (S.bk.notes ? S.bk.notes + '\n' : '') + `Style I want: ${c.name} (${c.top.toLowerCase()} on top, ${c.sides.toLowerCase()}).`; return render(); }
+  if (D.sface) { SF.face = D.sface; return render(); }
+  if (D.shair) { SF.hair = D.shair; return render(); }
+  if (D.scare) { SF.care = +D.scare; return render(); }
+  if (D.sgo != null) { SF.done = true; window.scrollTo(0, 0); return render(); }
+  if (D.sagain != null) { SF.done = false; return render(); }
+  if (D.ssave) return saveStyle(D.ssave);
+  if (D.sbook) { const c = cutById(D.sbook); S.styleNote = `Style I want: ${c.name} (${c.top.toLowerCase()} on top, ${c.sides.toLowerCase()}). Suggested by Brotherhood Style Finder.`; toast('Pick your barber. Your style will be added to the booking notes.'); S.branch = ''; return nav('/discover'); }
   if (D.ngo) { if (D.ngo.startsWith('#/')) { S.mine = null; return nav(D.ngo.slice(1)); } return; }
   if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); return render(); }
   if (D.ddays) { S.dashDays = +D.ddays; render(); return loadDash(); }

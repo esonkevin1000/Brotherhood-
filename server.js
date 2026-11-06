@@ -246,6 +246,7 @@ const openTickets = (branchId, date) => one("select count(*) n from orders where
 // a shop's own cover photo (site/<name>-1.jpg) is used on the promo and booking sites until a picture is set for the branch in the back office
 const siteSvc = name => { const f = 'svc-' + String(name || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '') + '.jpg'; return fs.existsSync(path.join(DIR, 'site', f)) ? '/site/' + f : null; };   // service photo: site/svc-<name>.jpg until one is set in the back office
 const siteCover = name => { const s = String(name || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, ''), f = s === 'alaminos' ? 'alaminos.jpg' : s + '-1.jpg'; return s && fs.existsSync(path.join(DIR, 'site', f)) ? '/site/' + f : null; };
+const siteGallery = name => { const s = String(name || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, ''), out = []; if (!s) return out; if (s === 'alaminos' && fs.existsSync(path.join(DIR, 'site', 'alaminos.jpg'))) out.push('/site/alaminos.jpg'); for (let i = 1; i <= 12; i++) if (fs.existsSync(path.join(DIR, 'site', `${s}-${i}.jpg`))) out.push(`/site/${s}-${i}.jpg`); return out; };   // every photo of a shop in site/
 const openShift = branchId => one("select * from shifts where branchId=? and status='open' order by openedAt desc", branchId);
 function priceItems(lines) {
   const out = [];
@@ -1855,7 +1856,7 @@ async function handle(req, res) {
   bad(405, 'Method not allowed');
 }
 
-const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
+const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 
 http.createServer(async (req, res) => {
   if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);
