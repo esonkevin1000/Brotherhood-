@@ -224,6 +224,16 @@ function vSettings() {
       <td><input type="number" min="0" id="bs-${b.id}-grace" value="${b.graceMins ?? 10}" style="width:90px"></td><td><input type="number" min="0" max="100" step="any" id="bs-${b.id}-pct" value="${b.defaultPct ?? ''}" placeholder="40" style="width:90px"></td>
       <td><button class="btn sm" data-act="savebranch" data-id="${b.id}">Save</button> <button class="btn ghost sm" data-act="applycomm" data-id="${b.id}">Apply to all barbers</button></td></tr>`).join('')}</table></div>
 
+  <div class="card" style="margin-top:14px"><h3>Booking site: branch pictures and contact details</h3>
+    <p class="mute" style="font-size:13px;margin:0 0 12px">This is what customers see on your booking page (<b>${esc(location.origin)}/book</b>). Upload a picture of the shop front so people can find it, then add the phone number, address and a Google Maps link. Click <b>Save</b> on each branch.</p>
+    <div class="bgrid">${S.branches.map(b => `<div class="binfo"><div class="row" style="flex-wrap:nowrap;gap:14px;align-items:flex-start">
+      <div class="bpv" id="bp-${b.id}">${b.photo ? `<img src="${esc(b.photo)}" alt="">` : '<span>No picture yet</span>'}</div>
+      <div style="flex:1;min-width:0"><b style="font:600 18px Oswald;text-transform:uppercase">${esc(b.name)}</b><label>Picture</label><input type="file" accept="image/*" data-bphoto="${b.id}" style="padding:8px"><small class="mute" id="bm-${b.id}">JPG or PNG. It is resized automatically. A wide photo of the shop front works best.</small></div></div>
+      <label>Phone number</label><input id="bi-${b.id}-phone" value="${esc(b.phone || '')}" placeholder="09XX XXX XXXX">
+      <label>Address</label><input id="bi-${b.id}-address" value="${esc(b.address || '')}" placeholder="Street, town, province">
+      <label>Google Maps link (optional)</label><input id="bi-${b.id}-map" value="${esc(b.mapUrl || '')}" placeholder="https://maps.google.com/...">
+      <div class="row" style="margin-top:12px"><button class="btn sm" data-act="savebinfo" data-id="${b.id}">Save</button>${b.photo ? `<button class="btn ghost sm" data-act="rmbphoto" data-id="${b.id}">Remove picture</button>` : ''}<a class="btn ghost sm" href="/book" target="_blank" style="text-decoration:none">View booking site</a></div></div>`).join('')}</div></div>
+
   <div class="card overflow" style="margin-top:14px"><h3>Access: what each role can open in the POS</h3>
     <table><tr><th>Section</th><th>Cashier</th><th>Barber</th></tr>
     ${s.modules.map(m => `<tr><td>${esc(MOD_LABEL[m] || m)}</td>${['cashier', 'barber'].map(r => `<td><input type="checkbox" data-perm="${r}:${m}" ${s.perms[r].includes(m) ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000"></td>`).join('')}</tr>`).join('')}</table>
@@ -312,6 +322,12 @@ document.addEventListener('click', async e => {
     try { const r = await api('POST', `/api/users/${d.id}/reset`); openModal(`<h2>New ${r.pin ? 'PIN' : 'password'}</h2><p>For <b>${esc(u.name)}</b>. Write it down and give it to them now. It will not be shown again.</p><div style="font:700 34px Oswald,sans-serif;letter-spacing:6px;text-align:center;background:var(--s3);border-radius:14px;padding:16px;margin:10px 0 18px">${esc(r.pin || r.password)}</div><button class="btn" data-act="close">Done</button>`); } catch (x) { alert(x.message); }
     return;
   }
+  if (act === 'savebinfo' || act === 'rmbphoto') {
+    const v = k => document.getElementById(`bi-${d.id}-${k}`).value.trim(), body = { phone: v('phone'), address: v('address'), mapUrl: v('map') };
+    if (act === 'rmbphoto') { if (!confirm('Remove this branch picture?')) return; body.photo = ''; } else if (ui.bphoto && ui.bphoto[d.id]) body.photo = ui.bphoto[d.id];
+    try { await api('PUT', `/api/branches/${d.id}`, body); if (ui.bphoto) delete ui.bphoto[d.id]; await load(false); await loadView(); render(); alert(act === 'rmbphoto' ? 'Picture removed.' : 'Saved. The booking site now shows these details.'); } catch (x) { alert(x.message); }
+    return;
+  }
   if (act === 'savebranch') {
     const v = k => document.getElementById(`bs-${d.id}-${k}`).value, body = { openTime: v('open'), closeTime: v('close'), graceMins: +v('grace') || 0 }; if (v('pct') !== '') body.defaultPct = +v('pct');
     try { await api('PUT', `/api/branches/${d.id}`, body); await load(false); await loadView(); render(); alert('Saved.'); } catch (x) { alert(x.message); } return;
@@ -350,6 +366,14 @@ document.addEventListener('change', async e => {
   if (t.id === 'branchsel') { ui.branch = t.value; render(); await loadView(); return render(); }
   if (t.id === 'tierf') { ui.cust.tier = t.value; ui.cust.page = 1; await loadView(); return render(); }
   if (t.id === 'bfrom' || t.id === 'bto') { if (t.id === 'bfrom') ui.bf = t.value || today(); else ui.bt = t.value || today(); await loadView(); return render(); }
+  if (t.dataset.bphoto) {
+    const file = t.files[0]; if (!file) return; const id = t.dataset.bphoto, msg = document.getElementById('bm-' + id); msg.textContent = 'Uploading…';
+    try {
+      const r = await api('POST', '/api/upload', { data: await resizeToJpeg(file, 1100) }); (ui.bphoto ||= {})[id] = r.url;
+      document.getElementById('bp-' + id).innerHTML = `<img src="${r.url}" alt="">`; msg.textContent = 'Uploaded. Click Save to show it on the booking site.';
+    } catch (x) { msg.textContent = x.message; }
+    return;
+  }
   if (t.dataset.photo) {
     const file = t.files[0]; if (!file) return; const msg = document.getElementById('phmsg'); msg.textContent = 'Uploading…';
     try {
