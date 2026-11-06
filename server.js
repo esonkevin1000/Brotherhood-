@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 
 process.env.TZ ||= 'Asia/Manila';
@@ -751,18 +752,37 @@ function csv(rep) {
 }
 
 // ---------- http ----------
+const GZIP_OK = new WeakSet();   // responses whose client accepts gzip
 const send = (res, code, body, type = 'application/json') => {
-  res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-  res.end(type === 'application/json' && !Buffer.isBuffer(body) ? JSON.stringify(body) : body);
+  let out = type === 'application/json' && !Buffer.isBuffer(body) ? JSON.stringify(body) : body;
+  const h = { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+  if (GZIP_OK.has(res) && out.length > 1024) { out = zlib.gzipSync(out, { level: 6 }); h['Content-Encoding'] = 'gzip'; h.Vary = 'Accept-Encoding'; }
+  res.writeHead(code, h); res.end(out);
 };
+// Static files: read once, compressed once (brotli + gzip), revalidated with ETag so repeat visits cost a tiny 304.
+const SCACHE = new Map();
+function serveStatic(req, res, file) {
+  const fp = path.join(DIR, file), st = fs.statSync(fp); let c = SCACHE.get(file);
+  if (!c || c.mtime !== st.mtimeMs) {
+    const buf = fs.readFileSync(fp), ext = file.split('.').pop(), text = ext === 'html' || ext === 'js' || ext === 'webmanifest' || ext === 'json';
+    c = { mtime: st.mtimeMs, buf, ext, etag: '"' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 16) + '"', br: text && buf.length > 512 ? zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } }) : null, gz: text && buf.length > 512 ? zlib.gzipSync(buf, { level: 9 }) : null };
+    SCACHE.set(file, c);
+  }
+  const img = c.ext === 'png' || c.ext === 'jpg';
+  const h = { 'Content-Type': MIME[c.ext], ETag: c.etag, 'Cache-Control': img ? 'public, max-age=86400' : 'no-cache', 'X-Content-Type-Options': 'nosniff', Vary: 'Accept-Encoding' };
+  if (req.headers['if-none-match'] === c.etag) { res.writeHead(304, h); return res.end(); }
+  const ae = String(req.headers['accept-encoding'] || ''); let body = c.buf;
+  if (c.br && /(^|[ ,])br([ ,;]|$)/.test(ae)) { body = c.br; h['Content-Encoding'] = 'br'; } else if (c.gz && /gzip/.test(ae)) { body = c.gz; h['Content-Encoding'] = 'gzip'; }
+  h['Content-Length'] = body.length; res.writeHead(200, h); res.end(body);
+}
 const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
 });
-const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/': 'landing.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
+const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/': 'landing.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace(/:\d+$/, '').replace(/^www\./, '');
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST);
-const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/logo.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/.well-known/assetlinks.json']);
+const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/logo.png', '/logo-sm.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/.well-known/assetlinks.json']);
 // App version = hash of every file the apps load. It changes on each deploy, which is what makes phones offer the "Update app" button.
 const APP_VERSION = (() => { const h = crypto.createHash('sha1'); for (const f of Object.values(STATIC).filter((v, i, a) => a.indexOf(v) === i && v !== 'sw.js').sort()) { try { h.update(fs.readFileSync(path.join(DIR, f))); } catch { } } return h.digest('hex').slice(0, 12); })();
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', jpg: 'image/jpeg', json: 'application/json' };
@@ -816,7 +836,7 @@ async function handle(req, res) {
   if (method === 'GET' && p === '/backend/') { res.writeHead(302, { Location: '/backend' }); return res.end(); }
   if (method === 'GET' && p === '/sw.js') { res.writeHead(200, { 'Content-Type': MIME.js, 'Cache-Control': 'no-cache' }); return res.end(`const VERSION=${JSON.stringify(APP_VERSION)};\n` + fs.readFileSync(path.join(DIR, 'sw.js'), 'utf8')); }
   if (method === 'GET' && p === '/api/version') return send(res, 200, { version: APP_VERSION });
-  if (method === 'GET' && STATIC[p]) return send(res, 200, fs.readFileSync(path.join(DIR, STATIC[p])), MIME[STATIC[p].split('.').pop()]);
+  if (method === 'GET' && STATIC[p]) return serveStatic(req, res, STATIC[p]);
   const im = p.match(/^\/img\/(\w+)$/);
   if (im && method === 'GET') {
     const r = one('select mime,data from images where id=?', im[1]); if (!r) return send(res, 404, { error: 'Not found' });
@@ -1787,6 +1807,7 @@ async function handle(req, res) {
 }
 
 http.createServer(async (req, res) => {
+  if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);
   try { await handle(req, res); }
   catch (e) { if (!res.headersSent) send(res, e instanceof HttpError ? e.code : 400, { error: e.message }); }
 }).listen(PORT, () => console.log(`${SHOP} running → http://localhost:${PORT}`));
