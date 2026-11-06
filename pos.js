@@ -32,7 +32,7 @@ function toast(msg, err) { const t = document.createElement('div'); t.className 
 
 let token = ''; try { token = localStorage.getItem('bp.pos') || ''; } catch (e) { }
 const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: [], boot: null, dash: null, queue: [], att: [], exp: null, shift: null, z: [], zs: [], view: 'dashboard', pin: '', err: '',
-  cart: { items: [], barberId: '', mode: 'later', editing: null }, cust: { q: '', tier: '', rows: [], total: 0 }, rm: { date: '', calc: null, list: [], proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
+  cart: { items: [], barberId: '', mode: 'later', editing: null }, q: [], sf: null, offline: false, cust: { q: '', tier: '', rows: [], total: 0 }, rm: { date: '', calc: null, list: [], proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 // which sections this login may open (the owner sets this in Settings → Access)
 const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance', release: 'release' };
@@ -65,6 +65,61 @@ async function loadCustomers() {
   const r = await api('GET', '/api/customers?size=40&q=' + encodeURIComponent(c.q) + (c.tier ? '&tier=' + c.tier : '') + (br ? '&branch=' + br : ''));
   c.rows = r.rows; c.total = r.total;
 }
+// ---------- offline-first attendance: selfie, encrypted local queue, automatic sync ----------
+const isNet = e => e instanceof TypeError || /Failed to fetch|NetworkError|Load failed|network/i.test(String(e && e.message));
+const OFF = {
+  _db: null,
+  db() { return this._db ||= new Promise((ok, no) => { const r = indexedDB.open('bp-offline', 1); r.onupgradeneeded = () => { r.result.createObjectStore('keys'); r.result.createObjectStore('queue', { keyPath: 'id' }); }; r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); },
+  async tx(store, mode, fn) { const db = await this.db(); return new Promise((ok, no) => { const t = db.transaction(store, mode), req = fn(t.objectStore(store)); t.oncomplete = () => ok(req && req.result); t.onerror = () => no(t.error); }); },
+  async key() { let k = await this.tx('keys', 'readonly', s => s.get('k')); if (!k) { k = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']); await this.tx('keys', 'readwrite', s => s.put(k, 'k')); } return k; },   // non-extractable key kept in the browser
+  async enc(text) { const k = await this.key(), iv = crypto.getRandomValues(new Uint8Array(12)), c = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, new TextEncoder().encode(text))), out = new Uint8Array(12 + c.length); out.set(iv); out.set(c, 12); return out; },
+  async dec(buf) { const b = new Uint8Array(buf), k = await this.key(); return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, k, b.slice(12))); },
+  all() { return this.tx('queue', 'readonly', s => s.getAll()).then(r => r || []); },
+  put(item) { return this.tx('queue', 'readwrite', s => s.put(item)); },
+  del(id) { return this.tx('queue', 'readwrite', s => s.delete(id)); }
+};
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2));
+let syncing = false;
+async function syncQueue() {
+  if (syncing || !P.me || !P.boot) return; syncing = true;
+  try {
+    for (const it of (await OFF.all()).sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+      if (it.status === 'CONFLICT' && !it.retry) continue;
+      try {
+        let photoId = it.photoId || '';
+        if (!photoId && it.photo) { const f = await api('POST', '/api/files', { data: await OFF.dec(it.photo), kind: 'attendance', branchId: it.branchId }); photoId = f.id; it.photoId = photoId; await OFF.put(it); }
+        await api('POST', '/api/attendance', { staffId: it.staffId, action: it.action, photoId, clientId: it.id, deviceAt: it.deviceAt, geo: it.geo });
+        await OFF.del(it.id);
+      } catch (e) {
+        if (isNet(e) || /Login required/.test(e.message)) { it.tries = (it.tries || 0) + 1; it.status = 'PENDING SYNC'; await OFF.put(it); break; }   // still offline: keep it and try again later
+        it.status = 'CONFLICT'; it.error = e.message; it.retry = false; it.tries = (it.tries || 0) + 1; await OFF.put(it);   // kept for the manager. Never deleted silently
+      }
+    }
+  } catch (e) { } finally { syncing = false; P.q = await OFF.all().catch(() => []); if (!sheet.open && P.me) { try { await refresh(); } catch (e) { } } }
+}
+function cacheSave() { try { localStorage.setItem('bp.cache', JSON.stringify({ me: P.me, shop: P.shop, branches: P.branches, mods: P.mods, boot: P.boot, att: P.att, branch: P.branch })); } catch (e) { } }
+function selfieSheet() {
+  const sf = P.sf, st = P.boot.staff.find(s => s.id === sf.staffId), need = P.boot.settings?.attPhoto !== false, word = sf.action === 'in' ? 'Time in' : 'Time out';
+  openSheet(`<div class="row between"><h2 style="margin:0">${word} · ${esc(st?.name || '')}</h2><button class="ghost sm" data-a="sfcancel">Cancel</button></div>
+    <p class="mute" style="margin:8px 0 0">${need ? 'Take a selfie to confirm it is really you. ' : ''}${navigator.onLine === false ? '<b>No internet.</b> This will be saved on this device and uploaded automatically.' : 'The time is recorded now.'}</p>
+    <button type="button" class="ghost block" data-a="sfpick" style="margin-top:10px">🤳 ${sf.data ? 'Retake selfie' : 'Take selfie'}</button><input type="file" id="sffile" accept="image/*" capture="user" hidden>
+    ${sf.data ? `<img class="idprev" src="${sf.data}" alt="Selfie">` : ''}
+    ${P.boot.settings?.attGeo ? `<p class="mute" style="font-size:12.5px;margin:8px 0 0">📍 ${sf.geo ? 'Location captured' : 'Getting location… (optional)'}</p>` : ''}
+    <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
+    <button class="block" data-a="sfgo" ${(need && !sf.data) || sf.busy ? 'disabled' : ''}>${sf.busy ? 'Saving…' : 'Confirm ' + word.toLowerCase()}</button>`);
+}
+async function sfSubmit() {
+  const sf = P.sf, st = P.boot.staff.find(s => s.id === sf.staffId); sf.busy = true; selfieSheet();
+  const item = { id: uuid(), staffId: sf.staffId, staffName: st?.name || '', branchId: P.boot.branch.id, action: sf.action, deviceAt: new Date().toISOString(), geo: sf.geo || null, createdAt: new Date().toISOString(), status: 'PENDING SYNC', tries: 0, photo: sf.data ? await OFF.enc(sf.data) : null };
+  if (navigator.onLine !== false) {
+    try {
+      const photoId = sf.data ? (await api('POST', '/api/files', { data: sf.data, kind: 'attendance', branchId: item.branchId })).id : '';
+      await api('POST', '/api/attendance', { staffId: item.staffId, action: item.action, photoId, clientId: item.id, deviceAt: item.deviceAt, geo: item.geo });
+      P.sf = null; closeSheet(); toast(sf.action === 'in' ? 'Timed in' : 'Timed out'); return refresh();
+    } catch (e) { if (!isNet(e)) { sf.busy = false; selfieSheet(); const er = document.getElementById('err'); if (er) er.textContent = e.message; return; } }
+  }
+  await OFF.put(item); P.q = await OFF.all(); P.sf = null; closeSheet(); toast('Saved on this device. It will upload when the internet is back.'); render();
+}
 async function refresh() {
   if (!P.me) return;
   if (!canOpen(P.view)) P.view = firstView() || P.view;
@@ -80,7 +135,8 @@ async function refresh() {
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
     if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expense-claims?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
     if (P.view === 'reading') { const s = await api('GET', withBr('/api/pos/shift')); P.cur = s; P.zs = await api('GET', withBr('/api/pos/zreadings')); }
-  } catch (e) { if (P.me) toast(e.message, true); }
+    P.offline = false; cacheSave();
+  } catch (e) { if (isNet(e)) P.offline = true; else if (P.me) toast(e.message, true); }
   if (!sheet.open) render();
 }
 function notifyBookings() {
@@ -112,7 +168,7 @@ function render() {
   const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay']];
   const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
-  app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div><span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
+  app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
     <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
     ${P.view === 'pos' && P.cart.mode !== 'now' && !isWide() && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
     <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`;
@@ -222,6 +278,7 @@ const VIEWS = {
     const cnt = k => P.att.filter(s => s.state === k).length;
     return `<div class="grid"><div class="card"><small class="mute">Present (on time)</small><b style="font-size:22px;display:block">${cnt('present')}</b></div><div class="card"><small class="mute">Late</small><b style="font-size:22px;display:block">${cnt('late')}</b></div>
     <div class="card"><small class="mute">On break</small><b style="font-size:22px;display:block">${cnt('break')}</b></div><div class="card"><small class="mute">Not timed in</small><b style="font-size:22px;display:block">${cnt('none')}</b></div></div>
+    ${P.q && P.q.length ? `<div class="card" style="border-color:#f1d98a;background:#fff9e8"><b>Waiting to sync (${P.q.length})</b><p class="mute" style="margin:4px 0 8px;font-size:13px">Saved on this device with the original time. They upload automatically when the internet is back.</p>${P.q.map(x => `<div class="row between" style="padding:6px 0;border-top:1px solid var(--line)"><span><b>${esc(x.staffName)}</b> · ${x.action === 'in' ? 'Time in' : 'Time out'} · ${hm(x.deviceAt)}</span><span class="tag ${x.status === 'CONFLICT' ? 'void' : 'waiting'}">${x.status}</span></div>${x.error ? `<small style="color:var(--bad)">${esc(x.error)} (kept for the manager)</small>` : ''}`).join('')}<button class="sm" data-a="syncnow" style="margin-top:8px">Retry now</button></div>` : ''}
     <div class="card"><b>Barber attendance roster</b> <span class="mute">· ${P.att.length} barbers</span>
     ${P.att.map(s => `<hr><div class="row between"><div class="row" style="flex-wrap:nowrap">${av(s.name, s.photo)}<div><b>${esc(s.name)}</b><br><small class="mute">${esc(s.chairName || 'No chair assigned')}${s.timeIn ? ' · in ' + hm(s.timeIn) : ''}</small></div></div><span class="tag ${s.state}">${stateLabel[s.state]}</span></div>
       <div class="row" style="margin-top:8px">${s.state === 'none' || s.state === 'off' ? `<button class="sm" data-a="att" data-id="${s.id}" data-x="in">Time in</button>` + (s.state === 'none' ? `<button class="sm ghost" data-a="att" data-id="${s.id}" data-x="off">Off duty</button>` : '') : ''}
@@ -679,6 +736,15 @@ document.addEventListener('click', async e => {
     } catch (er) { x.busy = false; expSheet(); const e2 = document.getElementById('err'); if (e2) e2.textContent = er.message; }
     return;
   }
+  if (a === 'att' && (d.x === 'in' || d.x === 'out')) {
+    P.sf = { staffId: d.id, action: d.x, data: '', geo: null, busy: false }; selfieSheet();
+    if (P.boot.settings?.attGeo && navigator.geolocation) navigator.geolocation.getCurrentPosition(p => { if (P.sf) { P.sf.geo = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; if (sheet.open) selfieSheet(); } }, () => { }, { timeout: 8000, maximumAge: 60000 });
+    return;
+  }
+  if (a === 'sfpick') { document.getElementById('sffile')?.click(); return; }
+  if (a === 'sfcancel') { P.sf = null; closeSheet(); return render(); }
+  if (a === 'sfgo') return sfSubmit();
+  if (a === 'syncnow') { for (const x of await OFF.all()) { x.retry = true; await OFF.put(x); } await syncQueue(); return; }
   if (a === 'att') { const r = await guard(() => api('POST', '/api/attendance', { staffId: d.id, action: d.x })); if (r) toast('Saved'); return refresh(); }
   if (a === 'printz') return printHtml(readingHtml(P.lastZ));
   if (a === 'printsale') return printHtml(saleHtml(P.lastSale));
@@ -710,6 +776,7 @@ document.addEventListener('change', async e => {
   if (t.id === 'avinst') { P.av.inst = t.value; return; }
   if (t.id === 'avconsent') { P.av.consent = t.checked; return; }
   if (a === 'rmdate' || t.id === 'rmdate') { P.rm.date = t.value || ymd(0); P.rm.proofId = ''; P.rm.preview = ''; refresh().then(render); return; }
+  if (t.id === 'sffile') { const file = t.files[0]; if (!file || !P.sf) return; try { P.sf.data = await resizeToJpeg(file, 900); selfieSheet(); } catch (x) { toast('Could not read that photo. Please try again.', true); } return; }
   if (t.id === 'xcat') { P.ex.category = t.value; return; }
   if (t.id === 'xfile') {
     const file = t.files[0]; if (!file || !P.ex) return;
@@ -762,8 +829,18 @@ sheet.addEventListener('close', () => render());
 window.matchMedia('(min-width: 900px)').addEventListener('change', () => { closeSheet(); render(); });
 
 (async () => {
-  if (token) { try { const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || []; P.mods = st.modules || Object.values(VMAP); if (isAdminRole()) P.branch = P.branches[0]?.id || ''; await refresh(); } catch (e) { token = ''; P.me = null; } }
+  P.q = await OFF.all().catch(() => []);
+  if (token) {
+    try { const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || []; P.mods = st.modules || Object.values(VMAP); if (isAdminRole()) P.branch = P.branches[0]?.id || ''; await refresh(); }
+    catch (e) {
+      let c = null; try { c = JSON.parse(localStorage.getItem('bp.cache') || 'null'); } catch (x) { }
+      if (isNet(e) && c && c.me) { Object.assign(P, { me: c.me, shop: c.shop, branches: c.branches, mods: c.mods, boot: c.boot, att: c.att || [], branch: c.branch, offline: true }); P.view = canOpen('attendance') ? 'attendance' : firstView(); }   // opened without internet: work from the last saved roster
+      else { token = ''; P.me = null; }
+    }
+  }
   render();
+  window.addEventListener('online', () => syncQueue());
+  setInterval(() => { if (P.q && P.q.length) syncQueue(); }, 30000); syncQueue();
   setInterval(() => { if (P.me && !sheet.open && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) refresh(); }, 10000);
 })();
 

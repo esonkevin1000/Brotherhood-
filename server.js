@@ -61,7 +61,10 @@ addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'int
 addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
 db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
 addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
-addCol('payroll_days', 'deduction', 'real'); addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
+addCol('payroll_days', 'deduction', 'real');
+for (const c of ['inPhoto', 'outPhoto', 'deviceIn', 'deviceOut', 'receivedIn', 'receivedOut', 'geoIn', 'geoOut', 'flagReason', 'corrections']) addCol('attendance', c, 'text');
+for (const c of ['undertimeMins', 'overtimeMins', 'flagged', 'offline', 'corrected']) addCol('attendance', c, 'integer');
+db.exec(`create table if not exists attendance_events(id text primary key, clientId text unique, staffId text, branchId text, action text, deviceAt text, receivedAt text, effectiveAt text, photoId text, flag text, byName text);`); addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
 db.exec(`
 create table if not exists expense_claims(id text primary key, branchId text, date text, category text, description text, amount real, method text, receipts text, noReceiptReason text,
   status text, submittedById text, submittedBy text, staffId text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text, cashMoveId text, history text);
@@ -76,6 +79,7 @@ create table if not exists remittances(id text primary key, branchId text, date 
   submittedById text, submittedBy text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text, history text);
 create index if not exists remit_date on remittances(date, branchId);
 `);
+addCol('files', 'enc', 'integer');
 db.exec(`
 create table if not exists id_photos(id text primary key, orderId text, branchId text, idType text, mime text, data blob, byId text, createdAt text);
 create index if not exists idp_order on id_photos(orderId);
@@ -175,6 +179,10 @@ dailyBackup(); setInterval(dailyBackup, 6 * 3600e3).unref();
 
 // ---------- auth ----------
 const SECRET = process.env.SESSION_SECRET || 'bp:' + PASS;
+// evidence photos are encrypted at rest (AES-256-GCM) with a key derived from the server secret
+const FKEY = crypto.createHash('sha256').update('files:' + SECRET).digest();
+const encBuf = b => { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', FKEY, iv), e = Buffer.concat([c.update(b), c.final()]); return Buffer.concat([iv, c.getAuthTag(), e]); };
+const decBuf = b => { const d = crypto.createDecipheriv('aes-256-gcm', FKEY, b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]); };
 const TOKEN_DAYS = 30;
 const sign = s => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');
 const makeToken = (u, v) => { const p = Buffer.from(JSON.stringify({ u, v, e: Date.now() + TOKEN_DAYS * 864e5 })).toString('base64url'); return p + '.' + sign(p); };
@@ -849,7 +857,7 @@ async function handle(req, res) {
       if (/^\/api\/pos\/dashboard$/.test(p)) return 'dashboard';
       if (/^\/api\/pos\/queue$/.test(p)) return ['queue', 'pos'];
       if (/^\/api\/pos\/(shift|zreadings)$|^\/api\/shifts\//.test(p)) return 'reading';
-      if (/^\/api\/(pos\/)?attendance$/.test(p)) return 'attendance';
+      if (/^\/api\/(pos\/)?attendance$/.test(p) || p === '/api/attendance/log') return 'attendance';
       if (/^\/api\/expenses$/.test(p) || /^\/api\/expense-claims/.test(p)) return 'expenses';
       if (/^\/api\/bookings/.test(p)) return 'bookings';
       if (p === '/api/orders' && method === 'POST') return 'pos';
@@ -955,11 +963,13 @@ async function handle(req, res) {
   // ----- settings: terms, email (admin) -----
   if (p === '/api/settings' && method === 'GET') {
     adminOnly();
-    return send(res, 200, { ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+    return send(res, 200, { attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
       log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
   }
   if (p === '/api/settings' && method === 'PUT') {
     adminOnly(); const b = await readBody(req, 50_000);
+    if ('attPhoto' in b) setSetting('attPhoto', b.attPhoto ? '1' : '0');
+    if ('attGeo' in b) setSetting('attGeo', b.attGeo ? '1' : '0');
     if ('terms' in b) setSetting('terms', String(b.terms || '').trim().slice(0, 8000));
     if (b.perms && typeof b.perms === 'object') {
       const cur = permsAll(), next = {}; for (const role of ['cashier', 'barber']) next[role] = Array.isArray(b.perms[role]) ? b.perms[role].filter(m => MODULES.includes(m)) : cur[role];
@@ -1017,13 +1027,13 @@ async function handle(req, res) {
     const b = await readBody(req, 1_800_000), branchId = branchScope(me, b.branchId);
     const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.data || '')); if (!m) bad(400, 'The photo must be a JPEG, PNG or WebP image');
     const buf = Buffer.from(m[2], 'base64'); if (buf.length > 1_000_000) bad(413, 'The photo is too large. Please try again.');
-    const id = uid() + uid(); run('insert into files(id,kind,branchId,mime,data,byId,byName,createdAt) values(?,?,?,?,?,?,?,?)', id, String(b.kind || 'other').slice(0, 20), branchId, m[1], buf, me.id, me.name, nowISO());
+    const id = uid() + uid(); run('insert into files(id,kind,branchId,mime,data,byId,byName,createdAt,enc) values(?,?,?,?,?,?,?,?,1)', id, String(b.kind || 'other').slice(0, 20), branchId, m[1], encBuf(buf), me.id, me.name, nowISO());
     log(me, 'file-upload', 'files', id, String(b.kind || 'other')); return send(res, 201, { id });
   }
   const flm = p.match(/^\/api\/files\/(\w+)$/);
   if (flm && method === 'GET') {
     const f = get('files', flm[1]); if (!f || (isBranchUser(me) && f.branchId !== me.branchId)) bad(404, 'Not found');
-    res.writeHead(200, { 'Content-Type': f.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(f.data);
+    res.writeHead(200, { 'Content-Type': f.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(f.enc ? decBuf(f.data) : f.data);
   }
   // ----- expenses with receipts -----
   const EXP_CATS = ['Supplies', 'Utilities', 'Repairs & Maintenance', 'Food & Meals', 'Transportation', 'Marketing', 'Equipment', 'Staff Welfare', 'Other'], PAY_METHODS = ['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Card', 'Other'];
@@ -1255,7 +1265,7 @@ async function handle(req, res) {
       branch: get('branches', bid), chairs: all('select * from chairs where branchId=? and active=1 order by sort', bid),
       staff: all('select id,name,chairId,pct,photo from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, onDuty: !!onDuty(s.id, t), ...staffState(s.id, t) })),
       categories: all('select * from categories order by name'), items: all('select * from items where active=1 order by name'), discounts: all('select * from discounts where active=1 order by name'),
-      shift: openShift(bid) || null,
+      shift: openShift(bid) || null, settings: { attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1' },
       queue: all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair') order by no", bid, t).map(parseOrder).map(withCust)
     });
   }
@@ -1377,18 +1387,36 @@ async function handle(req, res) {
   if (p === '/api/attendance' && method === 'POST') {
     const b = await readBody(req), s = get('staff', b.staffId); if (!s || !s.active) bad(404, 'Unknown barber');
     if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
-    const t = todayStr(), open = onDuty(s.id, t), br = get('branches', s.branchId);
+    const br = get('branches', s.branchId), needPhoto = getSetting('attPhoto') !== '0', recv = new Date();
+    // idempotent: a record sent twice (offline retry) is applied once
+    const cid = String(b.clientId || '').slice(0, 64);
+    if (cid && one('select 1 x from attendance_events where clientId=?', cid)) return send(res, 200, { ok: true, duplicate: true });
+    // the time of the event is the time on the device when the button was pressed (kept exactly); the server time is stored separately
+    let at = recv, flag = '', offlineMin = 0;
+    if (b.deviceAt) {
+      const dv = new Date(b.deviceAt), diff = (dv - recv) / 60000;
+      if (isNaN(dv)) flag = 'Unreadable device timestamp; server time used';
+      else if (diff > 5) flag = `Device clock was ${Math.round(diff)} minutes ahead of the server; server time used`;
+      else if (diff < -48 * 60) flag = 'Device timestamp is more than 48 hours old; server time used';
+      else { at = dv; offlineMin = Math.max(0, Math.round(-diff)); if (offlineMin > 12 * 60) flag = `Recorded offline ${Math.round(offlineMin / 60)} hours before it reached the server`; }
+    }
+    const t = dOf(at), atIso = at.toISOString(), recvIso = recv.toISOString(), open = onDuty(s.id, t);
+    let photo = null; if (['in', 'out'].includes(b.action)) { photo = b.photoId ? get('files', String(b.photoId)) : null; if (photo && photo.branchId !== s.branchId) photo = null; if (needPhoto && !photo) bad(400, 'Take a selfie first. Photo is required for time in and time out.'); }
+    const geo = b.geo && Number.isFinite(+b.geo.lat) && Number.isFinite(+b.geo.lng) ? { lat: +(+b.geo.lat).toFixed(5), lng: +(+b.geo.lng).toFixed(5), acc: Math.round(+b.geo.acc || 0) } : null;
+    let attId = '';
     if (b.action === 'in') {
       if (open) bad(409, `${s.name} is already clocked in`);
-      const now = new Date(), late = Math.max(0, minsOfDay(now) - (toMin(br.openTime) + (br.graceMins || 0)));
+      const late = Math.max(0, minsOfDay(at) - (toMin(br.openTime) + (br.graceMins || 0)));
       run("delete from attendance where staffId=? and date=? and status='off'", s.id, t);
-      const prior = one('select 1 x from attendance where staffId=? and date=?', s.id, t);
-      run('insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins) values(?,?,?,?,?,?,?)', uid(), s.id, s.branchId, t, nowISO(), null, prior ? 0 : late);
+      const prior = one('select 1 x from attendance where staffId=? and date=?', s.id, t); attId = uid();
+      run('insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins,inPhoto,deviceIn,receivedIn,geoIn,flagged,flagReason,offline) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', attId, s.id, s.branchId, t, atIso, null, prior ? 0 : late, photo?.id || '', b.deviceAt || '', recvIso, geo ? JSON.stringify(geo) : '', flag ? 1 : 0, flag, offlineMin > 2 ? 1 : 0);
       promoteNext(s.branchId, s.chairId);
     } else if (b.action === 'out') {
       if (!open) bad(409, `${s.name} is not clocked in`);
+      if (new Date(open.timeIn) > at) bad(409, 'The time out cannot be earlier than the time in');
       if (one("select 1 x from orders where barberId=? and status='in_chair'", s.id)) bad(409, `${s.name} still has a customer in the chair`);
-      run('update attendance set timeOut=? where id=?', nowISO(), open.id);
+      const close = toMin(br.closeTime || '21:00'), outM = minsOfDay(at), over = Math.max(0, outM - close), under = Math.max(0, close - outM); attId = open.id;
+      run('update attendance set timeOut=?, outPhoto=?, deviceOut=?, receivedOut=?, geoOut=?, undertimeMins=?, overtimeMins=?, flagged=?, flagReason=trim(ifnull(flagReason,\'\') || ? ), offline=max(ifnull(offline,0),?) where id=?', atIso, photo?.id || '', b.deviceAt || '', recvIso, geo ? JSON.stringify(geo) : '', under, over, (flag || open.flagged) ? 1 : 0, flag ? ' ' + flag : '', offlineMin > 2 ? 1 : 0, open.id);
     } else if (b.action === 'break_start') {
       if (!open) bad(409, `${s.name} is not clocked in`);
       if (open.breakStartedAt) bad(409, 'Already on break');
@@ -1402,7 +1430,32 @@ async function handle(req, res) {
       if (one('select 1 x from attendance where staffId=? and date=?', s.id, t)) bad(409, `${s.name} already has attendance today`);
       run("insert into attendance(id,staffId,branchId,date,timeIn,timeOut,lateMins,status) values(?,?,?,?,?,?,?,'off')", uid(), s.id, s.branchId, t, nowISO(), null, 0);
     } else bad(400, 'action must be in, out, break_start, break_end or off');
-    log(me, 'clock-' + b.action, 'attendance', s.id, s.name); return send(res, 200, { ok: true });
+    run('insert into attendance_events(id,clientId,staffId,branchId,action,deviceAt,receivedAt,effectiveAt,photoId,flag,byName) values(?,?,?,?,?,?,?,?,?,?,?)', uid(), cid || null, s.id, s.branchId, b.action, b.deviceAt || '', recvIso, atIso, photo?.id || '', flag, me.name);
+    log(me, 'clock-' + b.action, 'attendance', s.id, s.name + (flag ? ' [' + flag + ']' : '')); return send(res, 200, { ok: true, flagged: !!flag, id: attId });
+  }
+  // attendance log with photos, lateness / undertime / overtime, flags and absences (daily, weekly or monthly through the date range)
+  if (p === '/api/attendance/log' && method === 'GET') {
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : todayStr(), to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : todayStr(), br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null);
+    const rows = all(`select a.*, s.name staffName, b.name branchName from attendance a join staff s on s.id=a.staffId left join branches b on b.id=a.branchId where a.date>=? and a.date<=? and ifnull(a.status,'present')='present'${br ? ' and a.branchId=?' : ''}${q.flagged === '1' ? ' and a.flagged=1' : ''} order by a.date desc, a.timeIn desc limit 1000`, from, to, ...(br ? [br] : []))
+      .map(a => ({ ...a, corrections: jp(a.corrections), geoIn: a.geoIn ? JSON.parse(a.geoIn) : null, geoOut: a.geoOut ? JSON.parse(a.geoOut) : null, workedMins: a.timeOut ? Math.round((new Date(a.timeOut) - new Date(a.timeIn)) / 60000) - (a.breakMins || 0) : null }));
+    const absences = []; const end = to < todayStr() ? to : todayStr();
+    if (q.flagged !== '1') for (let d = new Date(from + 'T00:00'), n = 0; dOf(d) <= end && n < 62; d.setDate(d.getDate() + 1), n++) {
+      const ds = dOf(d), had = new Set(all('select staffId from attendance where date=?', ds).map(x => x.staffId));
+      for (const s of all(`select * from staff where active=1${br ? ' and branchId=?' : ''}`, ...(br ? [br] : []))) if (!had.has(s.id) && !(ds === todayStr() && false)) absences.push({ date: ds, staffId: s.id, staffName: s.name, branchName: get('branches', s.branchId)?.name || '' });
+    }
+    return send(res, 200, { rows, absences, totals: { records: rows.length, late: rows.filter(r => r.lateMins > 0).length, lateMins: sum(rows, r => r.lateMins || 0), undertimeMins: sum(rows, r => r.undertimeMins || 0), overtimeMins: sum(rows, r => r.overtimeMins || 0), flagged: rows.filter(r => r.flagged).length, offline: rows.filter(r => r.offline).length, absences: absences.length } });
+  }
+  const acm = p.match(/^\/api\/attendance\/(\w+)\/correct$/);
+  if (acm && method === 'PUT') {
+    adminOnly(); const a = get('attendance', acm[1]); if (!a) bad(404, 'Not found'); const b = await readBody(req), reason = String(b.reason || '').trim().slice(0, 300);
+    if (reason.length < 5) bad(400, 'A reason is required for every attendance correction');
+    const parse = v => { if (!v) return null; const s = /^\d{2}:\d{2}$/.test(v) ? `${a.date}T${v}:00` : String(v); const d = new Date(s); if (isNaN(d)) bad(400, 'Invalid time'); return d; };
+    const tin = b.timeIn ? parse(b.timeIn) : new Date(a.timeIn), tout = b.timeOut === '' || b.timeOut === undefined ? (a.timeOut ? new Date(a.timeOut) : null) : parse(b.timeOut);
+    if (tout && tout < tin) bad(400, 'The time out cannot be earlier than the time in');
+    const br = get('branches', a.branchId), close = toMin(br.closeTime || '21:00'), late = Math.max(0, minsOfDay(tin) - (toMin(br.openTime) + (br.graceMins || 0)));
+    const log2 = jp(a.corrections); log2.push({ at: nowISO(), by: me.name, reason, before: { timeIn: a.timeIn, timeOut: a.timeOut, lateMins: a.lateMins }, after: { timeIn: tin.toISOString(), timeOut: tout ? tout.toISOString() : null } });
+    run('update attendance set timeIn=?, timeOut=?, lateMins=?, undertimeMins=?, overtimeMins=?, corrections=?, corrected=1 where id=?', tin.toISOString(), tout ? tout.toISOString() : null, late, tout ? Math.max(0, close - minsOfDay(tout)) : 0, tout ? Math.max(0, minsOfDay(tout) - close) : 0, JSON.stringify(log2), a.id);
+    log(me, 'attendance-correction', 'attendance', a.id, reason); return send(res, 200, { ok: true });
   }
   if (p === '/api/shifts/open' && method === 'POST') {
     const b = await readBody(req), bid = branchScope(me, b.branchId), terminal = String(b.terminal || 'Terminal 1').slice(0, 40);

@@ -30,6 +30,7 @@ async function loadView() {
     if (v === 'dashboard') { [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}&branch=${ui.branch}`)); }
+    else if (v === 'att') ui.att = await api('GET', `/api/attendance/log?${qs()}&flagged=${ui.aflag ? 1 : 0}`);
     else if (v === 'adv') ui.adv = await api('GET', `/api/advances?branch=${ui.branch}&status=${ui.astatus || ''}`);
     else if (v === 'exp') ui.exp = await api('GET', `/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}`);
     else if (v === 'remit') ui.remit = await api('GET', `/api/remittances?${qs()}&status=${ui.rstatus || ''}`);
@@ -79,7 +80,7 @@ const ICONS = {
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
@@ -107,13 +108,14 @@ function render() {
     <button class="${on('remit')}" data-view="remit">${ic('coin')}Daily Remittance</button>
     <button class="${on('exp')}" data-view="exp">${ic('wallet')}Expenses &amp; Receipts</button>
     <button class="${on('adv')}" data-view="adv">${ic('tag')}Release Pay</button>
+    <button class="${on('att')}" data-view="att">${ic('clock')}Attendance</button>
     <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
     <button class="${on('settings')}" data-view="settings">${ic('gear')}Settings</button>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).trim();
-  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -147,6 +149,20 @@ function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
   return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
+}
+function vAtt() {
+  const r = ui.att, fl = !!ui.aflag, hm = iso => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' }) : '—', mm = n => n ? (n >= 60 ? Math.floor(n / 60) + 'h ' + (n % 60) + 'm' : n + 'm') : '—';
+  const extra = `<label class="chk" style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:500;margin:0"><input type="checkbox" id="aflag" ${fl ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Flagged only</label><button class="btn ghost sm" data-act="attcsv">⬇ Export CSV</button>`;
+  return `<h2>Attendance &amp; Timekeeping <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(extra)}
+  ${r ? `<div class="grid"><div class="card stat"><span>Records</span><b>${r.totals.records}</b></div><div class="card stat"><span>Late</span><b>${r.totals.late}</b><small class="mute">${mm(r.totals.lateMins)} total</small></div><div class="card stat"><span>Undertime</span><b>${mm(r.totals.undertimeMins)}</b></div><div class="card stat"><span>Overtime</span><b>${mm(r.totals.overtimeMins)}</b></div>
+    <div class="card stat"><span>Flagged for review</span><b style="color:${r.totals.flagged ? 'var(--bad)' : 'var(--ok)'}">${r.totals.flagged}</b></div><div class="card stat"><span>Synced from offline</span><b>${r.totals.offline}</b></div><div class="card stat"><span>No time-in (absent)</span><b>${r.totals.absences}</b></div></div>
+  <div class="card overflow"><table><tr><th>Date</th><th>Barber</th><th>Branch</th><th>Time in</th><th>Time out</th><th>Worked</th><th>Late</th><th>Undertime</th><th>Overtime</th><th>Selfies</th><th>Review</th><th></th></tr>
+  ${r.rows.map(a => `<tr><td>${esc(a.date)}</td><td><b>${esc(a.staffName)}</b></td><td>${esc(a.branchName)}</td><td>${hm(a.timeIn)}${a.offline ? ' <span class="tag">offline</span>' : ''}${a.deviceIn && a.receivedIn ? `<br><span class="mute" style="font-size:11px">server got it ${hm(a.receivedIn)}</span>` : ''}</td><td>${hm(a.timeOut)}</td><td>${a.workedMins != null ? mm(a.workedMins) : '<span class="mute">on duty</span>'}</td>
+    <td style="color:${a.lateMins ? 'var(--bad)' : ''}">${mm(a.lateMins)}</td><td>${mm(a.undertimeMins)}</td><td>${mm(a.overtimeMins)}</td>
+    <td>${a.inPhoto ? `<a href="#" data-act="viewfiles" data-ids="${a.inPhoto}${a.outPhoto ? ',' + a.outPhoto : ''}">View${a.outPhoto ? ' in/out' : ''}</a>` : '<span class="mute">none</span>'}${a.geoIn ? `<br><a href="https://maps.google.com/?q=${a.geoIn.lat},${a.geoIn.lng}" target="_blank" rel="noopener" style="font-size:11px">📍 location</a>` : ''}</td>
+    <td style="white-space:normal;min-width:170px">${a.flagged ? `<span class="tag" style="color:var(--bad);background:rgba(255,93,108,.13)">FLAGGED</span><br><span class="mute" style="font-size:11px">${esc(a.flagReason)}</span>` : ''}${a.corrected ? `<span class="tag">corrected</span> <a href="#" data-act="atthist" data-id="${a.id}" style="font-size:11px">history</a>` : ''}</td>
+    <td><button class="btn ghost sm" data-act="attfix" data-id="${a.id}">Correct</button></td></tr>`).join('') || '<tr><td colspan="12" class="mute">No attendance records in this period.</td></tr>'}</table></div>
+  ${r.absences.length ? `<div class="card overflow" style="margin-top:14px"><h3>No time-in recorded (possible absences)</h3><table><tr><th>Date</th><th>Barber</th><th>Branch</th></tr>${r.absences.slice(0, 200).map(x => `<tr><td>${esc(x.date)}</td><td>${esc(x.staffName)}</td><td>${esc(x.branchName)}</td></tr>`).join('')}</table></div>` : ''}` : '<p class="mute">Loading…</p>'}`;
 }
 function vAdv() {
   const r = ui.adv, st = ui.astatus || '';
@@ -257,6 +273,9 @@ function vSettings() {
   const s = ui.settings; if (!s) return '<p class="mute">Loading…</p>';
   const e = s.email, owner = S.me.role === 'owner';
   return `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+    <div class="card"><h3>Attendance</h3><label class="chk" style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:500"><input type="checkbox" id="at-photo" ${s.attPhoto ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Require a selfie for every time in and time out</label>
+      <label class="chk" style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:500"><input type="checkbox" id="at-geo" ${s.attGeo ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Also record the location (optional, needs location permission on the phone)</label>
+      <p class="mute" style="font-size:12px;margin:8px 0 10px">Tell your staff that selfies and location are recorded for attendance only. Photos are encrypted and visible only to you and your branch staff. Attendance works without internet: it is saved on the phone and uploaded automatically.</p><button class="btn sm" data-act="saveatt">Save</button></div>
     ${owner ? `<div class="card"><h3>Owner login</h3>
       <p style="margin:0 0 8px">Your username: <b>${s.ownerUser ? esc(s.ownerUser) : '<span class="mute">not set (you log in with a blank username)</span>'}</b></p>
       <label>New owner username</label><input id="ou-name" value="${esc(s.ownerUser || '')}" placeholder="e.g. kevin" autocapitalize="none" autocomplete="off">
@@ -380,6 +399,21 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
+  if (act === 'attcsv') {
+    const r = ui.att, rows = [['Date', 'Barber', 'Branch', 'Time in', 'Time out', 'Late mins', 'Undertime mins', 'Overtime mins', 'Flagged', 'Reason', 'Offline', 'Corrected'], ...r.rows.map(a => [a.date, a.staffName, a.branchName, a.timeIn || '', a.timeOut || '', a.lateMins || 0, a.undertimeMins || 0, a.overtimeMins || 0, a.flagged ? 'YES' : '', a.flagReason || '', a.offline ? 'YES' : '', a.corrected ? 'YES' : ''])];
+    const csv = '﻿' + rows.map(x => x.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `attendance-${ui.from}_${ui.to}.csv`; a.click(); return;
+  }
+  if (act === 'atthist') { const a = ui.att.rows.find(r => r.id === d.id); return openModal('<h2 style="margin-top:0">Correction history</h2>' + a.corrections.map(c => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(c.by)}</b> <span class="mute" style="font-size:12px">${new Date(c.at).toLocaleString('en-PH')}</span><br>${esc(c.reason)}<br><span class="mute" style="font-size:12px">Before: ${esc(c.before.timeIn || '')} → ${esc(c.before.timeOut || '')}<br>After: ${esc(c.after.timeIn || '')} → ${esc(c.after.timeOut || '')}</span></div>`).join('') + '<br><button class="btn ghost" data-act="close">Close</button>'); }
+  if (act === 'attfix') {
+    const a = ui.att.rows.find(r => r.id === d.id), hhmm = iso => iso ? new Date(iso).toTimeString().slice(0, 5) : '';
+    return openModal(`<h2 style="margin-top:0">Correct attendance</h2><p>${esc(a.staffName)} · ${esc(a.date)}</p><label>Time in</label><input id="fx-in" type="time" value="${hhmm(a.timeIn)}"><label>Time out</label><input id="fx-out" type="time" value="${hhmm(a.timeOut)}">
+      <label>Reason (required, kept in the audit trail)</label><input id="fx-reason" maxlength="300" placeholder="e.g. Tablet was offline, confirmed by branch manager"><p id="fx-err" style="color:var(--bad)"></p><div class="row"><button class="btn" data-act="attfixgo" data-id="${a.id}">Save correction</button><button class="btn ghost" data-act="close">Cancel</button></div>`);
+  }
+  if (act === 'attfixgo') {
+    const v = i => document.getElementById(i).value;
+    try { await api('PUT', '/api/attendance/' + d.id + '/correct', { timeIn: v('fx-in'), timeOut: v('fx-out') || undefined, reason: v('fx-reason') }); closeModal(); await loadView(); render(); } catch (x) { document.getElementById('fx-err').textContent = x.message; } return;
+  }
+  if (act === 'saveatt') { try { await api('PUT', '/api/settings', { attPhoto: document.getElementById('at-photo').checked, attGeo: document.getElementById('at-geo').checked }); await loadView(); render(); alert('Attendance settings saved.'); } catch (x) { alert(x.message); } return; }
   if (act === 'advhist') {
     const a = ui.adv.rows.find(r => r.id === d.id);
     return openModal(`<h2 style="margin-top:0">${esc(a.staffName)} · ${esc(a.type)}</h2><p class="mute">${esc(a.reason)}</p>
@@ -491,6 +525,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.id === 'aflag') { ui.aflag = t.checked; await loadView(); return render(); }
   if (t.id === 'astatus') { ui.astatus = t.value; await loadView(); return render(); }
   if (t.id === 'estatus') { ui.estatus = t.value; await loadView(); return render(); }
   if (t.id === 'ecat') { ui.ecat = t.value; await loadView(); return render(); }
