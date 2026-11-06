@@ -243,6 +243,7 @@ const branchScope = (me, requested) => {
 const dayLocked = (branchId, date) => one('select no from zreadings where branchId=? and businessDate=? order by generatedAt desc', branchId, date);
 const openTickets = (branchId, date) => one("select count(*) n from orders where branchId=? and date=? and status in ('waiting','in_chair')", branchId, date).n;
 // a shop's own cover photo (site/<name>-1.jpg) is used on the promo and booking sites until a picture is set for the branch in the back office
+const siteSvc = name => { const f = 'svc-' + String(name || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '') + '.jpg'; return fs.existsSync(path.join(DIR, 'site', f)) ? '/site/' + f : null; };   // service photo: site/svc-<name>.jpg until one is set in the back office
 const siteCover = name => { const s = String(name || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, ''), f = s === 'alaminos' ? 'alaminos.jpg' : s + '-1.jpg'; return s && fs.existsSync(path.join(DIR, 'site', f)) ? '/site/' + f : null; };
 const openShift = branchId => one("select * from shifts where branchId=? and status='open' order by openedAt desc", branchId);
 function priceItems(lines) {
@@ -884,7 +885,7 @@ async function handle(req, res) {
     return send(res, 200, {
       shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime,photo,mapUrl,googlePlaceId,googleUrl from branches order by rowid').map(({ googlePlaceId, googleUrl, ...b }) => ({ ...b, photo: b.photo || siteCover(b.name), google: gInfo({ ...b, googlePlaceId, googleUrl }) })),
       ratings: Object.fromEntries(all('select branchId, count(*) n, avg(rating) a from reviews group by branchId').map(s => [s.branchId, { count: s.n, avg: Math.round(s.a * 10) / 10 }])),
-      services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price"),
+      services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) })),
       categories: all("select id,name from categories where type='service'"),
       staff: all('select id,name,photo,branchId from staff where active=1 order by name')
     });
