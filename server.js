@@ -11,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 process.env.TZ ||= 'Asia/Manila';
 const PORT = +process.env.PORT || 3000;
 const PASS = process.env.ADMIN_PASSWORD || 'admin123';
+const ownerUser = () => String(getSetting('ownerUser') || process.env.OWNER_USERNAME || '').trim().toLowerCase();   // chosen by the owner in Settings (or OWNER_USERNAME); blank = old behaviour
 const SHOP = process.env.SHOP_NAME || 'Brotherhood';
 const DIR = import.meta.dirname;
 const BRANCHES = ['Alaminos', 'Bay', 'Calauan', 'Nagcarlan', 'Tiaong', 'San Pablo', 'Sto. Tomas'];
@@ -798,6 +799,7 @@ async function handle(req, res) {
     return send(res, 201, { ok: true, booking: { date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, staffPhoto: bk.staffPhoto, items: bk.items, total: bk.total, name: bk.customerName } });
   }
 
+  if (p === '/api/public/login-hint' && method === 'GET') return send(res, 200, { ownerNamed: !!ownerUser() });
   if (p === '/api/login' && method === 'POST') {
     const b = await readBody(req);
     await new Promise(r => setTimeout(r, failDelay(ip)));
@@ -808,7 +810,7 @@ async function handle(req, res) {
       const u = /^\d{6}$/.test(pin) ? one('select * from users where pinKey=? and active=1', pinKeyOf(pin)) : null;
       if (u) { tok = makeToken(u.id, u.pinKey.slice(-8)); who = u.name; }
     }
-    else if ((!uname || uname === 'owner') && crypto.timingSafeEqual(sha(pw), sha(PASS))) { tok = makeToken('owner', ''); who = 'Owner'; }
+    else if ((ownerUser() ? uname === ownerUser() : (!uname || uname === 'owner')) && crypto.timingSafeEqual(sha(pw), sha(PASS))) { tok = makeToken('owner', ''); who = 'Owner'; }
     else if (uname) {
       const u = one('select * from users where username=? and active=1', uname);
       if (u?.passHash && checkPw(pw, u.passHash)) { tok = makeToken(u.id, u.passHash.slice(-8)); who = u.name; }
@@ -930,7 +932,7 @@ async function handle(req, res) {
   // ----- settings: terms, email (admin) -----
   if (p === '/api/settings' && method === 'GET') {
     adminOnly();
-    return send(res, 200, { google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+    return send(res, 200, { ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
       log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
   }
   if (p === '/api/settings' && method === 'PUT') {
@@ -956,6 +958,15 @@ async function handle(req, res) {
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
     log(me, 'reset-data', 'settings', '', JSON.stringify(gone)); return send(res, 200, { ok: true, deleted: gone, backup: path.basename(file) });
+  }
+  if (p === '/api/settings/owner-username' && method === 'PUT') {
+    if (me.role !== 'owner') bad(403, 'Only the owner can change the owner username');
+    const b = await readBody(req), u = String(b.username || '').trim().toLowerCase();
+    if (u && !/^[a-z0-9._-]{3,30}$/.test(u)) bad(400, 'Username must be 3 to 30 characters: letters, numbers, dot, dash or underscore');
+    if (u && one('select 1 x from users where lower(username)=?', u)) bad(409, 'That username is already used by another user');
+    if (!crypto.timingSafeEqual(sha(String(b.password || '')), sha(PASS))) bad(403, 'Wrong password. Enter your current owner password to confirm.');
+    setSetting('ownerUser', u); log(me, 'owner-username', 'settings', '', u || '(blank)');
+    return send(res, 200, { ok: true, username: u });
   }
   if (p === '/api/settings/test-email' && method === 'POST') {
     adminOnly(); const to = normEmail((await readBody(req)).to); if (!validEmail(to)) bad(400, 'Invalid email address');

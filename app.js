@@ -84,7 +84,7 @@ function render() {
   if (!loggedIn) {
     nav.style.display = 'none';
     view.innerHTML = `<div class="online card"><img class="logo" src="/logo.png" alt=""><h2>${esc(S.shop)}</h2><p class="mute" style="text-align:center;margin:-6px 0 6px">Back office login</p><form data-form="login">
-      <label>Username <span class="mute">(owner: iwanang blangko)</span></label><input name="username" autocapitalize="none" autocomplete="username">
+      <label>Username ${ui.ownerNamed ? '' : '<span class="mute">(owner: leave blank)</span>'}</label><input name="username" autocapitalize="none" autocomplete="username">
       <label>Password</label><input type="password" name="password" autocomplete="current-password" required>
       <p id="err" style="color:var(--bad);min-height:20px">${esc(loadErr === 'Login required' ? '' : loadErr)}</p><button class="btn" style="width:100%;justify-content:center;padding:12px">Login</button></form></div>`;
     return;
@@ -214,6 +214,12 @@ function vSettings() {
   const s = ui.settings; if (!s) return '<p class="mute">Loading…</p>';
   const e = s.email, owner = S.me.role === 'owner';
   return `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+    ${owner ? `<div class="card"><h3>Owner login</h3>
+      <p style="margin:0 0 8px">Your username: <b>${s.ownerUser ? esc(s.ownerUser) : '<span class="mute">not set (you log in with a blank username)</span>'}</b></p>
+      <label>New owner username</label><input id="ou-name" value="${esc(s.ownerUser || '')}" placeholder="e.g. kevin" autocapitalize="none" autocomplete="off">
+      <label>Current owner password (to confirm)</label><input id="ou-pw" type="password" autocomplete="current-password">
+      <p class="mute" style="font-size:12px;margin:8px 0 10px">3 to 30 characters: letters, numbers, dot, dash or underscore. After saving, log in with this username and your usual owner password. Leave the username blank to go back to a blank username. The owner password itself is set in the Railway variable ADMIN_PASSWORD.</p>
+      <button class="btn sm" data-act="saveowner">Save username</button></div>` : ''}
     <div class="card"><h3>Email (welcome and promos)</h3>
       <p style="margin:0 0 8px">${e.configured ? '<b style="color:var(--ok)">● Email service is connected</b>' : '<b style="color:var(--bad)">● Email service is not connected yet</b>'}</p>
       <p class="mute" style="font-size:13px;margin:0 0 10px">${e.configured ? `Sending from: <b>${esc(e.from)}</b><br>Unsubscribe links point to: ${esc(e.baseUrl)}` : 'Until it is connected, welcome emails wait in the queue (nothing is lost) and are sent once it is set up. Add RESEND_API_KEY and EMAIL_FROM in the Railway variables.'}</p>
@@ -356,6 +362,11 @@ document.addEventListener('click', async e => {
     const perms = { cashier: [], barber: [] }; document.querySelectorAll('[data-perm]').forEach(c => { if (c.checked) { const [r, m] = c.dataset.perm.split(':'); perms[r].push(m); } });
     try { await api('PUT', '/api/settings', { perms }); await loadView(); render(); alert('Access saved.'); } catch (x) { alert(x.message); } return;
   }
+  if (act === 'saveowner') {
+    const username = document.getElementById('ou-name').value.trim(), password = document.getElementById('ou-pw').value;
+    if (!password) return alert('Enter your current owner password to confirm.');
+    try { await api('PUT', '/api/settings/owner-username', { username, password }); ui.ownerNamed = !!username; await loadView(); render(); alert(username ? 'Saved. From now on log in with the username "' + username.toLowerCase() + '" and your owner password.' : 'Saved. You can log in with a blank username again.'); } catch (x) { alert(x.message); } return;
+  }
   if (act === 'resetdata') {
     const g = k => document.getElementById('rs-' + k).checked, body = { confirm: document.getElementById('rs-confirm').value.trim(), sales: g('sales'), bookings: g('bookings'), reviews: g('reviews'), customers: g('customers') };
     if (!body.sales && !body.bookings && !body.reviews && !body.customers) return alert('Choose what to reset first.');
@@ -426,5 +437,6 @@ document.addEventListener('submit', e => {
   run(() => id ? api('PUT', `/api/${kind}/${id}`, o) : api('POST', `/api/${kind}`, o), err);
 });
 
+fetch('/api/public/login-hint').then(r => r.json()).then(j => { ui.ownerNamed = !!j.ownerNamed; if (!loggedIn) render(); }).catch(() => { });
 load().then(() => setInterval(() => { if (loggedIn && !modal.open && ui.view === 'dashboard' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) load(); }, 15000));
 render();
