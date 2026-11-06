@@ -87,7 +87,17 @@ function checkAppt(a, ignoreId) {
 }
 
 // ---------- http helpers ----------
-const tokens = new Set();
+// Stateless signed tokens: survive restarts/redeploys. Changing ADMIN_PASSWORD (or SESSION_SECRET) logs everyone out.
+const SECRET = process.env.SESSION_SECRET || 'bp:' + PASS;
+const TOKEN_DAYS = 30;
+const sign = exp => crypto.createHmac('sha256', SECRET).update(String(exp)).digest('hex');
+const makeToken = () => { const exp = Date.now() + TOKEN_DAYS * 864e5; return exp + '.' + sign(exp); };
+function validToken(t) {
+  const [exp, sig] = String(t).split('.');
+  if (!exp || !sig || !(+exp > Date.now())) return false;
+  const a = Buffer.from(sig), b = Buffer.from(sign(exp));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 const send = (res, code, body, type = 'application/json') => {
   res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
   res.end(type === 'application/json' ? JSON.stringify(body) : body);
@@ -97,7 +107,7 @@ const readBody = req => new Promise((ok, no) => {
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new Error('bad json')); } });
 });
 const hash = s => crypto.createHash('sha256').update(String(s)).digest();
-const isAdmin = req => tokens.has((req.headers.authorization || '').replace(/^Bearer /, ''));
+const isAdmin = req => validToken((req.headers.authorization || '').replace(/^Bearer /, ''));
 let failDelay = 0;
 
 const STATIC = { '/': 'index.html', '/book': 'index.html', '/app.js': 'app.js' };
@@ -139,7 +149,7 @@ http.createServer(async (req, res) => {
       const b = await readBody(req);
       await new Promise(r => setTimeout(r, failDelay));
       if (crypto.timingSafeEqual(hash(b.password), hash(PASS))) {
-        failDelay = 0; const t = crypto.randomBytes(24).toString('hex'); tokens.add(t); return send(res, 200, { token: t });
+        failDelay = 0; return send(res, 200, { token: makeToken() });
       }
       failDelay = Math.min(failDelay + 500, 3000);
       return send(res, 401, { error: 'Wrong password' });
