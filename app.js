@@ -11,7 +11,7 @@ const ago = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso
 let S = { shop: 'Brotherhood', me: null, branches: [], chairs: [], staff: [], categories: [], items: [], discounts: [], users: [] };
 let token = ''; try { token = localStorage.getItem('bp.token') || ''; } catch (e) { }
 let loggedIn = false, loadErr = '';
-const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', bp: 'week', reviews: [], picked: new Set(), navClosed: new Set((() => { try { return JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { return []; } })()) };
+const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', reviews: [], picked: new Set(), navClosed: new Set((() => { try { return JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { return []; } })()) };
 const modal = document.getElementById('modal');
 const openModal = h => { modal.innerHTML = h; if (!modal.open) modal.showModal(); };
 const closeModal = () => modal.close();
@@ -41,7 +41,7 @@ async function loadView() {
     else if (v === 'activity') ui.audit = await api('GET', '/api/audit');
     else if (v === 'settings') ui.settings = await api('GET', '/api/settings');
     else if (v === 'reviews') ui.reviews = await api('GET', '/api/reviews');
-    else if (v === 'bookings') ui.bk = await api('GET', `/api/bookings?from=${ui.bf}&to=${ui.bt}&branch=${ui.branch}`);
+    else if (v === 'bookings') ui.bk = await api('GET', `/api/bookings?${qs()}`);
   } catch (e) { if (loggedIn) alert(e.message); }
 }
 async function load(viewToo = true) {
@@ -115,9 +115,12 @@ function renderBase() {
   view.innerHTML = branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
 }
 // Branch picker shown at the top of every page (not only in the side menu), so it is one tap on phones too
+const DATE_VIEWS = ['bookings', 'chk', 'slip', 'att', 'exp', 'remit'];
 function branchBar() {
   if (['settings', 'activity', 'inbox'].includes(ui.view)) return '';
-  return `<div class="pagebar"><label for="branchsel2">Branch</label><select id="branchsel2"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></div>`;
+  const dated = DATE_VIEWS.includes(ui.view) || ui.view.startsWith('rep:');
+  const date = dated ? `<label for="dpreset" style="margin-left:8px">Date</label><select id="dpreset">${PRESETS.map(([k, l]) => `<option value="${k}" ${ui.rp === k ? 'selected' : ''}>${l}</option>`).join('')}</select>${ui.rp === 'custom' ? `<input type="date" id="rfrom" value="${ui.from}"><span class="mute">to</span><input type="date" id="rto" value="${ui.to}">` : `<span class="mute">${ui.rp === 'all' ? 'Everything' : ui.from === ui.to ? ui.from : ui.from + ' → ' + ui.to}</span>`}` : '';
+  return `<div class="pagebar"><label for="branchsel2">Branch</label><select id="branchsel2"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>${date}</div>`;
 }
 
 // ---------- report rendering ----------
@@ -132,7 +135,7 @@ function renderTable(t) {
     ${t.rows.map((r, i) => `<tr>${sel ? `<td><input type="checkbox" data-pick="${t.ids[i]}" ${ui.picked.has(t.ids[i]) ? 'checked' : ''} style="width:auto"></td>` : ''}${r.map((v, j) => `<td>${fmtVal(v, t.cols[j][1])}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${t.cols.length}" class="mute">No data in this period.</td></tr>`}</table></div>`;
 }
 // Date range presets used by reports and bookings: Today, This week, This month, Custom range, All time
-const PRESETS = [['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['custom', 'Custom range'], ['all', 'All time']];
+const PRESETS = [['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['all', 'All time'], ['custom', 'Custom range']];
 function presetRange(p) {
   const t = today(), d = new Date(t + 'T00:00');
   if (p === 'today') return [t, t];
@@ -140,13 +143,9 @@ function presetRange(p) {
   if (p === 'month') return [t.slice(0, 8) + '01', dstr(new Date(d.getFullYear(), d.getMonth() + 1, 0))];
   return ['2000-01-01', '2099-12-31'];
 }
-[ui.bf, ui.bt] = presetRange(ui.bp);
-const rangeBar = (w, extra = '') => {
-  const cur = w === 'r' ? ui.rp : ui.bp, a = w === 'r' ? ui.from : ui.bf, b = w === 'r' ? ui.to : ui.bt;
-  return `<div class="row" style="margin-bottom:14px;align-items:flex-end"><div class="presets">${PRESETS.map(([k, l]) => `<button class="${cur === k ? 'on' : ''}" data-act="preset" data-w="${w}" data-p="${k}">${l}</button>`).join('')}</div>
-    ${cur === 'custom' ? `<div><label>From</label><input type="date" id="${w}from" value="${a}"></div><div><label>To</label><input type="date" id="${w}to" value="${b}"></div>` : `<span class="mute">${cur === 'all' ? 'Everything' : a === b ? a : a + ' → ' + b}</span>`}${extra}</div>`;
-};
-const filterBar = extra => rangeBar('r', extra);
+
+// The date range now lives in the bar at the top of the page (see pageBar); pages only keep their own extra buttons/filters here
+const filterBar = extra => extra ? `<div class="row" style="margin-bottom:14px;align-items:flex-end">${extra}</div>` : '';
 function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
@@ -468,7 +467,6 @@ function vBookings() {
   const rows = ui.bk;
   return `<div class="card" style="margin-bottom:14px"><div class="row between"><div><h3 style="margin:0 0 4px">Online booking link</h3><b style="font-size:16px">${esc(link)}</b><div class="mute" style="font-size:12px">Give this link to customers (Facebook, Messenger, QR code). Each booking goes straight to that branch's POS.</div></div>
     <div class="row"><button class="btn" data-act="copylink">Copy link</button><a class="btn ghost" href="/book" target="_blank" style="text-decoration:none">Open</a></div></div></div>
-  ${rangeBar('b')}
   <div class="card overflow"><table><tr><th>Date</th><th>Time</th><th>Customer</th><th>Phone</th><th>Services</th><th>Barber</th><th>Branch</th><th>Source</th><th>Status</th><th></th></tr>
   ${rows.map(b => `<tr><td>${esc(b.date)}</td><td>${esc(b.time)}</td><td>${esc(b.customerName)}</td><td>${esc(b.phone)}</td><td>${b.items.map(i => esc(i.name)).join(', ')}</td><td>${thumb({ photo: b.staffPhoto, name: b.staffName })} ${esc(b.staffName)}</td><td>${esc(b.branchName)}</td><td>${b.source === 'online' ? 'Online' : 'Phone/POS'}</td>
     <td><span class="tag ${b.status === 'booked' ? 'booked' : b.status === 'arrived' ? 'done' : ''}">${esc(b.status)}</span></td><td>${b.status === 'booked' ? `<button class="btn bad sm" data-act="bkcancel" data-id="${b.id}">Cancel</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="mute">No bookings in this period.</td></tr>'}</table></div>`;
@@ -627,7 +625,6 @@ document.addEventListener('click', async e => {
   if (act === 'logout') { token = ''; try { localStorage.removeItem('bp.token'); } catch (x) { } loggedIn = false; return render(); }
   if (act === 'edit') return form(d.kind, d.id);
   if (act === 'del') { if (confirm('Are you sure?')) mut(async () => { const r = await api('DELETE', `/api/${d.kind}/${d.id}`); if (r.deactivated) alert('This record has history, so it was deactivated instead of deleted.'); }); return; }
-  if (act === 'preset') { const [a, b] = presetRange(d.p); if (d.w === 'r') { ui.rp = d.p; if (d.p !== 'custom') { ui.from = a; ui.to = b; } } else { ui.bp = d.p; if (d.p !== 'custom') { ui.bf = a; ui.bt = b; } } await loadView(); return render(); }
   if (act === 'export') return download(`/api/reports/${d.name}?${qs()}&format=csv`, `${d.name}-${ui.from}_${ui.to}.csv`);
   if (act === 'delreview') { if (confirm('Delete this review? It will disappear from the booking site.')) mut(async () => { await api('DELETE', `/api/reviews/${d.id}`); await loadView(); }); return; }
   if (act === 'resetuser') {
@@ -690,7 +687,7 @@ document.addEventListener('change', async e => {
   if (t.id === 'rstatus') { ui.rstatus = t.value; await loadView(); return render(); }
   if (t.id === 'branchsel' || t.id === 'branchsel2') { ui.branch = t.value; render(); await loadView(); return render(); }
   if (t.id === 'tierf') { ui.cust.tier = t.value; ui.cust.page = 1; await loadView(); return render(); }
-  if (t.id === 'bfrom' || t.id === 'bto') { if (t.id === 'bfrom') ui.bf = t.value || today(); else ui.bt = t.value || today(); await loadView(); return render(); }
+  if (t.id === 'dpreset') { ui.rp = t.value; if (t.value !== 'custom') [ui.from, ui.to] = presetRange(t.value); render(); await loadView(); return render(); }
   if (t.dataset.bphoto) {
     const file = t.files[0]; if (!file) return; const id = t.dataset.bphoto, msg = document.getElementById('bm-' + id); msg.textContent = 'Uploading…';
     try {
