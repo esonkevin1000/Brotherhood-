@@ -384,7 +384,7 @@ function csv(rep) {
 // ---------- http ----------
 const send = (res, code, body, type = 'application/json') => {
   res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-  res.end(type === 'application/json' ? JSON.stringify(body) : body);
+  res.end(type === 'application/json' && !Buffer.isBuffer(body) ? JSON.stringify(body) : body);
 };
 const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
