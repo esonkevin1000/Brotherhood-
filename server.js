@@ -53,7 +53,12 @@ create table if not exists images(id text primary key, mime text, data blob, cre
 create table if not exists bookings(id text primary key, branchId text, staffId text, customerName text, phone text, date text, time text, mins integer,
   itemIds text, status text, notes text, source text, orderId text, createdAt text);
 create index if not exists bookings_date on bookings(date, branchId);
+create table if not exists email_log(id text primary key, customerId text, toAddr text, kind text, subject text, html text, text text, status text, attempts integer, error text, createdAt text, sentAt text);
+create index if not exists orders_cust on orders(customerId);
 `);
+addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'integer'); addCol('customers', 'consentAt', 'text'); addCol('customers', 'welcomedAt', 'text');
+addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
+db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
 db.exec("create table if not exists settings(k text primary key, v text)");
 db.exec("create unique index if not exists users_pin on users(pinKey) where pinKey is not null and pinKey<>''");
 
@@ -64,7 +69,7 @@ const COLS = {
   categories: ['name', 'type'],
   items: ['name', 'categoryId', 'type', 'price', 'mins', 'active', 'photo', 'bookable', 'apptOnly'],
   discounts: ['name', 'kind', 'value', 'active'],
-  customers: ['name', 'phone', 'email', 'notes', 'createdAt'],
+  customers: ['name', 'phone', 'email', 'notes', 'createdAt', 'preferredCut'],
   users: ['name', 'username', 'role', 'branchId', 'active']
 };
 const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly']);
@@ -242,6 +247,156 @@ function zData(shift) {
   };
 }
 
+// ---------- customer directory, loyalty tiers, consent, welcome email ----------
+const normPhone = s => { const d = String(s || '').replace(/\D/g, ''); return d.startsWith('63') ? '0' + d.slice(2) : d; };
+const normEmail = s => String(s || '').trim().toLowerCase();
+const validEmail = s => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s);
+const TIERS = [[51, 'VIP'], [26, 'Gold'], [16, 'Silver'], [5, 'Bronze'], [0, 'Member']];   // 1 paid visit = 1 point
+const tierOf = v => TIERS.find(([min]) => v >= min)[1];
+const nextTier = v => { const n = [...TIERS].reverse().find(([min]) => min > v); return n ? { name: n[1], visitsNeeded: n[0] - v } : null; };
+const getSetting = k => one('select v from settings where k=?', k)?.v;
+const setSetting = (k, v) => run('insert into settings(k,v) values(?,?) on conflict(k) do update set v=excluded.v', k, v);
+const DEFAULT_TERMS = `TERMS & CONDITIONS AT PAHINTULOT — BROTHERHOOD BARBER
+
+1. Anong impormasyon ang kinokolekta namin
+Ang iyong buong pangalan, mobile number, email address, preferred haircut, at ang kasaysayan ng iyong mga bisita at binili sa aming mga branch.
+
+2. Bakit namin ito kinokolekta
+Para makilala ka ng aming mga barber at maihanda ang iyong preferred haircut, maitala ang iyong mga visit at loyalty points, at maasikaso ang iyong mga appointment.
+
+3. Pahintulot sa email at promos
+Sa pag-tick ng kahon, pumapayag ka na padalhan ka ng Brotherhood Barber ng email, promo, at balita. Hindi ito kailangan para makapagpagupit. Kung hindi ka magbibigay ng email, hindi ka makakatanggap ng email.
+
+4. Loyalty Program
+1 natapos at bayad na visit = 1 point. Member (0–4 visits), Bronze (5–15), Silver (16–25), Gold (26–50), VIP (51 pataas). Maaaring baguhin ng Brotherhood ang mga benepisyo ng bawat tier anumang oras.
+
+5. Pagtigil sa mga email
+Maaari kang mag-unsubscribe anumang oras gamit ang link sa ibaba ng bawat email, o sa pagsabi sa aming cashier.
+
+6. Proteksyon ng iyong data
+Hindi namin ibinebenta o ibinabahagi ang iyong impormasyon sa ibang kumpanya. Sumusunod kami sa Data Privacy Act of 2012 (RA 10173). May karapatan kang humiling na tingnan, ituwid, o burahin ang iyong data sa pamamagitan ng aming cashier.`;
+const getTerms = () => getSetting('terms') || DEFAULT_TERMS;
+const EMAIL = { key: process.env.RESEND_API_KEY || '', from: process.env.EMAIL_FROM || 'Brotherhood Barber <onboarding@resend.dev>', replyTo: process.env.EMAIL_REPLY_TO || '' };
+let lastOrigin = getSetting('origin') || '';
+const baseUrl = () => process.env.PUBLIC_URL || lastOrigin || 'http://localhost:' + PORT;
+function rememberOrigin(req) {   // only called for authenticated admins, so the Host header can be trusted
+  const host = req.headers.host || ''; if (!host || /^(localhost|127\.)/.test(host)) return;
+  const o = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0] + '://' + host;
+  if (o !== lastOrigin) { lastOrigin = o; setSetting('origin', o); }
+}
+const unsubSig = id => crypto.createHmac('sha256', SECRET).update('unsub:' + id).digest('base64url').slice(0, 22);
+
+function custCard(c) {
+  const s = one("select count(*) n, ifnull(sum(total),0) s, max(paidAt) l from orders where customerId=? and status='paid'", c.id);
+  return { id: c.id, name: c.name, phone: c.phone, email: c.email, preferredCut: c.preferredCut || '', consent: c.consent ? 1 : 0, welcomed: !!c.welcomedAt,
+    visits: s.n, spent: r2(s.s), lastVisit: s.l, tier: tierOf(s.n), next: nextTier(s.n) };
+}
+const withCust = o => { const c = o.customerId ? get('customers', o.customerId) : null; return { ...o, cust: c ? custCard(c) : null }; };
+function findCustomer(phone, email) {
+  const pk = normPhone(phone), ek = normEmail(email);
+  if (pk.length >= 10) { const c = one('select * from customers where phoneKey=?', pk); if (c) return c; }
+  if (ek && validEmail(ek)) { const c = one('select * from customers where emailKey=?', ek); if (c) return c; }
+  return null;
+}
+// Directory rule: a person only enters the directory when they give a phone number or an email. Returns null otherwise.
+function upsertCustomer(info, source) {
+  const name = String(info.name || '').trim().slice(0, 200), phone = String(info.phone || '').trim().slice(0, 40), email = normEmail(info.email).slice(0, 200);
+  if (email && !validEmail(email)) bad(400, 'Invalid email address');
+  const pk = normPhone(phone); if (phone && pk.length < 10) bad(400, 'Invalid phone number');
+  const cut = info.preferredCut === undefined ? undefined : String(info.preferredCut || '').trim().slice(0, 200);
+  let c = info.id ? get('customers', String(info.id)) : null; c ||= findCustomer(phone, email);
+  if (!c && !pk && !email) return null;   // directory rule: no phone and no email → not added
+  if (!c) {
+    if (!name) bad(400, 'Full name required');
+    const id = uid();
+    run('insert into customers(id,name,phone,email,notes,createdAt,preferredCut,consent,consentAt,welcomedAt,phoneKey,emailKey,source) values(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      id, name, phone, email, '', nowISO(), cut || '', info.consent ? 1 : 0, info.consent ? nowISO() : null, null, pk || null, email || null, source);
+    c = get('customers', id);
+  } else {
+    // returning customer: keep what we already know (e.g. the past email) unless something new was typed
+    const nPhone = pk ? phone : c.phone, nEmail = email || c.email;
+    run('update customers set name=?, phone=?, email=?, preferredCut=?, consent=?, consentAt=?, phoneKey=?, emailKey=? where id=?',
+      c.name || name, nPhone, nEmail, cut || c.preferredCut || '', (info.consent || c.consent) ? 1 : 0, info.consent && !c.consent ? nowISO() : c.consentAt, normPhone(nPhone) || null, nEmail || null, c.id);
+    c = get('customers', c.id);
+  }
+  maybeWelcome(c);
+  return c;
+}
+function resolveCustomer(b, source) {
+  const info = b.customer && typeof b.customer === 'object' ? { ...b.customer } : {};
+  info.id = b.customerId || info.id || '';
+  const existing = info.id ? get('customers', String(info.id)) : null;
+  if (existing) { const hasNew = info.phone || info.email || info.preferredCut !== undefined || info.consent; const c = hasNew ? (upsertCustomer({ ...info, id: existing.id, name: existing.name }, source) || existing) : existing; return { id: c.id, name: c.name }; }
+  const name = String(info.name || b.customerName || '').trim();
+  const c = upsertCustomer({ ...info, id: '', name }, source);
+  return c ? { id: c.id, name: c.name } : { id: '', name };
+}
+function editCustomer(cur, b) {
+  const phone = 'phone' in b ? String(b.phone || '').trim().slice(0, 40) : cur.phone, email = 'email' in b ? normEmail(b.email).slice(0, 200) : cur.email;
+  if (email && !validEmail(email)) bad(400, 'Invalid email address');
+  if (phone && normPhone(phone).length < 10) bad(400, 'Invalid phone number');
+  if (!normPhone(phone) && !email) bad(400, 'Kailangan ng phone o email para manatili sa Customer Directory.');
+  const name = 'name' in b ? String(b.name || '').trim().slice(0, 200) : cur.name; if (!name) bad(400, 'Name required');
+  const clash = findCustomer(phone, email); if (clash && clash.id !== cur.id) bad(409, `Ginagamit na ng ibang customer (${clash.name}) ang phone o email na ito`);
+  const consent = 'consent' in b ? (+b.consent ? 1 : 0) : cur.consent;
+  run('update customers set name=?, phone=?, email=?, preferredCut=?, notes=?, consent=?, consentAt=?, phoneKey=?, emailKey=? where id=?', name, phone, email,
+    'preferredCut' in b ? String(b.preferredCut || '').slice(0, 200) : cur.preferredCut, 'notes' in b ? String(b.notes || '').slice(0, 500) : cur.notes,
+    consent, consent && !cur.consent ? nowISO() : cur.consentAt, normPhone(phone) || null, email || null, cur.id);
+  const c = get('customers', cur.id); maybeWelcome(c); return c;
+}
+const esc2 = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+function welcomeEmail(c) {
+  const first = esc2(String(c.name).trim().split(/\s+/)[0] || 'Ka-Brotherhood');
+  const rows = [['Member', '0–4 visits'], ['Bronze', '5–15 visits'], ['Silver', '16–25 visits'], ['Gold', '26–50 visits'], ['VIP', '51+ visits']]
+    .map(([n, r]) => `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:700">${n}</td><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#555">${r}</td></tr>`).join('');
+  const html = `<!doctype html><html><body style="margin:0;background:#f5f5f6;font-family:Arial,Helvetica,sans-serif;color:#111"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#fff;border-radius:16px;overflow:hidden">
+<tr><td style="background:#000;color:#fff;text-align:center;padding:28px 20px"><div style="font-size:26px;letter-spacing:3px;font-weight:700">BROTHERHOOD</div><div style="color:#bbb;margin-top:4px">BARBER</div></td></tr>
+<tr><td style="height:5px;background:repeating-linear-gradient(135deg,#d6283a 0 10px,#fff 10px 20px,#2563eb 20px 30px)"></td></tr>
+<tr><td style="padding:28px 26px"><h1 style="margin:0 0 10px;font-size:22px">Welcome, ${first}! 💈</h1>
+<p style="line-height:1.55;margin:0 0 14px">Salamat sa pagsama sa <b>Brotherhood Barber</b>. Isa ka na ngayong <b>Member</b> ng aming loyalty program.</p>
+<p style="line-height:1.55;margin:0 0 14px">Sa bawat natapos na gupit, <b>may 1 point ka</b>. Habang dumarami ang visits mo, tumataas ang iyong tier:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eee;border-radius:10px;border-collapse:separate;margin:0 0 16px">${rows}</table>
+<p style="line-height:1.55;margin:0 0 14px">Ibigay lang ang iyong mobile number o email sa cashier tuwing bibisita, at awtomatiko nang madadagdag ang iyong points. Aalamin din ng barber ang paborito mong gupit.</p>
+<p style="line-height:1.55;margin:0;color:#555">Makakatanggap ka rin ng mga promo at balita mula sa amin. Hanggang sa susunod mong gupit!</p></td></tr>
+<tr><td style="padding:16px 26px 24px;color:#888;font-size:12px;border-top:1px solid #eee">Natanggap mo ang email na ito dahil pumayag ka sa Terms &amp; Conditions ng Brotherhood Barber.<br><a href="{{UNSUB}}" style="color:#888">Mag-unsubscribe</a></td></tr>
+</table></td></tr></table></body></html>`;
+  const text = `Welcome, ${String(c.name).trim().split(/\s+/)[0]}!\n\nSalamat sa pagsama sa Brotherhood Barber. Isa ka na ngayong Member ng aming loyalty program.\nBawat natapos na gupit = 1 point.\nMember 0-4 visits | Bronze 5-15 | Silver 16-25 | Gold 26-50 | VIP 51+\n\nIbigay lang ang mobile number o email mo sa cashier tuwing bibisita para awtomatikong madagdag ang points.\n\nMag-unsubscribe: {{UNSUB}}`;
+  return { subject: 'Welcome to Brotherhood Barber 💈', html, text };
+}
+function maybeWelcome(c) {
+  if (!c.consent || !c.email || !validEmail(c.email) || c.welcomedAt) return;
+  const m = welcomeEmail(c);
+  run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt) values(?,?,?,?,?,?,?,'pending',0,'',?)", uid(), c.id, c.email, 'welcome', m.subject, m.html, m.text, nowISO());
+  run('update customers set welcomedAt=? where id=?', nowISO(), c.id);
+  setTimeout(() => processEmails().catch(() => { }), 50);
+}
+async function sendEmail({ to, subject, html, text }) {
+  if (!EMAIL.key) return { ok: false, error: 'Email service not configured' };
+  try {
+    const r = await fetch(process.env.RESEND_URL || 'https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + EMAIL.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: EMAIL.from, to: [to], subject, html, text, ...(EMAIL.replyTo ? { reply_to: EMAIL.replyTo } : {}) }) });
+    const j = await r.json().catch(() => ({}));
+    return r.ok ? { ok: true } : { ok: false, error: String(j.message || j.error || r.status).slice(0, 300) };
+  } catch (e) { return { ok: false, error: String(e.message).slice(0, 300) }; }
+}
+let sending = false;
+async function processEmails() {
+  if (!EMAIL.key || sending) return; sending = true;
+  try {
+    for (const r of all("select * from email_log where status='pending' order by createdAt limit 20")) {
+      const unsub = `${baseUrl()}/unsubscribe?c=${r.customerId}&t=${unsubSig(r.customerId)}`;
+      const res = await sendEmail({ to: r.toAddr, subject: r.subject, html: r.html.replaceAll('{{UNSUB}}', unsub), text: r.text.replaceAll('{{UNSUB}}', unsub) });
+      if (res.ok) run("update email_log set status='sent', sentAt=?, error='', attempts=attempts+1 where id=?", nowISO(), r.id);
+      else run('update email_log set attempts=attempts+1, error=?, status=? where id=?', res.error, r.attempts + 1 >= 5 ? 'failed' : 'pending', r.id);
+    }
+  } finally { sending = false; }
+}
+setInterval(() => processEmails().catch(() => { }), 60_000).unref();
+for (const c of all('select id,phone,email from customers where phoneKey is null and emailKey is null')) {
+  const pk = normPhone(c.phone), ek = normEmail(c.email); if (pk || ek) run('update customers set phoneKey=?, emailKey=? where id=?', pk || null, ek || null, c.id);
+}
+
 // ---------- online / phone bookings ----------
 const hmOf = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const bookHits = new Map();
@@ -283,9 +438,10 @@ function createBooking(b, source) {
     const free = all('select * from staff where branchId=? and active=1', branchId).filter(s => staffFree(s, date, start, mins)).sort((x, y) => load(x) - load(y));
     sid = free[0].id;
   }
+  const cust = upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos');
   const id = uid();
-  run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), 'booked', String(b.notes || '').slice(0, 300), source, '', nowISO());
+  run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '');
   return bookingView(one('select * from bookings where id=?', id));
 }
 function bookingView(b) {
@@ -507,7 +663,14 @@ async function handle(req, res) {
     res.writeHead(200, { 'Content-Type': r.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
     return res.end(Buffer.from(r.data));
   }
+  if (p === '/unsubscribe' && method === 'GET') {
+    const c = q.c ? get('customers', String(q.c)) : null, ok = !!c && String(q.t || '') === unsubSig(c.id);
+    if (ok) { run('update customers set consent=0 where id=?', c.id); log({ name: 'Customer' }, 'unsubscribe', 'customers', c.id, c.name); }
+    const page = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Brotherhood Barber</title><body style="margin:0;font-family:Arial,Helvetica,sans-serif;background:#f5f5f6;display:grid;place-items:center;min-height:100vh"><div style="background:#fff;border-radius:16px;padding:32px;max-width:420px;text-align:center;box-shadow:0 8px 30px -14px rgba(0,0,0,.3)"><div style="font-size:24px;font-weight:700;letter-spacing:3px">BROTHERHOOD</div><p style="margin:18px 0 6px;font-size:18px"><b>${ok ? 'Na-unsubscribe ka na.' : 'Hindi valid ang link.'}</b></p><p style="color:#666;margin:0">${ok ? 'Hindi ka na makakatanggap ng email at promo mula sa amin. Mananatili pa rin ang iyong points at visits.' : 'Pakisabi sa aming cashier kung nais mong tumigil sa pagtanggap ng email.'}</p></div></body>`;
+    return send(res, ok ? 200 : 400, page, 'text/html; charset=utf-8');
+  }
   if (!p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
+  if (p === '/api/public/terms' && method === 'GET') return send(res, 200, { terms: getTerms() });
 
   // ----- public booking (customers, no login) -----
   if (p === '/api/public/info' && method === 'GET') {
@@ -557,6 +720,7 @@ async function handle(req, res) {
 
   // ----- admin data -----
   if (p === '/api/state' && method === 'GET') {
+    if (admin) rememberOrigin(req);
     if (!admin) return send(res, 200, { shop: SHOP, me });
     return send(res, 200, {
       shop: SHOP, me, branches: all('select * from branches order by rowid'), chairs: all('select * from chairs order by branchId, sort'), staff: all('select * from staff order by name'),
@@ -576,19 +740,34 @@ async function handle(req, res) {
   // ----- customers (admins + cashiers) -----
   if (p === '/api/customers' && method === 'GET') {
     const term = '%' + String(q.q || '').trim().toLowerCase() + '%', size = Math.min(100, +q.size || 20), off = Math.max(0, (+q.page || 1) - 1) * size;
-    const where = "where lower(name||' '||ifnull(phone,'')||' '||ifnull(email,'')) like ?";
-    return send(res, 200, { total: one(`select count(*) n from customers ${where}`, term).n, rows: all(`select * from customers ${where} order by name limit ${size} offset ${off}`, term) });
+    const T = { member: [0, 4], bronze: [5, 15], silver: [16, 25], gold: [26, 50], vip: [51, 1e9] }[String(q.tier || '').toLowerCase()];
+    const base = `select c.*, (select count(*) from orders o where o.customerId=c.id and o.status='paid') visits, (select ifnull(sum(o.total),0) from orders o where o.customerId=c.id and o.status='paid') spent,
+      (select max(o.paidAt) from orders o where o.customerId=c.id and o.status='paid') lastVisit from customers c
+      where lower(c.name||' '||ifnull(c.phone,'')||' '||ifnull(c.email,'')||' '||ifnull(c.preferredCut,'')) like ?`;
+    const where = T ? ' where visits between ? and ?' : '', args = T ? [term, T[0], T[1]] : [term];
+    const rows = all(`select * from (${base}) ${where} order by name limit ${size} offset ${off}`, ...args).map(c => ({ ...c, spent: r2(c.spent), tier: tierOf(c.visits) }));
+    return send(res, 200, { total: one(`select count(*) n from (${base}) ${where}`, ...args).n, rows });
   }
+  if (p === '/api/customers/lookup' && method === 'GET') { const c = findCustomer(q.phone, q.email); return send(res, 200, { customer: c ? custCard(c) : null }); }
+  if (p === '/api/customers' && method === 'POST') {
+    const b = await readBody(req), c = upsertCustomer(b, me.role === 'cashier' ? 'pos' : 'admin');
+    if (!c) bad(400, 'Kailangan ng phone o email para mapasama sa Customer Directory.');
+    log(me, 'customer', 'customers', c.id, c.name); return send(res, 201, custCard(c));
+  }
+  const cum = p.match(/^\/api\/customers\/(\w+)$/);
+  if (cum && method === 'PUT') {
+    const cur = get('customers', cum[1]); if (!cur) bad(404, 'Not found');
+    const c = editCustomer(cur, await readBody(req)); log(me, 'update', 'customers', c.id, c.name); return send(res, 200, custCard(c));
+  }
+  if (cum && method === 'DELETE') { adminOnly(); run('delete from customers where id=?', cum[1]); log(me, 'delete', 'customers', cum[1], ''); return send(res, 200, { ok: true }); }
   if (p === '/api/customers/import' && method === 'POST') {
     adminOnly(); const b = await readBody(req, 8_000_000), rows = Array.isArray(b.rows) ? b.rows.slice(0, 20000) : [];
-    const key = s => String(s || '').replace(/\D/g, '').replace(/^63/, '0'), seen = new Set(all('select phone from customers').map(r => key(r.phone)).filter(Boolean));
     let added = 0, skipped = 0; db.exec('begin');
     try {
       for (const r of rows) {
-        const name = String(r.name || '').trim().slice(0, 200), k = key(r.phone);
-        if (!name || (k && seen.has(k))) { skipped++; continue; }
-        if (k) seen.add(k);
-        insert('customers', { name, phone: String(r.phone || '').trim().slice(0, 40), email: String(r.email || '').trim().slice(0, 200), notes: '', createdAt: nowISO() }); added++;
+        const name = String(r.name || '').trim().slice(0, 200), phone = String(r.phone || '').trim().slice(0, 40), email = normEmail(r.email).slice(0, 200), pk = normPhone(phone);
+        if (!name || (!pk && !(email && validEmail(email))) || findCustomer(phone, email)) { skipped++; continue; }   // directory rule: needs phone or email
+        run('insert into customers(id,name,phone,email,notes,createdAt,preferredCut,consent,phoneKey,emailKey,source) values(?,?,?,?,?,?,?,0,?,?,?)', uid(), name, phone, validEmail(email) ? email : '', '', nowISO(), String(r.preferredCut || '').slice(0, 200), pk || null, validEmail(email) ? email : null, 'import'); added++;
       }
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
@@ -596,6 +775,24 @@ async function handle(req, res) {
     return send(res, 200, { added, skipped });
   }
 
+  // ----- settings: terms, email (admin) -----
+  if (p === '/api/settings' && method === 'GET') {
+    adminOnly();
+    return send(res, 200, { terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+      log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
+  }
+  if (p === '/api/settings' && method === 'PUT') {
+    adminOnly(); const b = await readBody(req, 50_000);
+    if ('terms' in b) setSetting('terms', String(b.terms || '').trim().slice(0, 8000));
+    log(me, 'settings', 'settings', '', 'terms'); return send(res, 200, { ok: true });
+  }
+  if (p === '/api/settings/test-email' && method === 'POST') {
+    adminOnly(); const to = normEmail((await readBody(req)).to); if (!validEmail(to)) bad(400, 'Invalid email address');
+    if (!EMAIL.key) bad(409, 'Hindi pa naka-set ang email service (RESEND_API_KEY sa Railway Variables).');
+    const w = welcomeEmail({ name: me.name }), unsub = baseUrl() + '/unsubscribe?test=1';
+    const r = await sendEmail({ to, subject: 'TEST: ' + w.subject, html: w.html.replaceAll('{{UNSUB}}', unsub), text: w.text.replaceAll('{{UNSUB}}', unsub) });
+    if (!r.ok) bad(502, r.error); log(me, 'test-email', 'settings', '', to); return send(res, 200, { ok: true });
+  }
   // ----- photos (admin) -----
   if (p === '/api/upload' && method === 'POST') {
     adminOnly(); const b = await readBody(req, 1_500_000);
@@ -627,9 +824,7 @@ async function handle(req, res) {
     if (method === 'POST' && bkm[2] === 'arrive') {
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
       const items = priceItems(jp(cur.itemIds).map(i => ({ itemId: i, qty: 1 })));
-      const key = s => String(s || '').replace(/\D/g, '').replace(/^63/, '0');
-      let cust = all('select * from customers').find(c => key(c.phone) && key(c.phone) === key(cur.phone));
-      if (!cust) cust = insert('customers', { name: cur.customerName, phone: cur.phone, email: '', notes: '', createdAt: nowISO() });
+      const cust = (cur.customerId && get('customers', cur.customerId)) || findCustomer(cur.phone, '') || upsertCustomer({ name: cur.customerName, phone: cur.phone }, 'online');
       const o = createTicket(me, cur.branchId, cust.id, cust.name, items, cur.staffId);
       run("update bookings set status='arrived', orderId=? where id=?", o.id, cur.id); log(me, 'booking-arrived', 'bookings', cur.id, `#${o.no} ${cur.customerName}`);
       return send(res, 200, { order: o, seated: o.status === 'in_chair' });
@@ -678,13 +873,13 @@ async function handle(req, res) {
       staff: all('select id,name,chairId,pct,photo from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, onDuty: !!onDuty(s.id, t), ...staffState(s.id, t) })),
       categories: all('select * from categories order by name'), items: all('select * from items where active=1 order by name'), discounts: all('select * from discounts where active=1 order by name'),
       shift: openShift(bid) || null,
-      queue: all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair') order by no", bid, t).map(parseOrder)
+      queue: all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair') order by no", bid, t).map(parseOrder).map(withCust)
     });
   }
   if (p === '/api/pos/dashboard' && method === 'GET') {
     const bid = branchScope(me, q.branch), t = todayStr();
     const paid = all("select * from orders where branchId=? and date=? and status='paid'", bid, t);
-    const queue = all("select o.*, s.name barberName from orders o left join staff s on s.id=o.barberId where o.branchId=? and o.date=? and o.status in ('waiting','in_chair') order by o.no", bid, t).map(parseOrder);
+    const queue = all("select o.*, s.name barberName from orders o left join staff s on s.id=o.barberId where o.branchId=? and o.date=? and o.status in ('waiting','in_chair') order by o.no", bid, t).map(parseOrder).map(withCust);
     const st = all('select id from staff where branchId=? and active=1', bid).map(s => staffState(s.id, t).state);
     return send(res, 200, {
       gross: r2(sum(paid, o => o.subtotal)), net: r2(sum(paid, o => o.total)), completed: paid.length, bookings: one("select count(*) n from bookings where branchId=? and date=? and status='booked'", bid, t).n, waiting: queue.filter(o => o.status === 'waiting').length,
@@ -694,7 +889,7 @@ async function handle(req, res) {
   if (p === '/api/pos/queue' && method === 'GET') {
     const bid = branchScope(me, q.branch), t = todayStr(), f = q.filter || 'active';
     const sts = f === 'done' ? "('paid')" : f === 'all' ? "('waiting','in_chair','paid','void')" : "('waiting','in_chair')";
-    return send(res, 200, all(`select o.*, s.name barberName from orders o left join staff s on s.id=o.barberId where o.branchId=? and o.date=? and o.status in ${sts} order by o.no`, bid, t).map(parseOrder));
+    return send(res, 200, all(`select o.*, s.name barberName from orders o left join staff s on s.id=o.barberId where o.branchId=? and o.date=? and o.status in ${sts} order by o.no`, bid, t).map(parseOrder).map(withCust));
   }
   if (p === '/api/pos/shift' && method === 'GET') {
     const s = openShift(branchScope(me, q.branch)); if (!s) return send(res, 200, { shift: null });
@@ -717,12 +912,11 @@ async function handle(req, res) {
   }
   if (p === '/api/orders' && method === 'POST') {
     const b = await readBody(req), branchId = branchScope(me, b.branchId), t = todayStr();
-    const cust = b.customerId ? get('customers', b.customerId) : null;
-    const name = String(cust?.name || b.customerName || '').trim().slice(0, 200); if (!name) bad(400, 'Customer name required');
+    const cust = resolveCustomer(b, 'pos'), name = cust.name.slice(0, 200); if (!name) bad(400, 'Customer name required');
     const items = priceItems(b.items), tt = totals(items, null);
     const no = (one('select max(no) m from orders where branchId=? and date=?', branchId, t).m || 0) + 1, ord = (one('select max(ord) m from orders').m || 0) + 1, id = uid();
     run(`insert into orders(id,ord,no,branchId,date,customerId,customerName,barberId,chairId,status,items,subtotal,discountName,discountAmt,total,tenders,cashierId,createdAt)
-      values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, cust?.id || '', name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO());
+      values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, cust.id, name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO());
     const o = { id, ord, no, branchId };
     if (b.barberId) { const a = checkAssign(o, b); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); }
     log(me, 'ticket', 'orders', id, `#${no} ${name}`);
@@ -733,13 +927,13 @@ async function handle(req, res) {
     const cur = get('orders', om[1]); if (!cur) bad(404, 'Not found');
     if (me.role === 'cashier' && cur.branchId !== me.branchId) bad(403, 'Not your branch');
     const o = parseOrder(cur), act = om[2];
-    if (method === 'GET' && !act) return send(res, 200, o);
+    if (method === 'GET' && !act) return send(res, 200, withCust(o));
     if (method === 'PUT' && !act) {
       if (!['waiting', 'in_chair'].includes(o.status)) bad(409, 'Order is already closed');
       const b = await readBody(req); const upd = {};
       if ('items' in b) { const items = priceItems(b.items), tt = totals(items, null); upd.items = JSON.stringify(items); upd.subtotal = tt.subtotal; upd.total = tt.total; }
-      if ('customerName' in b || 'customerId' in b) {
-        const c = b.customerId ? get('customers', b.customerId) : null; upd.customerId = c?.id || ''; upd.customerName = String(c?.name || b.customerName || o.customerName).trim().slice(0, 200);
+      if ('customer' in b || 'customerName' in b || 'customerId' in b) {
+        const c = resolveCustomer({ ...b, customerName: b.customerName || o.customerName }, 'pos'); upd.customerId = c.id; upd.customerName = c.name.slice(0, 200) || o.customerName;
       }
       if ('barberId' in b) {
         if (!b.barberId) { upd.barberId = ''; upd.chairId = ''; upd.status = 'waiting'; upd.startedAt = null; }

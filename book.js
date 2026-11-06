@@ -13,7 +13,7 @@ const ICON = {
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
 
 let I = null;
-const S = { pickBranch: false, branch: '', items: [], staff: 'any', date: '', time: '', slots: null, name: '', phone: '', notes: '', err: '', busy: false, done: null };
+const S = { pickBranch: false, branch: '', items: [], staff: 'any', date: '', time: '', slots: null, name: '', phone: '', email: '', cut: '', consent: false, terms: null, showTerms: false, err: '', busy: false, done: null };
 const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(Date.now() + i * 864e5); return { v: ymd(d), l: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-PH', { weekday: 'short' }), s: d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) }; });
 
 const svcs = () => I.services.filter(s => S.items.includes(s.id));
@@ -41,9 +41,10 @@ function render() {
       ${b.items.map(i => `<div class="r"><span>${esc(i.name)}</span><span>${peso(i.price)}</span></div>`).join('')}<div class="r"><b>Total (bayad sa shop)</b><b>${peso(b.total)}</b></div></div>
       <p class="mute" style="font-size:13px">Pumunta 5–10 minuto bago ang oras. Kung hindi ka makakarating, tawagan ang shop para mabigyan ng slot ang iba.</p>
       <button class="go" id="again">Book another</button></div></main>`;
-    document.getElementById('again').onclick = () => { Object.assign(S, { items: [], staff: 'any', date: '', time: '', slots: null, notes: '', err: '', done: null }); render(); };
+    document.getElementById('again').onclick = () => { Object.assign(S, { items: [], staff: 'any', date: '', time: '', slots: null, err: '', done: null }); render(); };
     return;
   }
+  if (S.showTerms) { app.innerHTML = head + `<main><div class="step"><h2>Terms &amp; Conditions</h2><div class="terms">${esc(S.terms)}</div><br><button class="go" id="closeterms">Naiintindihan ko</button></div></main>`; window.scrollTo(0, 0); return; }
   const brs = I.branches, mates = team();
   const sum = S.items.length ? `${S.items.length} service${S.items.length > 1 ? 's' : ''} · ${mins()} min` : 'Pumili ng serbisyo';
   app.innerHTML = head + `<main>
@@ -56,8 +57,12 @@ function render() {
       <div class="chips">${days.map(d => `<button class="chip ${S.date === d.v ? 'on' : ''}" data-date="${d.v}">${d.l}<small>${d.s}</small></button>`).join('')}</div>
       ${!S.date ? '<p class="mute" style="margin:6px 0 0">Pumili ng petsa.</p>' : S.slots === null ? '<p class="mute">Hinahanap ang mga bakanteng oras…</p>' : S.slots.length ? `<div class="slots">${S.slots.map(t => `<button class="chip ${S.time === t ? 'on' : ''}" data-time="${t}">${t12(t)}</button>`).join('')}</div>` : '<p class="mute">Walang bakanteng oras sa petsang ito. Subukan ang ibang araw o ibang barber.</p>'}</section>
     <section class="step ${S.time ? '' : 'off'}"><h2><b>${brs.length > 1 ? 5 : 4}</b>Iyong detalye</h2>
-      <label>Pangalan</label><input id="name" value="${esc(S.name)}" autocomplete="name"><label>Mobile number</label><input id="phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(S.phone)}" autocomplete="tel">
-      <label>Paalala (optional)</label><textarea id="notes" rows="2" placeholder="Hal. low fade, no.2 sa gilid">${esc(S.notes)}</textarea></section>
+      <label>Buong pangalan (Full name)</label><input id="name" value="${esc(S.name)}" autocomplete="name">
+      <label>Mobile number</label><input id="phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(S.phone)}" autocomplete="tel">
+      <label>Email (optional)</label><input id="email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(S.email)}" autocomplete="email">
+      <label>Preferred haircut (optional)</label><input id="cut" placeholder="Hal. Low fade, no. 2 sa gilid" value="${esc(S.cut)}">
+      <label class="consent"><input type="checkbox" id="consent" ${S.consent ? 'checked' : ''}><span>Pumapayag akong makatanggap ng email at promos mula sa Brotherhood Barber, at sumasang-ayon ako sa <a href="#" id="terms">Terms &amp; Conditions</a>.</span></label>
+      <p class="mute" style="font-size:12px;margin:8px 0 0">Ang iyong phone o email ang gagamitin para makilala ka tuwing babalik ka at maitala ang iyong visits at points sa loyalty program.</p></section>
   </main>
   <div class="bar"><div><div class="sum"><span>${sum}</span><b>${peso(total())}</b></div><div class="err">${esc(S.err)}</div><button class="go" id="go" ${ready() && !S.busy ? '' : 'disabled'}>${S.busy ? 'Sandali…' : 'Confirm booking'}</button></div></div>`;
 }
@@ -74,15 +79,22 @@ document.addEventListener('click', async e => {
   if (el.id === 'go') {
     S.busy = true; S.err = ''; render();
     try {
-      const r = await fetch('/api/public/book', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branchId: S.branch, staffId: S.staff, date: S.date, time: S.time, itemIds: S.items, name: S.name, phone: S.phone, notes: S.notes }) });
+      const r = await fetch('/api/public/book', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branchId: S.branch, staffId: S.staff, date: S.date, time: S.time, itemIds: S.items, name: S.name, phone: S.phone, email: S.email, preferredCut: S.cut, consent: S.consent }) });
       const j = await r.json();
       if (!r.ok) { S.err = j.error || 'May problema. Subukan ulit.'; S.busy = false; if (r.status === 409) { await loadSlots(); S.err = j.error; render(); } else render(); return; }
       S.done = j.booking; S.busy = false; window.scrollTo(0, 0); render();
     } catch (x) { S.err = 'Walang koneksyon. Subukan ulit.'; S.busy = false; render(); }
   }
 });
+document.addEventListener('change', e => { if (e.target.id === 'consent') S.consent = e.target.checked; });
+document.addEventListener('click', async e => {
+  const a = e.target.closest('#terms,#closeterms'); if (!a) return; e.preventDefault();
+  if (a.id === 'closeterms') { S.showTerms = false; return render(); }
+  if (S.terms === null) { try { S.terms = (await (await fetch('/api/public/terms')).json()).terms; } catch (x) { S.terms = 'Hindi ma-load ang Terms.'; } }
+  S.showTerms = true; render();
+});
 document.addEventListener('input', e => {
-  const t = e.target; if (!['name', 'phone', 'notes'].includes(t.id)) return;
+  const t = e.target; if (!['name', 'phone', 'email', 'cut'].includes(t.id)) return;
   S[t.id] = t.value; const go = document.getElementById('go'); if (go) go.disabled = !ready() || S.busy;
 });
 

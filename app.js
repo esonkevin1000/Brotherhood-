@@ -11,7 +11,7 @@ const ago = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso
 let S = { shop: 'Brotherhood', me: null, branches: [], chairs: [], staff: [], categories: [], items: [], discounts: [], users: [] };
 let token = ''; try { token = localStorage.getItem('bp.token') || ''; } catch (e) { }
 let loggedIn = false, loadErr = '';
-const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0 }, picked: new Set() };
+const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, picked: new Set() };
 const modal = document.getElementById('modal');
 const openModal = h => { modal.innerHTML = h; if (!modal.open) modal.showModal(); };
 const closeModal = () => modal.close();
@@ -29,8 +29,9 @@ async function loadView() {
   try {
     if (v === 'dashboard') { [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
-    else if (v === 'customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}`)); }
+    else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}`)); }
     else if (v === 'activity') ui.audit = await api('GET', '/api/audit');
+    else if (v === 'settings') ui.settings = await api('GET', '/api/settings');
     else if (v === 'bookings') ui.bk = await api('GET', `/api/bookings?from=${ui.bf}&to=${ui.bt}&branch=${ui.branch}`);
   } catch (e) { if (loggedIn) alert(e.message); }
 }
@@ -67,12 +68,13 @@ const ICONS = {
   scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   building: '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1M14 9h1M9 13h1M14 13h1M9 17h6"/>', key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M14 9l2 2"/>', activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   bottle: '<path d="M10 2h4M10 2v4l-2 3v11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V9l-2-3V2"/>', armchair: '<path d="M5 11V7a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v4M3 13a2 2 0 0 1 4 0v3h10v-3a2 2 0 0 1 4 0v5H3zM6 21v-3M18 21v-3"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
@@ -98,7 +100,8 @@ function render() {
     <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
-    <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+    <button class="${on('settings')}" data-view="settings">${ic('gear')}Settings</button>
+    <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -169,17 +172,38 @@ function vMgmt(kind) {
   <div class="card overflow"><table><tr>${m.cols.map(c => `<th>${c[1]}</th>`).join('')}<th></th></tr>
   ${rows.map(r => `<tr style="${r.active === 0 ? 'opacity:.5' : ''}">${m.cols.map(([k, , f]) => k === 'photo' ? `<td>${thumb(r)}</td>` : `<td>${esc(f ? f(r[k]) : r[k])}</td>`).join('')}<td><button class="btn ghost sm" data-act="edit" data-kind="${kind}" data-id="${r.id}">Edit</button> <button class="btn bad sm" data-act="del" data-kind="${kind}" data-id="${r.id}">Delete</button></td></tr>`).join('') || `<tr><td colspan="${m.cols.length + 1}" class="mute">Wala pa.</td></tr>`}</table></div>`;
 }
+const tierBadge = t => `<span class="tier ${t}">${esc(t)}</span>`;
 function vCustomers() {
   const c = ui.cust, pages = Math.max(1, Math.ceil(c.total / 20));
-  return `<div class="row" style="justify-content:space-between;margin-bottom:14px"><h2 style="margin:0">Customers <span class="mute" style="font-size:14px">· ${c.total.toLocaleString('en-PH')}</span></h2>
-    <div class="row"><input id="csearch" placeholder="Search name, phone, email" value="${esc(c.q)}" style="width:240px"><button class="btn" data-act="edit" data-kind="customers">+ Add</button>
-    <label class="btn ghost" style="margin:0;cursor:pointer;color:var(--text)">⬆ Import CSV<input type="file" id="csvfile" accept=".csv,text/csv" hidden></label></div></div>
-  <div class="card overflow"><table><tr><th>Name</th><th>Phone</th><th>Email</th><th>Notes</th><th></th></tr>
-  ${c.rows.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.phone)}</td><td>${esc(r.email)}</td><td class="mute">${esc(r.notes)}</td><td><button class="btn ghost sm" data-act="edit" data-kind="customers" data-id="${r.id}">Edit</button></td></tr>`).join('')}</table></div>
+  return `<div class="row between" style="margin-bottom:14px"><h2 style="margin:0">Customer Directory <span class="mute" style="font-size:14px">· ${c.total.toLocaleString('en-PH')}</span></h2>
+    <div class="row"><input id="csearch" placeholder="Search name, phone, email, haircut" value="${esc(c.q)}" style="width:250px">
+    <select id="tierf" style="width:150px"><option value="">All tiers</option>${[['member', 'Member (0–4)'], ['bronze', 'Bronze (5–15)'], ['silver', 'Silver (16–25)'], ['gold', 'Gold (26–50)'], ['vip', 'VIP (51+)']].map(([v, l]) => `<option value="${v}" ${c.tier === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <button class="btn" data-act="edit" data-kind="customers">+ Add</button>
+    <label class="btn ghost" style="margin:0;cursor:pointer;color:var(--text);text-transform:none;letter-spacing:0;font-size:14px;font-weight:700">⬆ Import CSV<input type="file" id="csvfile" accept=".csv,text/csv" hidden></label></div></div>
+  <p class="mute" style="margin:-6px 0 14px;font-size:13px">1 bayad na visit = 1 point · Member 0–4 · Bronze 5–15 · Silver 16–25 · Gold 26–50 · VIP 51+. Nasa directory lang ang may phone o email.</p>
+  <div class="card overflow"><table><tr><th>Customer</th><th>Contact</th><th>Preferred haircut</th><th>Tier</th><th>Visits / points</th><th>Total spent</th><th>Last visit</th><th>Email promos</th><th></th></tr>
+  ${c.rows.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.phone)}${r.phone && r.email ? '<br>' : ''}<span class="mute">${esc(r.email)}</span></td><td>${esc(r.preferredCut)}</td><td>${tierBadge(r.tier)}</td><td><b>${r.visits}</b></td><td>${peso(r.spent)}</td><td class="mute">${r.lastVisit ? new Date(r.lastVisit).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+    <td>${r.consent ? '<span style="color:var(--ok);font-weight:700">✔ Subscribed</span>' : '<span class="mute">—</span>'}</td><td><button class="btn ghost sm" data-act="edit" data-kind="customers" data-id="${r.id}">Edit</button></td></tr>`).join('') || '<tr><td colspan="9" class="mute">Wala pang customer sa directory.</td></tr>'}</table></div>
   <div class="row" style="margin-top:12px;justify-content:center"><button class="btn ghost sm" data-act="page" data-n="-1" ${c.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span class="mute">Page ${c.page} / ${pages}</span><button class="btn ghost sm" data-act="page" data-n="1" ${c.page >= pages ? 'disabled' : ''}>Next ›</button></div>`;
 }
+function vSettings() {
+  const s = ui.settings; if (!s) return '<p class="mute">Loading…</p>';
+  const e = s.email;
+  return `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+    <div class="card"><h3>Email (welcome at promos)</h3>
+      <p style="margin:0 0 8px">${e.configured ? '<b style="color:var(--ok)">● Naka-set na ang email service</b>' : '<b style="color:var(--bad)">● Hindi pa naka-set</b>'}</p>
+      <p class="mute" style="font-size:13px;margin:0 0 10px">${e.configured ? `Galing sa: <b>${esc(e.from)}</b><br>Link sa unsubscribe: ${esc(e.baseUrl)}` : 'Habang wala pa nito, naka-pila lang ang mga welcome email (hindi mawawala) at ipapadala kapag na-set na. Tingnan ang gabay sa chat para sa RESEND_API_KEY at EMAIL_FROM sa Railway Variables.'}</p>
+      <label>Magpadala ng test email</label><div class="row" style="flex-wrap:nowrap"><input id="testto" type="email" placeholder="email mo" style="flex:1"><button class="btn" data-act="testmail">Send test</button></div></div>
+    <div class="card"><h3>Loyalty tiers</h3><table><tr><th>Tier</th><th>Visits</th></tr>${[['Member', '0–4'], ['Bronze', '5–15'], ['Silver', '16–25'], ['Gold', '26–50'], ['VIP', '51+']].map(([n, r]) => `<tr><td>${tierBadge(n)}</td><td>${r}</td></tr>`).join('')}</table><p class="mute" style="font-size:12px;margin:10px 0 0">1 bayad na visit = 1 point. Awtomatikong kinukuwenta mula sa mga bayad na ticket.</p></div></div>
+  <div class="card" style="margin-top:14px"><h3>Terms &amp; Conditions (lalabas sa ilalim ng fill-up form)</h3>
+    <textarea id="termsta" rows="16" style="font-size:13px;line-height:1.5">${esc(s.terms)}</textarea>
+    <p class="mute" style="font-size:12px">Draft lang ito. Ipa-review sa abogado o sa compliance officer para tiyaking sumusunod sa Data Privacy Act (RA 10173).</p>
+    <div class="row"><button class="btn" data-act="saveterms">Save terms</button>${s.customTerms ? '<button class="btn ghost" data-act="resetterms">Ibalik sa default</button>' : ''}</div></div>
+  <div class="card overflow" style="margin-top:14px"><h3>Mga email na ipinadala</h3><table><tr><th>When</th><th>To</th><th>Type</th><th>Status</th><th>Tries</th><th>Error</th></tr>
+    ${s.log.map(l => `<tr><td>${new Date(l.createdAt).toLocaleString('en-PH')}</td><td>${esc(l.toAddr)}</td><td>${esc(l.kind)}</td><td><span class="tag ${l.status === 'sent' ? 'done' : l.status === 'pending' ? 'booked' : ''}">${esc(l.status)}</span></td><td>${l.attempts}</td><td class="mute">${esc(l.error)}</td></tr>`).join('') || '<tr><td colspan="6" class="mute">Wala pang email.</td></tr>'}</table></div>`;
+}
 function form(kind, id) {
-  const m = M[kind] || { form: () => [['name', 'Name', 'text'], ['phone', 'Phone', 'text', { req: false }], ['email', 'Email', 'email', { req: false }], ['notes', 'Notes / preferred cut', 'textarea', { req: false }]] };
+  const m = M[kind] || { form: () => [['name', 'Full name', 'text'], ['phone', 'Mobile number', 'text', { req: false, hint: 'phone O email ang kailangan' }], ['email', 'Email', 'email', { req: false }], ['preferredCut', 'Preferred haircut', 'text', { req: false }], ['notes', 'Notes', 'textarea', { req: false }], ['consent', 'Email at promos', 'select', { opts: [[0, 'Hindi pumayag'], [1, 'Pumayag (Terms & Conditions)']] }]] };
   const o = id ? (kind === 'customers' ? ui.cust.rows.find(x => x.id === id) : m.rows().find(x => x.id === id)) : {};
   const input = ([n, l, t, x = {}]) => {
     const val = n === 'password' ? '' : (o[n] ?? x.def ?? '');
@@ -234,6 +258,9 @@ document.addEventListener('click', async e => {
   if (act === 'del') { if (confirm('Sigurado ka?')) mut(async () => { const r = await api('DELETE', `/api/${d.kind}/${d.id}`); if (r.deactivated) alert('May history na ito kaya na-deactivate na lang (hindi nabura).'); }); return; }
   if (act === 'range') { const t = today(); ui.to = t; ui.from = d.r === 'today' ? t : d.r === '7' ? addDays(t, -6) : t.slice(0, 8) + '01'; await loadView(); return render(); }
   if (act === 'export') return download(`/api/reports/${d.name}?${qs()}&format=csv`, `${d.name}-${ui.from}_${ui.to}.csv`);
+  if (act === 'saveterms') { const v = document.getElementById('termsta').value; try { await api('PUT', '/api/settings', { terms: v }); alert('Na-save ang Terms & Conditions.'); await loadView(); render(); } catch (x) { alert(x.message); } return; }
+  if (act === 'resetterms') { if (confirm('Ibalik ang default na Terms?')) { try { await api('PUT', '/api/settings', { terms: '' }); await loadView(); render(); } catch (x) { alert(x.message); } } return; }
+  if (act === 'testmail') { const to = document.getElementById('testto').value.trim(); try { await api('POST', '/api/settings/test-email', { to }); alert('Naipadala na ang test email sa ' + to + '. Tingnan ang inbox (at spam).'); await loadView(); render(); } catch (x) { alert(x.message); } return; }
   if (act === 'copylink') { try { await navigator.clipboard.writeText(location.origin + '/book'); alert('Na-copy ang link!'); } catch (x) { prompt('Copy this link:', location.origin + '/book'); } return; }
   if (act === 'bkcancel') { if (confirm('I-cancel ang booking na ito?')) mut(() => api('PUT', `/api/bookings/${d.id}`, { status: 'cancelled' })); return; }
   if (act === 'backup') return download('/api/backup', `brotherhood-${today()}.db`);
@@ -246,6 +273,7 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'branchsel') { ui.branch = t.value; render(); await loadView(); return render(); }
+  if (t.id === 'tierf') { ui.cust.tier = t.value; ui.cust.page = 1; await loadView(); return render(); }
   if (t.id === 'bfrom' || t.id === 'bto') { if (t.id === 'bfrom') ui.bf = t.value || today(); else ui.bt = t.value || today(); await loadView(); return render(); }
   if (t.dataset.photo) {
     const file = t.files[0]; if (!file) return; const msg = document.getElementById('phmsg'); msg.textContent = 'Ina-upload…';
@@ -260,9 +288,9 @@ document.addEventListener('change', async e => {
   if (t.id === 'csvfile' && t.files[0]) {
     const rows = parseCSV(await t.files[0].text()); if (rows.length < 2) return alert('Walang laman ang CSV.');
     const head = rows[0].map(h => h.trim().toLowerCase()), idx = k => head.findIndex(h => h.includes(k));
-    const ni = idx('name'), pi = idx('phone') >= 0 ? idx('phone') : idx('mobile'), ei = idx('email');
-    if (ni < 0) return alert('Kailangan ng column na "name" sa unang row ng CSV (optional: phone, email).');
-    const data = rows.slice(1).map(r => ({ name: r[ni], phone: pi >= 0 ? r[pi] : '', email: ei >= 0 ? r[ei] : '' }));
+    const ni = idx('name'), pi = idx('phone') >= 0 ? idx('phone') : idx('mobile'), ei = idx('email'), hi = idx('haircut') >= 0 ? idx('haircut') : idx('preferred');
+    if (ni < 0) return alert('Kailangan ng column na "name" sa unang row ng CSV (phone o email ang kailangan; optional: haircut).');
+    const data = rows.slice(1).map(r => ({ name: r[ni], phone: pi >= 0 ? r[pi] : '', email: ei >= 0 ? r[ei] : '', preferredCut: hi >= 0 ? r[hi] : '' }));
     if (!confirm(`I-import ang ${data.length} na customer?`)) return;
     try { const r = await api('POST', '/api/customers/import', { rows: data }); alert(`${r.added} ang nadagdag, ${r.skipped} ang nilaktawan (duplicate/walang pangalan).`); await load(); } catch (x) { alert(x.message); }
   }
@@ -280,7 +308,7 @@ document.addEventListener('submit', e => {
     return;
   }
   const o = {};
-  for (const [k, v] of fd.entries()) { if (k === 'password' && !v) continue; o[k] = ['price', 'mins', 'pct', 'allowance', 'active', 'value', 'sort', 'graceMins', 'bookable', 'apptOnly'].includes(k) ? +v : v; }
+  for (const [k, v] of fd.entries()) { if (k === 'password' && !v) continue; o[k] = ['price', 'mins', 'pct', 'allowance', 'active', 'value', 'sort', 'graceMins', 'bookable', 'apptOnly', 'consent'].includes(k) ? +v : v; }
   run(() => id ? api('PUT', `/api/${kind}/${id}`, o) : api('POST', `/api/${kind}`, o), err);
 });
 
