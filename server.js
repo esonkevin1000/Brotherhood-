@@ -1563,7 +1563,9 @@ async function handle(req, res) {
   }
   if (p === '/api/pos/dashboard' && method === 'GET') {
     const bid = branchScope(me, q.branch), t = todayStr();
-    const paid = all("select * from orders where branchId=? and date=? and status='paid'", bid, t);
+    // a barber's dashboard shows only their own sales (never the whole shop's)
+    const mySid = me.role === 'barber' ? (get('users', me.id)?.staffId || '-') : '';
+    const paid = all("select * from orders where branchId=? and date=? and status='paid'", bid, t).filter(o => !mySid || o.barberId === mySid);
     const queue = all("select o.*, s.name barberName from orders o left join staff s on s.id=o.barberId where o.branchId=? and o.date=? and o.status in ('waiting','in_chair') order by o.no", bid, t).map(parseOrder).map(withCust);
     const st = all('select id from staff where branchId=? and active=1', bid).map(s => staffState(s.id, t).state);
     return send(res, 200, {

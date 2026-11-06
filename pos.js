@@ -217,7 +217,7 @@ function earningsCard() {
 const VIEWS = {
   dashboard() {
     const d = P.dash; if (!d) return '<p class="mute">Loading…</p>';
-    return `${earningsCard()}<div class="card hero"><small>Today's gross sales</small><div class="num">${peso(d.gross)}</div><span class="mute">${d.completed} completed order${d.completed === 1 ? '' : 's'} · net ${peso(d.net)}</span></div>
+    return `${earningsCard()}<div class="card hero"><small>${P.me.role === 'barber' ? 'My sales today' : "Today's gross sales"}</small><div class="num">${peso(d.gross)}</div><span class="mute">${d.completed} completed order${d.completed === 1 ? '' : 's'} · net ${peso(d.net)}</span></div>
     <div class="kpis">${canOpen('queue') ? `<div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in queue</small><div class="num">${d.waiting}</div><small>${d.cutting} in chair</small></div>` : ''}
       ${P.me.role === 'barber' ? '' : `<div class="card kpi g"><div class="ic">${ic('scissors')}</div><small>Barbers on duty</small><div class="num">${d.onDuty}<span class="mute" style="font-size:18px"> / ${d.totalBarbers}</span></div><small>available for walk-ins</small></div>`}</div>
     ${bookingsCard()}
