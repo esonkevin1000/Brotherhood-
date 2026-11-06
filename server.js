@@ -335,6 +335,8 @@ const tierOf = v => TIERS.find(([min]) => v >= min)[1];
 const nextTier = v => { const n = [...TIERS].reverse().find(([min]) => min > v); return n ? { name: n[1], visitsNeeded: n[0] - v } : null; };
 const getSetting = k => one('select v from settings where k=?', k)?.v;
 const setSetting = (k, v) => run('insert into settings(k,v) values(?,?) on conflict(k) do update set v=excluded.v', k, v);
+// one-time: online booking is for Vip Compadre only (Buddy and Amigo are walk-in). The owner can change it later under Services & Products ("Show on online booking").
+if (!getSetting('migOnlineVip')) { run("update items set bookable=0 where name in ('Buddy','Amigo') and type='service'"); run("update items set bookable=1 where name='Vip Compadre'"); setSetting('migOnlineVip', '1'); }
 const DEFAULT_TERMS = `TERMS & CONDITIONS AND CONSENT: BROTHERHOOD BARBER
 
 1. What information we collect
@@ -532,6 +534,7 @@ function createBooking(b, source) {
   if (date < todayStr()) bad(400, 'Date is in the past');
   if (date > dOf(new Date(Date.now() + 60 * 864e5))) bad(400, 'Too far ahead (max 60 days)');
   const itemIds = (Array.isArray(b.itemIds) ? b.itemIds : []).map(String); if (!itemIds.length) bad(400, 'Pick at least one service');
+  if (source === 'online') for (const id of itemIds) { const it = get('items', id); if (!it || !it.active || it.type !== 'service' || !it.bookable) bad(400, 'That service cannot be booked online. Please walk in or call the shop.'); }
   const name = String(b.name || '').trim().slice(0, 100), phone = String(b.phone || '').trim().slice(0, 30);
   if (!name) bad(400, 'Name required');
   if (phone.replace(/\D/g, '').length < 10) bad(400, 'Enter a valid mobile number');
@@ -609,7 +612,7 @@ const adjTotal = (staffId, to) => r2(sum(all("select amount from staff_adjustmen
 // Barber performance numbers (used by the owner scorecard and by each barber's own screen)
 function scoreData(from, to, br, onlyStaff) {
   const os = paidOrders(from, to, br), days = dayRows(from, to, br);
-  const rv = all(`select * from reviews where substr(createdAt,1,10)>=? and substr(createdAt,1,10)<=?${br ? ' and branchId=?' : ''}`, ...(br ? [from, to, br] : [from, to]));
+  const rv = all(`select * from reviews where date(createdAt,'localtime')>=? and date(createdAt,'localtime')<=?${br ? ' and branchId=?' : ''}`, ...(br ? [from, to, br] : [from, to]));
   const leaves = all("select * from leaves where status='APPROVED' and from_date<=? and to_date>=?", to, from);
   const visits = new Map(all("select customerId, count(*) n from orders where status='paid' and customerId<>'' group by customerId").map(r => [r.customerId, r.n]));
   const end = to < todayStr() ? to : todayStr(), cal = []; for (let d = new Date(from + 'T00:00'), n = 0; dOf(d) <= end && n < 400; d.setDate(d.getDate() + 1), n++) cal.push(dOf(d));
@@ -886,6 +889,7 @@ async function handle(req, res) {
       shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime,photo,mapUrl,googlePlaceId,googleUrl from branches order by rowid').map(({ googlePlaceId, googleUrl, ...b }) => ({ ...b, photo: b.photo || siteCover(b.name), google: gInfo({ ...b, googlePlaceId, googleUrl }) })),
       ratings: Object.fromEntries(all('select branchId, count(*) n, avg(rating) a from reviews group by branchId').map(s => [s.branchId, { count: s.n, avg: Math.round(s.a * 10) / 10 }])),
       services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) })),
+      menu: all("select id,name,price,mins,photo,apptOnly,bookable from items where active=1 and type='service' order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name), bookable: !!s.bookable })),   // every service for the price menu; only bookable ones can be booked online
       categories: all("select id,name from categories where type='service'"),
       staff: all('select id,name,photo,branchId from staff where active=1 order by name')
     });
@@ -1394,7 +1398,7 @@ async function handle(req, res) {
   if (adm && method === 'DELETE') { adminOnly(); const a = get('staff_adjustments', adm[1]); if (!a) bad(404, 'Not found'); if (a.payrollDate) bad(409, 'This was already paid in payroll and cannot be removed'); run('delete from staff_adjustments where id=?', a.id); log(me, 'adjustment-removed', 'staff_adjustments', a.id, `${a.kind} ${a.amount}`); return send(res, 200, { ok: true }); }
   // ----- digital payslips: every payroll payment, with a full breakdown -----
   const payslipRows = (from, to, br, staffId) => {
-    const days = all(`select pd.*, s.name staffName from payroll_days pd join staff s on s.id=pd.staffId where substr(pd.paidAt,1,10)>=? and substr(pd.paidAt,1,10)<=?${br ? ' and pd.branchId=?' : ''}${staffId ? ' and pd.staffId=?' : ''} order by pd.paidAt desc, pd.date`, from, to, ...(br ? [br] : []), ...(staffId ? [staffId] : [])), by = new Map();
+    const days = all(`select pd.*, s.name staffName from payroll_days pd join staff s on s.id=pd.staffId where date(pd.paidAt,'localtime')>=? and date(pd.paidAt,'localtime')<=?${br ? ' and pd.branchId=?' : ''}${staffId ? ' and pd.staffId=?' : ''} order by pd.paidAt desc, pd.date`, from, to, ...(br ? [br] : []), ...(staffId ? [staffId] : [])), by = new Map();
     for (const d of days) { const k = d.staffId + '|' + d.paidAt.slice(0, 16); const r = by.get(k) || { staffId: d.staffId, staffName: d.staffName, branchName: get('branches', d.branchId)?.name || '', paidAt: d.paidAt, paidBy: d.paidBy, days: [], dayItems: [], commission: 0, topup: 0, lunch: 0, bonus: 0, advance: 0, deduction: 0 }; r.days.push(d.date); r.dayItems.push({ date: d.date, commission: d.commission, topup: d.topup, lunch: d.lunch || 0 }); r.commission = r2(r.commission + d.commission); r.topup = r2(r.topup + d.topup); r.lunch = r2(r.lunch + (d.lunch || 0)); r.bonus = r2(r.bonus + (d.extra || 0)); r.advance = r2(r.advance + d.advance); r.deduction = r2(r.deduction + (d.deduction || 0)); by.set(k, r); }
     const cat = t => t === 'Partial Salary Release' ? 'Partial salary release' : t === 'Other Authorized Deduction' ? 'Other authorized deduction' : 'Cash advance';
     return [...by.values()].map(r => {
