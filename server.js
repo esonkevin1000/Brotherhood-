@@ -69,6 +69,9 @@ db.exec(`
 create table if not exists expense_claims(id text primary key, branchId text, date text, category text, description text, amount real, method text, receipts text, noReceiptReason text,
   status text, submittedById text, submittedBy text, staffId text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text, cashMoveId text, history text);
 create index if not exists exp_date on expense_claims(date, branchId);
+create table if not exists equipment(id text primary key, branchId text, name text, category text, serial text, status text, lastService text, nextService text, notes text, active integer);
+create table if not exists checklist_runs(id text primary key, branchId text, date text, kind text, items text, photoId text, submittedById text, submittedBy text, createdAt text);
+create table if not exists leaves(id text primary key, branchId text, staffId text, type text, from_date text, to_date text, reason text, status text, requestedBy text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text);
 create table if not exists problems(id text primary key, branchId text, category text, description text, priority text, photos text, status text, assignedTo text, submittedById text, submittedBy text, createdAt text, updatedAt text, history text, comments text);
 create table if not exists channels(id text primary key, kind text, name text, branchId text, announceOnly integer, members text, createdBy text, createdAt text);
 create table if not exists messages(id text primary key, channelId text, authorId text, authorName text, text text, attachments text, replyTo text, pinned integer, reactions text, createdAt text);
@@ -104,7 +107,8 @@ const COLS = {
   items: ['name', 'categoryId', 'type', 'price', 'mins', 'active', 'photo', 'bookable', 'apptOnly', 'needId'],
   discounts: ['name', 'kind', 'value', 'active'],
   customers: ['name', 'phone', 'email', 'notes', 'createdAt', 'preferredCut'],
-  users: ['name', 'username', 'role', 'branchId', 'active']
+  users: ['name', 'username', 'role', 'branchId', 'active'],
+  equipment: ['branchId', 'name', 'category', 'serial', 'status', 'lastService', 'nextService', 'notes', 'active']
 };
 const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly', 'defaultPct', 'needId']);
 const uid = () => crypto.randomBytes(5).toString('hex');
@@ -210,7 +214,7 @@ function whoami(req) {
 const isAdmin = me => me.role === 'owner' || me.role === 'admin';
 const isBranchUser = me => me.role === 'cashier' || me.role === 'barber';
 // Which parts of the POS each role may open (editable by the owner in Settings → Access)
-const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release', 'problems', 'inbox'];
+const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release', 'problems', 'inbox', 'checklist', 'leave'];
 const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue', 'problems', 'inbox'] };
 const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber }; } catch { return { ...DEFAULT_PERMS }; } };
 const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
@@ -692,6 +696,27 @@ const REPORTS = {
         { title: 'Cash in & out audit trail', cols: [['When'], ['Branch'], ['Type'], ['Amount', 'peso'], ['Barber'], ['Note']], rows: mv.map(m => [stamp(m.ts), m.branchName, m.kind, m.amount, m.staffName || '', m.note]) }]
     };
   },
+  scorecard(f) {
+    const os = paidOrders(f.from, f.to, f.br), days = dayRows(f.from, f.to, f.br), rv = all(`select * from reviews where substr(createdAt,1,10)>=? and substr(createdAt,1,10)<=?${f.br ? ' and branchId=?' : ''}`, ...(f.br ? [f.from, f.to, f.br] : [f.from, f.to]));
+    const rows = all(`select * from staff where active=1${f.br ? ' and branchId=?' : ''} order by name`, ...(f.br ? [f.br] : [])).map(s => {
+      const mine = os.filter(o => o.barberId === s.id), svc = sum(mine, o => serviceNet(o)), dd = days.filter(d => d.staffId === s.id), r = rv.filter(x => x.staffId === s.id);
+      return { s, n: mine.length, sales: svc, avg: mine.length ? svc / mine.length : 0, comm: sum(mine, o => commissionOf(o, s.pct)), worked: dd.length, late: dd.filter(d => d.lateMins > 0).length, rating: r.length ? sum(r, x => x.rating) / r.length : null, rc: r.length };
+    }).sort((a, b) => b.sales - a.sales);
+    return {
+      cards: [{ label: 'Customers served', value: sum(rows, r => r.n), t: 'num' }, { label: 'Service sales', value: sum(rows, r => r.sales), t: 'peso' }, { label: 'Top barber', value: rows[0] && rows[0].n ? rows[0].s.name : '—', t: 'text' }],
+      tables: [{ title: 'Barber performance scorecard', cols: [['Barber'], ['Branch'], ['Customers', 'num'], ['Service sales', 'peso'], ['Avg ticket', 'peso'], ['Commission', 'peso'], ['Days worked', 'num'], ['Late days', 'num'], ['Rating'], ['Reviews', 'num']],
+        rows: rows.map(r => [r.s.name, get('branches', r.s.branchId)?.name || '', r.n, r.sales, r.avg, r.comm, r.worked, r.late, r.rating == null ? '—' : r.rating.toFixed(1) + ' ★', r.rc]) }]
+    };
+  },
+  accountability(f) {
+    const zs = all(`select z.*, b.name branchName from zreadings z left join branches b on b.id=z.branchId where z.businessDate>=? and z.businessDate<=?${f.br ? ' and z.branchId=?' : ''} order by z.generatedAt desc`, ...(f.br ? [f.from, f.to, f.br] : [f.from, f.to])).map(z => ({ ...z, d: JSON.parse(z.data) })), by = {};
+    for (const z of zs) { const k = z.d.cashier || 'Unknown'; const r = by[k] || { shifts: 0, short: 0, over: 0, shortCount: 0 }; r.shifts++; if (z.d.variance < 0) { r.short += z.d.variance; r.shortCount++; } else r.over += z.d.variance; by[k] = r; }
+    return {
+      cards: [{ label: 'Shifts closed', value: zs.length, t: 'num' }, { label: 'Total shortage', value: sum(zs.filter(z => z.d.variance < 0), z => z.d.variance), t: 'peso' }, { label: 'Total overage', value: sum(zs.filter(z => z.d.variance > 0), z => z.d.variance), t: 'peso' }, { label: 'Shifts with a shortage', value: zs.filter(z => z.d.variance < 0).length, t: 'num' }],
+      tables: [{ title: 'By cashier', cols: [['Cashier'], ['Shifts', 'num'], ['Shifts short', 'num'], ['Total short', 'peso'], ['Total over', 'peso']], rows: Object.entries(by).map(([k, r]) => [k, r.shifts, r.shortCount, r.short, r.over]) },
+        { title: 'Every closed shift', cols: [['Date'], ['Reading'], ['Branch'], ['Cashier'], ['Expected cash', 'peso'], ['Counted', 'peso'], ['Variance', 'peso']], rows: zs.map(z => [z.businessDate, 'Z-' + z.no, z.branchName, z.d.cashier || '', z.d.expected, z.d.counted, z.d.variance]) }]
+    };
+  },
   readings(f) {
     const zs = all(`select z.*, b.name branchName from zreadings z left join branches b on b.id=z.branchId where z.businessDate>=? and z.businessDate<=?${f.br ? ' and z.branchId=?' : ''} order by z.generatedAt desc`, ...(f.br ? [f.from, f.to, f.br] : [f.from, f.to])).map(z => ({ ...z, d: JSON.parse(z.data) }));
     const sal = sum(dayRows(f.from, f.to, f.br), r => r.pay), net = sum(zs, z => z.d.net), exp = sum(movesIn(f.from, f.to, f.br).filter(m => m.kind === 'expense'), m => m.amount);
@@ -870,6 +895,8 @@ async function handle(req, res) {
       if (/^\/api\/remittances/.test(p)) return 'remittance';
       if (/^\/api\/advances/.test(p)) return 'release';
       if (/^\/api\/problems/.test(p)) return 'problems';
+      if (/^\/api\/checklists/.test(p)) return 'checklist';
+      if (/^\/api\/leaves/.test(p)) return 'leave';
       if (/^\/api\/inbox/.test(p)) return 'inbox';
       if (/^\/api\/files/.test(p)) return ['remittance', 'expenses', 'pos'];
       if (/^\/api\/orders\/\w+\/(pay|void)$/.test(p)) return 'pos';
@@ -888,7 +915,7 @@ async function handle(req, res) {
     return send(res, 200, {
       shop: SHOP, me, branches: all('select * from branches order by rowid'), chairs: all('select * from chairs order by branchId, sort'), staff: all('select * from staff order by name'),
       categories: all('select * from categories order by name'), items: all('select * from items order by name'), discounts: all('select * from discounts order by name'),
-      users: all('select * from users order by name').map(strip)
+      users: all('select * from users order by name').map(strip), equipment: all('select * from equipment order by branchId, name')
     });
   }
   if (p === '/api/audit' && method === 'GET') { adminOnly(); return send(res, 200, all('select * from audit order by n desc limit 300')); }
@@ -1241,6 +1268,59 @@ async function handle(req, res) {
     const id = uid() + uid(); run('insert into files(id,kind,branchId,mime,data,byId,byName,createdAt,enc) values(?,?,?,?,?,?,?,?,1)', id, 'chat', me.branchId || '', m[1], encBuf(buf), me.id, me.name, nowISO());
     return send(res, 201, { id, type: m[1], name: String(b.name || '').slice(0, 80) });
   }
+  // ----- daily opening / closing checklists -----
+  const DEF_CHK = { opening: ['Unlock the shop and turn on the lights and aircon', 'Clean the chairs, mirrors and floor', 'Sanitize clippers, scissors and combs', 'Restock towels, capes and neck strips', 'Open the shift on the POS and count the cash float', 'Barbers are in uniform and timed in'], closing: ['Close all open tickets on the POS', 'Count the cash and do the sales reading (Z-reading)', 'Sanitize and store all tools', 'Sweep and mop the floor, empty the trash', 'Turn off aircon, lights and equipment', 'Lock the doors and secure the cash'] };
+  const chkTpl = () => { const t = {}; for (const k of ['opening', 'closing']) { const v = jp(getSetting('chk_' + k)); t[k] = v.length ? v.map(String) : DEF_CHK[k]; } return t; };
+  if (p === '/api/checklists/template' && method === 'GET') return send(res, 200, chkTpl());
+  if (p === '/api/checklists/template' && method === 'PUT') { adminOnly(); const b = await readBody(req); for (const k of ['opening', 'closing']) if (Array.isArray(b[k])) setSetting('chk_' + k, JSON.stringify(b[k].map(s => String(s).trim().slice(0, 120)).filter(Boolean).slice(0, 30))); log(me, 'checklist-template', 'settings', '', ''); return send(res, 200, chkTpl()); }
+  if (p === '/api/checklists/today' && method === 'GET') { const bid = branchScope(me, q.branch), t0 = todayStr(); return send(res, 200, { template: chkTpl(), runs: all('select * from checklist_runs where branchId=? and date=?', bid, t0).map(r => ({ ...r, items: jp(r.items) })) }); }
+  if (p === '/api/checklists/submit' && method === 'POST') {
+    const b = await readBody(req), bid = branchScope(me, b.branchId), kind = ['opening', 'closing'].includes(b.kind) ? b.kind : bad(400, 'Choose opening or closing'), t0 = todayStr(), tpl = chkTpl()[kind];
+    if (one('select 1 x from checklist_runs where branchId=? and date=? and kind=?', bid, t0, kind)) bad(409, `The ${kind} checklist for today was already submitted`);
+    const items = tpl.map((text, i) => { const x = (Array.isArray(b.items) ? b.items : [])[i] || {}; return { text, done: !!x.done, note: String(x.note || '').slice(0, 200) }; });
+    const missing = items.filter(i => !i.done && !i.note.trim()); if (missing.length) bad(400, `Tick every task, or write a note for the ones not done (${missing.length} left)`);
+    const photo = b.photoId ? get('files', String(b.photoId)) : null; const id = uid();
+    run('insert into checklist_runs(id,branchId,date,kind,items,photoId,submittedById,submittedBy,createdAt) values(?,?,?,?,?,?,?,?,?)', id, bid, t0, kind, JSON.stringify(items), photo && photo.branchId === bid ? photo.id : '', me.id, me.name, nowISO());
+    log(me, 'checklist', 'checklist_runs', id, `${kind} ${items.filter(i => i.done).length}/${items.length}`); return send(res, 201, { ok: true, id });
+  }
+  if (p === '/api/checklists' && method === 'GET') {
+    adminOnly(); const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : todayStr(), to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : todayStr(), br = q.branch && q.branch !== 'all' ? q.branch : null;
+    const rows = all(`select * from checklist_runs where date>=? and date<=?${br ? ' and branchId=?' : ''} order by date desc, createdAt desc limit 500`, from, to, ...(br ? [br] : [])).map(r => { const items = jp(r.items); return { ...r, items, branchName: get('branches', r.branchId)?.name || '', done: items.filter(i => i.done).length, total: items.length }; });
+    const missing = []; const end = to < todayStr() ? to : todayStr();
+    for (let d = new Date(from + 'T00:00'), n = 0; dOf(d) <= end && n < 31; d.setDate(d.getDate() + 1), n++) for (const b2 of all('select * from branches').filter(b => !br || b.id === br)) for (const k of ['opening', 'closing']) if (!rows.some(r => r.branchId === b2.id && r.date === dOf(d) && r.kind === k) && !(dOf(d) === todayStr() && k === 'closing')) missing.push({ date: dOf(d), branchName: b2.name, kind: k });
+    return send(res, 200, { rows, missing });
+  }
+  // ----- leave requests -----
+  const LEAVE_TYPES = ['Vacation', 'Sick', 'Emergency', 'Other'];
+  const leaveView = l => ({ ...l, branchName: get('branches', l.branchId)?.name || '', staffName: get('staff', l.staffId)?.name || '' });
+  if (p === '/api/leaves' && method === 'GET') {
+    const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = ['PENDING', 'APPROVED', 'REJECTED'].includes(q.status) ? q.status : null;
+    return send(res, 200, { rows: all(`select * from leaves where 1=1${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''} order by createdAt desc limit 500`, ...(br ? [br] : []), ...(st ? [st] : [])).map(leaveView), types: LEAVE_TYPES });
+  }
+  if (p === '/api/leaves' && method === 'POST') {
+    const b = await readBody(req), branchId = branchScope(me, b.branchId), s = get('staff', String(b.staffId || '')); if (!s || s.branchId !== branchId) bad(400, 'Choose the employee');
+    const type = LEAVE_TYPES.includes(b.type) ? b.type : bad(400, 'Choose the leave type'), from = String(b.from || ''), to = String(b.to || b.from || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || to < from) bad(400, 'Choose valid dates'); if (from < todayStr() && type !== 'Sick' && type !== 'Emergency') bad(400, 'Leave cannot start in the past');
+    const reason = String(b.reason || '').trim().slice(0, 300); if (reason.length < 3) bad(400, 'Enter the reason');
+    if (one("select 1 x from leaves where staffId=? and status<>'REJECTED' and from_date<=? and to_date>=?", s.id, to, from)) bad(409, 'This employee already has leave on those dates');
+    const id = uid(); run('insert into leaves(id,branchId,staffId,type,from_date,to_date,reason,status,requestedBy,createdAt) values(?,?,?,?,?,?,?,?,?,?)', id, branchId, s.id, type, from, to, reason, 'PENDING', me.name, nowISO());
+    log(me, 'leave-request', 'leaves', id, `${s.name} ${from}..${to}`); return send(res, 201, leaveView(get('leaves', id)));
+  }
+  const lvm = p.match(/^\/api\/leaves\/(\w+)\/review$/);
+  if (lvm && method === 'PUT') {
+    adminOnly(); const l = get('leaves', lvm[1]); if (!l) bad(404, 'Not found'); const b = await readBody(req), act = { approve: 'APPROVED', reject: 'REJECTED' }[b.action], note = String(b.note || '').trim().slice(0, 300);
+    if (!act) bad(400, 'Choose approve or reject'); if (act === 'REJECTED' && !note) bad(400, 'A note is required to reject leave');
+    run('update leaves set status=?, reviewedBy=?, reviewedAt=?, reviewNote=? where id=?', act, me.name, nowISO(), note, l.id); log(me, 'leave-' + b.action, 'leaves', l.id, note); return send(res, 200, leaveView(get('leaves', l.id)));
+  }
+  // ----- digital payslips (built from what was actually paid in payroll) -----
+  if (p === '/api/payslips' && method === 'GET') {
+    adminOnly(); const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : '2000-01-01', to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : '2099-12-31', br = q.branch && q.branch !== 'all' ? q.branch : null;
+    const days = all(`select pd.*, s.name staffName from payroll_days pd join staff s on s.id=pd.staffId where substr(pd.paidAt,1,10)>=? and substr(pd.paidAt,1,10)<=?${br ? ' and pd.branchId=?' : ''} order by pd.paidAt desc, pd.date`, from, to, ...(br ? [br] : [])), by = new Map();
+    for (const d of days) { const k = d.staffId + '|' + d.paidAt.slice(0, 16); const r = by.get(k) || { staffId: d.staffId, staffName: d.staffName, branchName: get('branches', d.branchId)?.name || '', paidAt: d.paidAt, paidBy: d.paidBy, days: [], commission: 0, topup: 0, advance: 0, deduction: 0 }; r.days.push(d.date); r.commission = r2(r.commission + d.commission); r.topup = r2(r.topup + d.topup); r.advance = r2(r.advance + d.advance); r.deduction = r2(r.deduction + (d.deduction || 0)); by.set(k, r); }
+    const rows = [...by.values()].map(r => ({ ...r, gross: r2(r.commission + r.topup), net: r2(r.commission + r.topup - r.advance - r.deduction), deductionItems: all("select d.amount, d.seq, a.type from advance_deductions d join advances a on a.id=d.advanceId where d.staffId=? and d.status='APPLIED' and d.payrollDate in (" + r.days.map(() => '?').join(',') + ')', r.staffId, ...r.days) }));
+    return send(res, 200, { rows });
+  }
+  // ----- barber scorecard and cash accountability are in REPORTS -----
   // ----- daily sales remittance (separate from expenses) -----
   const remitCalc = (branchId, date) => {
     const os = all("select * from orders where branchId=? and date=? and status='paid'", branchId, date).map(parseOrder), tender = {};

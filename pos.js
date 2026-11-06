@@ -35,7 +35,7 @@ const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: 
   cart: { items: [], barberId: '', mode: 'later', editing: null }, q: [], sf: null, offline: false, cust: { q: '', tier: '', rows: [], total: 0 }, rm: { date: '', calc: null, list: [], proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 // which sections this login may open (the owner sets this in Settings → Access)
-const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance', release: 'release', problems: 'problems', inbox: 'inbox' };
+const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance', release: 'release', problems: 'problems', inbox: 'inbox', checklist: 'checklist', leave: 'leave' };
 const freshCart = () => ({ items: [], editing: null, mode: (typeof P !== 'undefined' && P.cart && P.cart.mode) || 'later' });
 const isAdminRole = () => P.me && ['owner', 'admin'].includes(P.me.role);
 const canOpen = v => (P.mods || []).includes(VMAP[v]);
@@ -120,6 +120,10 @@ async function sfSubmit() {
   }
   await OFF.put(item); P.q = await OFF.all(); P.sf = null; closeSheet(); toast('Saved on this device. It will upload when the internet is back.'); render();
 }
+async function loadChk() {
+  const r = await api('GET', withBr('/api/checklists/today')), keep = P.ck;
+  P.ck = { template: r.template, runs: r.runs, kind: keep ? keep.kind : 'opening', items: keep && keep.items ? keep.items : [] };
+}
 async function refresh() {
   if (!P.me) return;
   if (!canOpen(P.view)) P.view = firstView() || P.view;
@@ -130,6 +134,8 @@ async function refresh() {
     if (P.view === 'pos') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
     if (P.view === 'customers') await loadCustomers();
     if (P.view === 'remit') await loadRemit();
+    if (P.view === 'checklist') await loadChk();
+    if (P.view === 'leave') P.lv = await api('GET', withBr('/api/leaves'));
     if (P.view === 'problems') P.pr = await api('GET', withBr('/api/problems'));
     if (canOpen('inbox') && window.Inbox) { Inbox.setOpt({ token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); try { P.inUnread = await Inbox.refreshUnread(); } catch (x) { } }
     if (P.view === 'release') { P.adv = await api('GET', withBr('/api/advances')); if (P.advBal) P.advBal = await api('GET', '/api/advances/balance?staffId=' + P.advBal.staffId); }
@@ -157,7 +163,7 @@ async function afterLogin(j) {
 }
 
 // ---------- shell ----------
-const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay', problems: 'Report a Problem', inbox: 'Inbox' };
+const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay', problems: 'Report a Problem', inbox: 'Inbox', checklist: 'Daily Checklist', leave: 'Leave Requests' };
 function render() {
   if (!P.me) {
     app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
@@ -167,7 +173,7 @@ function render() {
   const b = P.boot; app.classList.toggle('in', !!P.me);
   if (!canOpen(P.view)) P.view = firstView();
   if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
-  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Problems'], ['inbox', 'users', 'Inbox']];
+  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Problems'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Checklist'], ['leave', 'calendar', 'Leave']];
   const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.inUnread && P.view !== 'inbox' ? `<span class="shiftchip" style="color:#e5384a" data-a="go" data-v="inbox">✉ ${P.inUnread}</span>` : ''}${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
@@ -241,6 +247,21 @@ const VIEWS = {
       <small class="mute">${esc(x.priority)} priority · ${esc(x.submittedBy)} · ${esc(x.createdAt.slice(0, 10))}${x.assignedTo ? ' · Assigned: ' + esc(x.assignedTo) : ''}</small><p style="margin:6px 0">${esc(x.description)}</p>
       ${x.comments.map(c => `<small style="display:block;border-left:3px solid var(--line);padding-left:8px;margin:4px 0"><b>${esc(c.by)}</b>: ${esc(c.text)}</small>`).join('')}
       <div class="row" style="margin-top:8px">${x.photos.length ? `<button class="ghost sm" data-a="viewfiles" data-ids="${x.photos.join(',')}">${x.photos.length} photo${x.photos.length > 1 ? 's' : ''}</button>` : ''}<button class="ghost sm" data-a="pbcomment" data-id="${x.id}">Add comment</button></div></div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No problem reports yet.</p></div>'}`;
+  },
+  checklist() {
+    const c = P.ck; if (!c) return '<p class="mute">Loading…</p>';
+    const tabs = `<div class="seg"><button class="${c.kind === 'opening' ? 'on' : ''}" data-a="ckkind" data-k="opening">Opening</button><button class="${c.kind === 'closing' ? 'on' : ''}" data-a="ckkind" data-k="closing">Closing</button></div>`;
+    const run = c.runs.find(r => r.kind === c.kind);
+    if (run) return tabs + `<div class="card"><b style="color:var(--ok)">✔ Submitted</b> <span class="mute">by ${esc(run.submittedBy)} at ${hm(run.createdAt)}</span>${run.items.map(i => `<div class="row" style="padding:6px 0;border-top:1px solid var(--line);flex-wrap:nowrap"><span style="color:${i.done ? 'var(--ok)' : 'var(--bad)'}">${i.done ? '✔' : '✗'}</span><div><span>${esc(i.text)}</span>${i.note ? `<br><small class="mute">${esc(i.note)}</small>` : ''}</div></div>`).join('')}</div>`;
+    return tabs + `<div class="card"><h3 style="margin:0 0 6px;font-size:15px;text-transform:uppercase;letter-spacing:1px">${c.kind === 'opening' ? 'Opening' : 'Closing'} checklist</h3><p class="mute" style="margin:0 0 6px;font-size:13px">Tick every task. If a task cannot be done, leave it unticked and write why.</p>
+      ${c.template[c.kind].map((txt, i) => { const it = c.items[i] || {}; return `<div style="padding:8px 0;border-top:1px solid var(--line)"><label class="consent" style="margin:0"><input type="checkbox" data-a="ckitem" data-i="${i}" ${it.done ? 'checked' : ''}><span>${esc(txt)}</span></label>${it.done ? '' : `<input data-ck="${i}" placeholder="Why was this not done?" value="${esc(it.note || '')}" style="margin-top:6px">`}</div>`; }).join('')}
+      <p id="err" style="color:var(--bad);margin:8px 0 0"></p><button class="block" data-a="cksubmit">Submit ${c.kind} checklist</button></div>`;
+  },
+  leave() {
+    const l = P.lv; if (!l) return '<p class="mute">Loading…</p>';
+    const st = s => ({ PENDING: 'waiting', APPROVED: 'paid', REJECTED: 'void' }[s] || '');
+    return `<button class="block" data-a="newleave" style="margin-bottom:12px;padding:16px">${ic('plus')} New leave request</button>
+    ${l.rows.map(x => `<div class="card" style="padding:14px"><div class="row between" style="flex-wrap:nowrap"><b>${esc(x.staffName)}</b><span class="tag ${st(x.status)}">${x.status}</span></div><small class="mute">${esc(x.type)} · ${esc(x.from_date)}${x.to_date !== x.from_date ? ' to ' + esc(x.to_date) : ''}</small><br><small>${esc(x.reason)}</small>${x.reviewNote ? `<br><small>Owner note: ${esc(x.reviewNote)}</small>` : ''}</div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No leave requests.</p></div>'}`;
   },
   release() {
     const l = P.adv; if (!l) return '<p class="mute">Loading…</p>';
@@ -447,6 +468,14 @@ function probSheet() {
     ${x.photos.length ? `<div class="thumbs">${x.photos.map((r, i) => `<div class="thumb"><img src="${r.preview}" alt=""><button class="rm" data-a="pbrm" data-i="${i}">✕</button></div>`).join('')}</div>` : ''}
     <p id="err" style="color:var(--bad);margin:8px 0 0"></p><button class="block" data-a="pbsave" ${x.busy ? 'disabled' : ''}>${x.busy ? 'Sending…' : 'Send report'}</button>`);
 }
+function leaveSheet() {
+  const x = P.lvf;
+  openSheet(`<div class="row between"><h2 style="margin:0">Leave request</h2><button class="ghost sm" data-a="closesheet">Cancel</button></div>
+    <label>Employee</label><select id="lvstaff"><option value="">Choose an employee</option>${P.boot.staff.map(s => `<option value="${s.id}" ${x.staffId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+    <label>Type</label><select id="lvtype">${['Vacation', 'Sick', 'Emergency', 'Other'].map(t => `<option ${x.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <div class="row" style="flex-wrap:nowrap"><div style="flex:1"><label>From</label><input type="date" id="lvfrom" value="${x.from}"></div><div style="flex:1"><label>To</label><input type="date" id="lvto" value="${x.to}"></div></div>
+    <label>Reason</label><input id="lvreason" value="${esc(x.reason)}" maxlength="300"><p id="err" style="color:var(--bad);margin:8px 0 0"></p><button class="block" data-a="lvsave" ${x.busy ? 'disabled' : ''}>${x.busy ? 'Sending…' : 'Send request'}</button>`);
+}
 function freeBarbers() { const cut = cuttingIds(); return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && !cut.has(s.id)); }
 const chairName = id => P.boot?.chairs.find(c => c.id === id)?.name || '';
 // "Assign to Chair": each chair is a card with its barber. Free chair = seated now; busy chair = joins that barber's line.
@@ -615,7 +644,7 @@ document.addEventListener('click', async e => {
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
-      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Report a Problem'], ['inbox', 'users', 'Inbox'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Report a Problem'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Daily Checklist'], ['leave', 'calendar', 'Leave Requests'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
@@ -659,6 +688,20 @@ document.addEventListener('click', async e => {
     return;
   }
   if (a === 'pbcomment') { const text = prompt('Write your comment'); if (!text || !text.trim()) return; await guard(() => api('POST', '/api/problems/' + d.id + '/comment', { text })); return refresh(); }
+  if (a === 'ckkind') { P.ck.kind = d.k; P.ck.items = []; return render(); }
+  if (a === 'cksubmit') {
+    const c = P.ck, n = c.template[c.kind].length, items = Array.from({ length: n }, (_, i) => c.items[i] || { done: false, note: '' });
+    try { await api('POST', '/api/checklists/submit', { branchId: P.boot.branch.id, kind: c.kind, items }); toast('Checklist submitted'); c.items = []; await refresh(); }
+    catch (x) { const er = document.getElementById('err'); if (er) er.textContent = x.message; else toast(x.message, true); }
+    return;
+  }
+  if (a === 'newleave') { P.lvf = { staffId: '', type: 'Vacation', from: ymd(1), to: ymd(1), reason: '', busy: false }; return leaveSheet(); }
+  if (a === 'lvsave') {
+    const x = P.lvf; x.busy = true; leaveSheet();
+    try { await api('POST', '/api/leaves', { branchId: P.boot.branch.id, staffId: x.staffId, type: x.type, from: x.from, to: x.to, reason: x.reason }); closeSheet(); toast('Leave request sent'); await refresh(); }
+    catch (er) { x.busy = false; leaveSheet(); const e2 = document.getElementById('err'); if (e2) e2.textContent = er.message; }
+    return;
+  }
   if (a === 'newadv') { P.av = { staffId: '', type: 'Cash Advance', amount: '', inst: 1, reason: '', consent: false, busy: false }; return advSheet(); }
   if (a === 'avsave') {
     const x = P.av; x.busy = true; advSheet();
@@ -814,6 +857,11 @@ document.addEventListener('change', async e => {
   if (t.id === 'avconsent') { P.av.consent = t.checked; return; }
   if (a === 'rmdate' || t.id === 'rmdate') { P.rm.date = t.value || ymd(0); P.rm.proofId = ''; P.rm.preview = ''; refresh().then(render); return; }
   if (t.id === 'sffile') { const file = t.files[0]; if (!file || !P.sf) return; try { P.sf.data = await resizeToJpeg(file, 900); selfieSheet(); } catch (x) { toast('Could not read that photo. Please try again.', true); } return; }
+  if (a === 'ckitem') { const i = +t.dataset.i; P.ck.items[i] = { ...(P.ck.items[i] || {}), done: t.checked }; return render(); }
+  if (t.id === 'lvstaff') { P.lvf.staffId = t.value; return; }
+  if (t.id === 'lvtype') { P.lvf.type = t.value; return; }
+  if (t.id === 'lvfrom') { P.lvf.from = t.value; return; }
+  if (t.id === 'lvto') { P.lvf.to = t.value; return; }
   if (t.id === 'pbcat') { P.pb.category = t.value; return; }
   if (t.id === 'pbfile') {
     const file = t.files[0]; if (!file || !P.pb) return;
@@ -856,6 +904,8 @@ document.addEventListener('input', e => {
     return;
   }  if (t.id === 'expq') { P.expQ = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('expq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
   if (t.id === 'remarks') P.remarks = t.value;
+  if (t.dataset.ck !== undefined) { const i = +t.dataset.ck; P.ck.items[i] = { ...(P.ck.items[i] || {}), note: t.value }; return; }
+  if (t.id === 'lvreason') { P.lvf.reason = t.value; return; }
   if (t.id === 'pbdesc') { P.pb.desc = t.value; return; }
   if (t.id === 'avamt') { P.av.amount = t.value; return; }
   if (t.id === 'avreason') { P.av.reason = t.value; return; }

@@ -30,6 +30,9 @@ async function loadView() {
     if (v === 'dashboard') { [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}&branch=${ui.branch}`)); }
+    else if (v === 'leave') ui.leave = await api('GET', `/api/leaves?branch=${ui.branch}&status=${ui.lstatus || ''}`);
+    else if (v === 'chk') { [ui.chk, ui.chkTpl] = await Promise.all([api('GET', `/api/checklists?${qs()}`), api('GET', '/api/checklists/template')]); }
+    else if (v === 'slip') ui.slip = await api('GET', `/api/payslips?${qs()}`);
     else if (v === 'prob') ui.prob = await api('GET', `/api/problems?branch=${ui.branch}&status=${ui.pstatus || ''}`);
     else if (v === 'att') ui.att = await api('GET', `/api/attendance/log?${qs()}&flagged=${ui.aflag ? 1 : 0}`);
     else if (v === 'adv') ui.adv = await api('GET', `/api/advances?branch=${ui.branch}&status=${ui.astatus || ''}`);
@@ -80,8 +83,8 @@ const ICONS = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
-const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view === 'prob' ? 'Problem Reports' : ui.view === 'inbox' ? 'Inbox' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc'], ['scorecard', 'Barber Scorecard', 'star'], ['accountability', 'Cash Accountability', 'coin']];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building'], ['equipment', 'Equipment & Maintenance', 'gear']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view === 'prob' ? 'Problem Reports' : ui.view === 'leave' ? 'Leave Requests' : ui.view === 'chk' ? 'Daily Checklists' : ui.view === 'slip' ? 'Payslips' : ui.view === 'inbox' ? 'Inbox' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 const inboxOpts = () => ({ token: () => token, isAdmin: true, meId: S.me ? S.me.id : 'owner' });
 const render = (() => { const base = renderBase; return function () { base(); const h = document.getElementById('inbox-host'); if (h && window.Inbox && loggedIn) Inbox.mount(h, inboxOpts()); }; })();
@@ -105,22 +108,10 @@ function renderBase() {
   const on = k => ui.view === k ? 'on' : '';
   nav.innerHTML = `<div class="brand"><img src="/logo.png" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
     <select id="branchsel"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
-    <button class="${on('dashboard')}" data-view="dashboard">${ic('grid')}Dashboard</button>
-    <button class="${on('bookings')}" data-view="bookings">${ic('calendar')}Bookings</button>
-    <button class="${on('reviews')}" data-view="reviews">${ic('star')}Reviews</button>
-    <button class="${on('remit')}" data-view="remit">${ic('coin')}Daily Remittance</button>
-    <button class="${on('exp')}" data-view="exp">${ic('wallet')}Expenses &amp; Receipts</button>
-    <button class="${on('adv')}" data-view="adv">${ic('tag')}Release Pay</button>
-    <button class="${on('att')}" data-view="att">${ic('clock')}Attendance</button>
-    <button class="${on('prob')}" data-view="prob">${ic('gear')}Problem Reports</button>
-    <button class="${on('inbox')}" data-view="inbox">${ic('users')}Inbox${ui.inUnread ? ` <span class="tag" style="color:#fff;background:#e5384a">${ui.inUnread}</span>` : ''}</button>
-    <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
-    <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
-    <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
-    <button class="${on('settings')}" data-view="settings">${ic('gear')}Settings</button>
+    ${navGroups(on)}
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).trim();
-  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -154,6 +145,54 @@ function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
   return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
+}
+const NAVG = [
+  ['Overview', [['dashboard', 'Dashboard', 'grid']]],
+  ['Booking & Calendar', [['bookings', 'Bookings', 'calendar'], ['reviews', 'Reviews', 'star']]],
+  ['POS & Sales', [['rep:sales'], ['rep:tender'], ['rep:discounts'], ['mgmt:items'], ['mgmt:categories'], ['mgmt:discounts'], ['mgmt:customers']]],
+  ['Attendance & Timekeeping', [['att', 'Attendance', 'clock'], ['rep:attendance']]],
+  ['Release Pay & Payroll', [['adv', 'Release Pay', 'tag'], ['rep:payroll'], ['rep:commissions'], ['slip', 'Payslips', 'doc']]],
+  ['Expenses & Receipts', [['exp', 'Expenses & Receipts', 'wallet']]],
+  ['Daily Sales Remittance', [['remit', 'Daily Remittance', 'coin']]],
+  ['Employees & Performance', [['mgmt:staff'], ['rep:scorecard'], ['leave', 'Leave Requests', 'calendar']]],
+  ['Inbox & Communications', [['inbox', 'Inbox', 'users']]],
+  ['Problem Reports', [['prob', 'Problem Reports', 'gear']]],
+  ['Daily Checklists', [['chk', 'Checklists', 'doc']]],
+  ['Maintenance', [['mgmt:equipment']]],
+  ['Branch Management', [['mgmt:branches'], ['mgmt:chairs'], ['mgmt:users']]],
+  ['Reports & Analytics', [['rep:items'], ['rep:readings'], ['rep:cash'], ['rep:accountability']]],
+  ['Settings & Permissions', [['settings', 'Settings', 'gear'], ['activity', 'Activity', 'activity']]]
+];
+function navGroups(on) {
+  return NAVG.map(([h, list]) => `<div class="navh">${h}</div>` + list.map(([v, l, i]) => {
+    if (!l) { const k = v.slice(v.indexOf(':') + 1), r = (v.startsWith('rep:') ? REPORTS : MGMT).find(x => x[0] === k); if (!r) return ''; l = r[1]; i = r[2]; }
+    const badge = v === 'inbox' && ui.inUnread ? ` <span class="tag" style="color:#fff;background:#e5384a">${ui.inUnread}</span>` : '';
+    return `<button class="${on(v)}" data-view="${v}">${ic(i)}${l.replace('&', '&amp;')}${badge}</button>`;
+  }).join('')).join('');
+}
+function vLeave() {
+  const r = ui.leave, st = ui.lstatus || '';
+  const tag = s => ({ PENDING: ['#b26a00', 'rgba(245,166,35,.16)'], APPROVED: ['var(--ok)', 'rgba(62,207,142,.13)'], REJECTED: ['var(--bad)', 'rgba(255,93,108,.13)'] }[s]);
+  return `<h2>Leave Requests <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2><div class="row" style="margin-bottom:14px"><select id="lstatus" style="width:auto"><option value="">All statuses</option>${['PENDING', 'APPROVED', 'REJECTED'].map(s => `<option ${st === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+  ${r ? `<div class="card overflow"><table><tr><th>Employee</th><th>Branch</th><th>Type</th><th>From</th><th>To</th><th>Reason</th><th>Filed by</th><th>Status</th><th></th></tr>
+  ${r.rows.map(x => { const [c, bg] = tag(x.status); return `<tr><td><b>${esc(x.staffName)}</b></td><td>${esc(x.branchName)}</td><td>${esc(x.type)}</td><td>${esc(x.from_date)}</td><td>${esc(x.to_date)}</td><td style="white-space:normal;min-width:150px">${esc(x.reason)}</td><td>${esc(x.requestedBy)}</td><td><span class="tag" style="color:${c};background:${bg}">${x.status}</span>${x.reviewNote ? `<br><span class="mute" style="font-size:11px">${esc(x.reviewNote)}</span>` : ''}</td>
+    <td>${x.status === 'PENDING' ? `<button class="btn sm" data-act="lvreview" data-a="approve" data-id="${x.id}">Approve</button> <button class="btn bad sm" data-act="lvreview" data-a="reject" data-id="${x.id}">Reject</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="9" class="mute">No leave requests.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
+}
+function vChk() {
+  const r = ui.chk, t = ui.chkTpl;
+  return `<h2>Daily Checklists <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar('')}
+  ${r ? `<div class="grid"><div class="card stat"><span>Submitted</span><b>${r.rows.length}</b></div><div class="card stat"><span>Not submitted</span><b style="color:${r.missing.length ? 'var(--bad)' : 'var(--ok)'}">${r.missing.length}</b></div></div>
+  <div class="card overflow"><table><tr><th>Date</th><th>Branch</th><th>Checklist</th><th>Done</th><th>By</th><th>Not done / notes</th></tr>
+  ${r.rows.map(x => `<tr><td>${esc(x.date)}</td><td>${esc(x.branchName)}</td><td style="text-transform:capitalize">${esc(x.kind)}</td><td><b style="color:${x.done === x.total ? 'var(--ok)' : '#b26a00'}">${x.done}/${x.total}</b></td><td>${esc(x.submittedBy)}</td><td style="white-space:normal;min-width:220px">${x.items.filter(i => !i.done).map(i => `<div>✗ ${esc(i.text)}<br><span class="mute" style="font-size:12px">${esc(i.note)}</span></div>`).join('') || '<span class="mute">All tasks done</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="mute">No checklists in this period.</td></tr>'}</table></div>
+  ${r.missing.length ? `<div class="card overflow" style="margin-top:14px"><h3>Not submitted</h3><table><tr><th>Date</th><th>Branch</th><th>Checklist</th></tr>${r.missing.slice(0, 150).map(x => `<tr><td>${esc(x.date)}</td><td>${esc(x.branchName)}</td><td style="text-transform:capitalize">${esc(x.kind)}</td></tr>`).join('')}</table></div>` : ''}` : '<p class="mute">Loading…</p>'}
+  ${t ? `<div class="card" style="margin-top:14px"><h3>Checklist tasks</h3><p class="mute" style="font-size:13px;margin:0 0 8px">One task per line. Cashiers see these every day.</p><div class="grid"><div><label>Opening</label><textarea id="chk-open" rows="7">${esc(t.opening.join('\n'))}</textarea></div><div><label>Closing</label><textarea id="chk-close" rows="7">${esc(t.closing.join('\n'))}</textarea></div></div><button class="btn sm" data-act="chksave">Save tasks</button></div>` : ''}`;
+}
+function vSlip() {
+  const r = ui.slip;
+  return `<h2>Payslips <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar('')}
+  <p class="mute" style="font-size:13px">A payslip is created every time you mark a barber as paid in Payroll. It lists the commission, the daily top-up, advances and release-pay deductions that were really paid.</p>
+  ${r ? `<div class="card overflow"><table><tr><th>Paid on</th><th>Employee</th><th>Branch</th><th>Days</th><th>Commission</th><th>Top-up</th><th>Advances</th><th>Release pay deductions</th><th>Net pay</th><th></th></tr>
+  ${r.rows.map((x, i) => `<tr><td>${esc(x.paidAt.slice(0, 10))}</td><td><b>${esc(x.staffName)}</b></td><td>${esc(x.branchName)}</td><td>${x.days.length}<br><span class="mute" style="font-size:11px">${esc(x.days[0])}${x.days.length > 1 ? ' → ' + esc(x.days[x.days.length - 1]) : ''}</span></td><td>${peso(x.commission)}</td><td>${peso(x.topup)}</td><td>${peso(x.advance)}</td><td>${peso(x.deduction)}</td><td><b>${peso(x.net)}</b></td><td><button class="btn ghost sm" data-act="slipprint" data-i="${i}">Print payslip</button></td></tr>`).join('') || '<tr><td colspan="10" class="mute">No payroll paid in this period.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
 }
 function vProb() {
   const r = ui.prob, st = ui.pstatus || '', FLOW = ['SUBMITTED', 'ACKNOWLEDGED', 'IN PROGRESS', 'RESOLVED', 'CLOSED'];
@@ -242,6 +281,9 @@ const M = {
     form: () => [['name', 'Name', 'text'], ['branchId', 'Branch', 'select', { opts: BR(), def: ui.branch !== 'all' ? ui.branch : S.branches[0]?.id }],
       ['chairId', 'Chair', 'select', { opts: [['', '— none —'], ...S.chairs.map(c => [c.id, chName(c.id)])], req: false }], ['pct', 'Commission %', 'number', { def: 50 }],
       ['allowance', 'Daily allowance (₱)', 'number', { def: 0, hint: 'guaranteed minimum per day worked' }], ['photo', 'Photo', 'photo', { req: false }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
+  equipment: { cols: [['branchId', 'Branch', brName], ['name', 'Equipment'], ['category', 'Type'], ['serial', 'Serial / tag'], ['status', 'Status'], ['lastService', 'Last service'], ['nextService', 'Next service due'], ['active', 'Active', yn]], rows: () => S.equipment || [],
+    form: () => [['branchId', 'Branch', 'select', { opts: BR(), def: ui.branch !== 'all' ? ui.branch : S.branches[0]?.id }], ['name', 'Equipment name', 'text'], ['category', 'Type (e.g. Clippers, Chair, Aircon)', 'text', { req: false }], ['serial', 'Serial number or tag', 'text', { req: false }],
+      ['status', 'Condition', 'select', { opts: [['OK', 'OK'], ['Needs service', 'Needs service'], ['Under repair', 'Under repair'], ['Retired', 'Retired']] }], ['lastService', 'Last service date', 'date', { req: false }], ['nextService', 'Next service due', 'date', { req: false }], ['notes', 'Notes', 'text', { req: false }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   chairs: { cols: [['branchId', 'Branch', brName], ['name', 'Name'], ['sort', 'Order'], ['active', 'Active', yn]], rows: () => S.chairs,
     form: () => [['branchId', 'Branch', 'select', { opts: BR(), def: ui.branch !== 'all' ? ui.branch : S.branches[0]?.id }], ['name', 'Name', 'text'], ['sort', 'Order', 'number', { def: 1 }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   categories: { cols: [['name', 'Name'], ['type', 'Type']], rows: () => S.categories,
@@ -417,6 +459,23 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
+  if (act === 'lvreview') {
+    const action = d.a, note = action === 'approve' ? '' : prompt('Why is this leave rejected?'); if (note === null) return; if (action !== 'approve' && !String(note).trim()) return alert('A note is required.');
+    try { await api('PUT', '/api/leaves/' + d.id + '/review', { action, note }); await loadView(); render(); } catch (x) { alert(x.message); } return;
+  }
+  if (act === 'chksave') {
+    const ls = id => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
+    try { ui.chkTpl = await api('PUT', '/api/checklists/template', { opening: ls('chk-open'), closing: ls('chk-close') }); alert('Checklist tasks saved.'); render(); } catch (x) { alert(x.message); } return;
+  }
+  if (act === 'slipprint') {
+    const x = ui.slip.rows[+d.i], w = window.open('', '_blank'); if (!w) return alert('Allow pop-ups to print the payslip.');
+    const row = (l, v, b) => `<tr><td>${l}</td><td style="text-align:right">${b ? '<b>' + v + '</b>' : v}</td></tr>`;
+    w.document.write(`<!doctype html><title>Payslip</title><body style="font:14px Arial;max-width:420px;margin:24px auto"><div style="text-align:center"><img src="/logo.png" width="80" style="border-radius:50%"><h2 style="margin:6px 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
+      <p><b>${esc(x.staffName)}</b><br>${esc(x.branchName)}<br>Paid on ${esc(x.paidAt.slice(0, 10))} · Days: ${esc(x.days[0])}${x.days.length > 1 ? ' to ' + esc(x.days[x.days.length - 1]) : ''} (${x.days.length} day${x.days.length > 1 ? 's' : ''})</p>
+      <table style="width:100%;border-collapse:collapse">${row('Commission', peso(x.commission))}${row('Daily allowance top-up', peso(x.topup))}${row('Gross pay', peso(x.gross), 1)}${row('Less: advances taken during the day', '−' + peso(x.advance))}${x.deductionItems.map(d => row('Less: release pay installment ' + d.seq + ' (' + esc(d.type) + ')', '−' + peso(d.amount))).join('')}${row('NET PAY', peso(x.net), 1)}</table>
+      <p style="font-size:11px;color:#666;margin-top:24px">Prepared by ${esc(x.paidBy || '')}. Deductions were authorized in writing by the employee.</p><script>window.print()<\/script>`);
+    w.document.close(); return;
+  }
   if (act === 'probhist') {
     const x = ui.prob.rows.find(r => r.id === d.id);
     return openModal(`<h2 style="margin-top:0">${esc(x.category)} · ${esc(x.branchName)}</h2><p>${esc(x.description)}</p><h3>Comments</h3>${x.comments.map(c => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${esc(c.by)}</b> <span class="mute" style="font-size:12px">${new Date(c.at).toLocaleString('en-PH')}</span><br>${esc(c.text)}</div>`).join('') || '<p class="mute">No comments yet.</p>'}
@@ -551,6 +610,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.id === 'lstatus') { ui.lstatus = t.value; await loadView(); return render(); }
   if (t.id === 'pstatus') { ui.pstatus = t.value; await loadView(); return render(); }
   if (t.id === 'aflag') { ui.aflag = t.checked; await loadView(); return render(); }
   if (t.id === 'astatus') { ui.astatus = t.value; await loadView(); return render(); }
