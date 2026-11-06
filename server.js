@@ -8,6 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
+import { mountBH } from './bh-api.js';
 
 process.env.TZ ||= 'Asia/Manila';
 const PORT = +process.env.PORT || 3000;
@@ -803,10 +804,10 @@ const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
 });
-const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/': 'landing.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
+const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/brotherhood': 'bh.html', '/bh.js': 'bh.js', '/bh.webmanifest': 'bh.webmanifest', '/': 'landing.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace(/:\d+$/, '').replace(/^www\./, '');
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST);
-const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/logo.png', '/logo-sm.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/.well-known/assetlinks.json']);
+const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/brotherhood', '/bh.js', '/bh.webmanifest', '/logo.png', '/logo-sm.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/.well-known/assetlinks.json']);
 // App version = hash of every file the apps load. It changes on each deploy, which is what makes phones offer the "Update app" button.
 const APP_VERSION = (() => { const h = crypto.createHash('sha1'); for (const f of Object.values(STATIC).filter((v, i, a) => a.indexOf(v) === i && v !== 'sw.js').sort()) { try { h.update(fs.readFileSync(path.join(DIR, f))); } catch { } } return h.digest('hex').slice(0, 12); })();
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', jpg: 'image/jpeg', json: 'application/json' };
@@ -850,7 +851,7 @@ async function handle(req, res) {
   if (SITE_HOST || APP_HOST) {
     const host = normHost(req.headers['x-forwarded-host'] || req.headers.host), go = (h, to) => { res.writeHead(302, { Location: 'https://' + h + (to ?? req.url) }); return res.end(); };
     if (SITE_HOST && host === SITE_HOST) {
-      const ok = PUBLIC_PATHS.has(p) || p.startsWith('/api/public/') || /^\/img\/\w+$/.test(p) || p.startsWith('/site/');
+      const ok = PUBLIC_PATHS.has(p) || p.startsWith('/api/public/') || p.startsWith('/api/bh/') || /^\/img\/\w+$/.test(p) || p.startsWith('/site/');
       if (!ok) { if (APP_HOST && method === 'GET' && !p.startsWith('/api/')) return go(APP_HOST); return send(res, 404, { error: 'Not found' }); }
     } else if (APP_HOST && host === APP_HOST) {
       if (method === 'GET' && p === '/') { res.writeHead(302, { Location: '/backend' }); return res.end(); }
@@ -921,6 +922,7 @@ async function handle(req, res) {
     return send(res, 201, { ok: true, booking: { date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, staffPhoto: bk.staffPhoto, items: bk.items, total: bk.total, name: bk.customerName } });
   }
 
+  if (p.startsWith('/api/bh/')) return BH(req, res, p, method, q, ip);
   if (p === '/api/public/login-hint' && method === 'GET') return send(res, 200, { ownerNamed: !!ownerUser() });
   if (p === '/api/login' && method === 'POST') {
     const b = await readBody(req);
@@ -1852,6 +1854,8 @@ async function handle(req, res) {
   }
   bad(405, 'Method not allowed');
 }
+
+const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, addCol, toMin });
 
 http.createServer(async (req, res) => {
   if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);
