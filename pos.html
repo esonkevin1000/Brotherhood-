@@ -48,11 +48,22 @@ dialog::backdrop{background:#000b}
 .toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:var(--ok);color:#06210f;padding:10px 18px;border-radius:99px;font-weight:700;z-index:99}
 .toast.err{background:var(--bad);color:#fff}
 hr{border:0;border-top:1px solid var(--line);margin:12px 0}
+#print{display:none}
+.paper{background:#fff;color:#111;font:12px/1.4 'Courier New',monospace;padding:14px;border-radius:8px;max-width:340px;margin:0 auto}
+.paper .r{display:flex;justify-content:space-between;gap:10px}.paper .r span:last-child{text-align:right}.paper .c{text-align:center}.paper h3{text-align:center;margin:0 0 2px;font-size:14px}
+.paper hr{border-top:1px dashed #111;margin:8px 0}
+@media print{
+  body>*:not(#print){display:none!important}
+  #print{display:block}
+  #print .paper{max-width:none;width:72mm;padding:0;margin:0;border-radius:0}
+  @page{margin:4mm}
+}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <dialog id="sheet"></dialog>
+<div id="print"></div>
 <script src="/pos.js"></script>
 </body>
 </html>

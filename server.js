@@ -223,9 +223,11 @@ function zData(shift) {
   const cashSales = tender.Cash || 0;
   const cashIn = sum(mv.filter(m => m.kind === 'in'), m => m.amount);
   const cashOut = sum(mv.filter(m => m.kind !== 'in'), m => m.amount);
+  const items = {};
+  for (const o of os) for (const i of o.items) { const k = items[i.name] ||= { qty: 0, amount: 0 }; k.qty += i.qty; k.amount = r2(k.amount + i.price * i.qty); }
   return {
     transactions: os.length, gross: r2(sum(os, o => o.subtotal)), discounts: r2(sum(os, o => o.discountAmt)), net: r2(sum(os, o => o.total)),
-    tender, openingFloat: shift.openingFloat, cashSales, cashIn: r2(cashIn), cashOut: r2(cashOut),
+    tender, items, openingFloat: shift.openingFloat, cashSales, cashIn: r2(cashIn), cashOut: r2(cashOut),
     expected: r2(shift.openingFloat + cashSales + cashIn - cashOut)
   };
 }
@@ -679,6 +681,8 @@ async function handle(req, res) {
       counted = r2(counted);
     } else counted = r2(b.counted);
     z.counted = counted; z.remarks = String(b.remarks || '').slice(0, 300); z.shiftNo = s.no; z.variance = r2(counted - z.expected);
+    const brn = get('branches', s.branchId);
+    Object.assign(z, { cashier: s.cashierName, terminal: s.terminal, openedAt: s.openedAt, closedAt: nowISO(), branchName: brn?.name || '', address: brn?.address || '', phone: brn?.phone || '' });
     const no = (one('select max(no) m from zreadings where branchId=?', s.branchId).m || 0) + 1;
     run("update shifts set status='closed', closedAt=?, counted=? where id=?", nowISO(), counted, s.id);
     run('insert into zreadings(id,no,branchId,shiftId,businessDate,generatedAt,data) values(?,?,?,?,?,?,?)', uid(), no, s.branchId, s.id, s.businessDate, nowISO(), JSON.stringify(z));

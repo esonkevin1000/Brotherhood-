@@ -10,7 +10,7 @@ function toast(msg, err) { const t = document.createElement('div'); t.className 
 
 let token = ''; try { token = localStorage.getItem('bp.pos') || ''; } catch (e) { }
 const P = { me: null, branch: '', branches: [], boot: null, dash: null, queue: [], att: [], exp: null, shift: null, z: [], zs: [], view: 'dashboard', pin: '', err: '',
-  cart: { items: [], cust: null, name: '', barberId: '', mode: 'now', editing: null }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
+  cart: { items: [], cust: null, name: '', barberId: '', mode: 'later', editing: null }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 const br = () => P.me && P.me.role !== 'cashier' ? `branch=${P.branch}` : '';
 const withBr = u => { const b = br(); return b ? u + (u.includes('?') ? '&' : '?') + b : u; };
@@ -39,7 +39,7 @@ async function refresh() {
 }
 async function afterLogin(j) {
   token = j.token; try { localStorage.setItem('bp.pos', token); } catch (e) { }
-  const st = await api('GET', '/api/state'); P.me = st.me; P.branches = st.branches || [];
+  const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || [];
   if (P.me.role !== 'cashier') { P.branch = P.branches[0]?.id || ''; }
   await refresh();
 }
@@ -114,7 +114,7 @@ const VIEWS = {
   },
   reading() {
     const tabs = `<div class="seg"><button class="${P.tab === 'close' ? 'on' : ''}" data-a="tab" data-t="close">Closing Tender</button><button class="${P.tab === 'z' ? 'on' : ''}" data-a="tab" data-t="z">Z Reading</button></div>`;
-    if (P.tab === 'z') return tabs + (P.zs.map(z => `<div class="card"><div class="row between"><b>Z-${z.no}</b><span class="mute">${z.businessDate}</span></div><small class="mute">Shift #${z.data.shiftNo || ''} · ${hm(z.generatedAt)}</small><hr>
+    if (P.tab === 'z') return tabs + (P.zs.map((z, idx) => `<div class="card" data-a="viewz" data-i="${idx}" style="cursor:pointer"><div class="row between"><b>Z-${z.no}</b><span class="mute">${z.businessDate}</span></div><small class="mute">Shift #${z.data.shiftNo || ''} · ${hm(z.generatedAt)}</small><hr>
       <div class="row between"><span>Net sales</span><b>${peso(z.data.net)}</b></div><div class="row between"><span>Expected cash</span><span>${peso(z.data.expected)}</span></div><div class="row between"><span>Counted</span><span>${peso(z.data.counted)}</span></div>
       <div class="row between"><span>Variance</span><b style="color:${z.data.variance < 0 ? 'var(--bad)' : z.data.variance > 0 ? 'var(--info)' : 'var(--ok)'}">${peso(z.data.variance)}</b></div></div>`).join('') || '<p class="mute">No Z-readings yet.</p>');
     const c = P.cur; if (!c?.shift) return tabs + `<div class="card"><p>Walang bukas na shift.</p><button data-a="openshift">Open shift</button></div>`;
@@ -148,6 +148,12 @@ function freeBarbers(includeId) {
   const cut = cuttingIds();
   return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && (!cut.has(s.id) || s.id === includeId));
 }
+function seatSheet(id) {
+  const free = freeBarbers(), bs = P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && cuttingIds().has(s.id));
+  openSheet(`<div class="row between"><h2 style="margin:0">Available barbers</h2><button class="ghost sm" data-a="closesheet">Close</button></div><p class="mute">Pumili ng barber para sa customer.</p>
+    ${free.map(s => `<button class="block ghost" style="margin-bottom:8px;text-align:left" data-a="doseat" data-id="${id}" data-b="${s.id}"><b>${esc(s.name)}</b> <span class="mute">${esc(P.boot.chairs.find(c => c.id === s.chairId)?.name || '')}</span></button>`).join('') || '<p class="mute">Walang available na barber ngayon. Mag-time in sa Attendance, o hintayin matapos ang iba.</p>'}
+    ${bs.length ? `<p class="mute">Busy: ${bs.map(s => esc(s.name)).join(', ')}</p>` : ''}<button class="block ghost" data-a="closesheet">Wait in queue (assign later)</button>`);
+}
 function cartSheet() {
   const c = P.cart, hasSvc = c.items.some(i => i.type === 'service'), need = c.mode === 'now' && !c.editing;
   openSheet(`<div class="row between"><h2 style="margin:0">${c.editing ? 'Edit ticket' : c.mode === 'now' ? 'Checkout' : 'New walk-in ticket'}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
@@ -155,7 +161,7 @@ function cartSheet() {
     <div id="custhits">${P.custHits.map(h => `<div class="card" style="padding:10px;margin:6px 0" data-a="pickcust" data-id="${h.id}" data-n="${esc(h.name)}">${esc(h.name)} <small class="mute">${esc(h.phone || '')}</small></div>`).join('')}</div>
     <hr>${c.items.map((i, n) => `<div class="row between" style="padding:6px 0"><span>${esc(i.name)}<br><small class="mute">${peso(i.price)}</small></span><div class="qty"><button class="ghost sm" data-a="q" data-n="${n}" data-d="-1">−</button><b>${i.qty}</b><button class="ghost sm" data-a="q" data-n="${n}" data-d="1">＋</button></div></div>`).join('') || '<p class="mute">Cart is empty.</p>'}
     <div class="row between"><b>Total</b><b>${peso(cartTotal())}</b></div>
-    ${hasSvc ? `<label>Barber ${need ? '(required)' : '(optional — puwedeng i-assign mamaya)'}</label><select id="cartbarber"><option value="">— ${need ? 'choose barber' : 'assign later'} —</option>${freeBarbers(c.editBarber).map(s => `<option value="${s.id}" ${c.barberId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>${freeBarbers(c.editBarber).length ? '' : '<p class="mute">Walang available na barber (time in muna sa Attendance).</p>'}` : ''}
+    ${hasSvc && (need || c.editing) ? `<label>Barber ${need ? '(required)' : '(optional — puwedeng i-assign mamaya)'}</label><select id="cartbarber"><option value="">— ${need ? 'choose barber' : 'assign later'} —</option>${freeBarbers(c.editBarber).map(s => `<option value="${s.id}" ${c.barberId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>${freeBarbers(c.editBarber).length ? '' : '<p class="mute">Walang available na barber (time in muna sa Attendance).</p>'}` : ''}
     <p id="err" style="color:var(--bad)"></p>
     <button class="block" data-a="${c.editing ? 'saveticket' : c.mode === 'now' ? 'gopay' : 'mkticket'}" ${c.items.length ? '' : 'disabled'}>${c.editing ? 'Save ticket' : c.mode === 'now' ? 'Proceed to payment' : 'Create ticket'}</button>`);
 }
@@ -187,10 +193,38 @@ function renderPay(p) {
     <p id="err" style="color:var(--bad)"></p><button class="block ok" data-a="confirmpay" ${p.method === 'Cash' && change < 0 ? 'disabled' : ''}>✔ Confirm payment</button>`);
 }
 function receiptSheet(o) {
+  P.lastSale = o;
   openSheet(`<h2 style="margin:0 0 6px;color:var(--ok)">✔ Paid</h2><p class="mute">SI-${String(o.si).padStart(6, '0')} · #${String(o.no).padStart(3, '0')} · ${esc(o.customerName)}</p>
     ${o.items.map(i => `<div class="row between"><span>${esc(i.name)} ×${i.qty}</span><span>${peso(i.price * i.qty)}</span></div>`).join('')}<hr>
     ${o.discountAmt ? `<div class="row between"><span>${esc(o.discountName)}</span><span>−${peso(o.discountAmt)}</span></div>` : ''}<div class="row between"><b>Total</b><b>${peso(o.total)}</b></div>
-    ${o.change ? `<div class="row between"><span>Change</span><b style="color:var(--gold);font-size:20px">${peso(o.change)}</b></div>` : ''}<br><button class="block" data-a="closesheet">Done</button>`);
+    ${o.change ? `<div class="row between"><span>Change</span><b style="color:var(--gold);font-size:20px">${peso(o.change)}</b></div>` : ''}<br><div class="row"><button style="flex:1" data-a="printsale">🖨 Print</button><button class="ghost" style="flex:1" data-a="closesheet">Done</button></div>`);
+}
+
+// ---------- printable receipts ----------
+const dt = iso => iso ? new Date(iso).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+const R = (l, r, b) => `<div class="r"><span>${esc(l)}</span><span>${b ? '<b>' + esc(r) + '</b>' : esc(r)}</span></div>`;
+const head = b => `<h3>${esc((P.shop || 'Brotherhood').toUpperCase())} BARBERSHOP</h3><div class="c">${esc(b.branchName || '')}</div>${b.address ? `<div class="c">${esc(b.address)}</div>` : ''}${b.phone ? `<div class="c">${esc(b.phone)}</div>` : ''}`;
+function readingHtml(z) {
+  const tender = Object.entries(z.tender || {}), items = Object.entries(z.items || {}), dn = Object.entries(z.denoms || {}).sort((a, b) => b[0] - a[0]);
+  return head(z) + `<hr><div class="c"><b>SALES READING · Z-${esc(z.no)}</b></div><div class="c">${esc(z.businessDate || '')}</div><hr>`
+    + R('Terminal', z.terminal || '') + R('Shift #', z.shiftNo || '') + R('Cashier', z.cashier || '') + R('Opened', dt(z.openedAt)) + R('Closed', dt(z.closedAt)) + '<hr>'
+    + R('Transactions', z.transactions) + R('Gross sales', peso(z.gross)) + R('Discounts', '-' + peso(z.discounts)) + R('NET SALES', peso(z.net), true) + '<hr><b>TENDER</b>'
+    + (tender.map(([k, v]) => R(k, peso(v))).join('') || R('—', '')) + '<hr><b>ITEMS SOLD</b>' + (items.map(([k, v]) => R(k + ' x' + v.qty, peso(v.amount))).join('') || R('—', ''))
+    + '<hr><b>CASH DRAWER</b>' + R('Opening float', peso(z.openingFloat)) + R('+ Cash sales', peso(z.cashSales)) + R('+ Cash in', peso(z.cashIn)) + R('- Out / expenses', peso(z.cashOut))
+    + R('Expected cash', peso(z.expected), true) + R('Declared cash', peso(z.counted)) + R('VARIANCE', peso(z.variance), true)
+    + (dn.length ? '<hr><b>DENOMINATIONS</b>' + dn.map(([d, n]) => R('P' + d + ' x ' + n, peso(d * n))).join('') : '')
+    + (z.remarks ? `<hr>Remarks: ${esc(z.remarks)}` : '') + `<hr><div class="c">Printed ${esc(dt(new Date().toISOString()))}</div><div class="c">*** END OF SALES READING ***</div>`;
+}
+function saleHtml(o) {
+  const b = P.boot?.branch || {};
+  return head({ branchName: b.name, address: b.address, phone: b.phone }) + `<hr><div class="c"><b>SALES INVOICE</b></div><hr>` + R('SI No.', 'SI-' + String(o.si).padStart(6, '0')) + R('Ticket', '#' + String(o.no).padStart(3, '0'))
+    + R('Date', dt(o.paidAt)) + R('Customer', o.customerName) + R('Cashier', P.me?.name || '') + '<hr>'
+    + o.items.map(i => R(i.name + ' x' + i.qty, peso(i.price * i.qty))).join('') + '<hr>' + R('Subtotal', peso(o.subtotal)) + (o.discountAmt ? R(o.discountName || 'Discount', '-' + peso(o.discountAmt)) : '')
+    + R('TOTAL', peso(o.total), true) + o.tenders.map(t => R(t.method, peso(t.amount))).join('') + (o.change ? R('Change', peso(o.change)) : '') + `<hr><div class="c">Thank you! Balik ka ulit.</div>`;
+}
+function printHtml(html) { document.getElementById('print').innerHTML = `<div class="paper">${html}</div>`; setTimeout(() => window.print(), 50); }
+function showReading(z) {
+  P.lastZ = z; openSheet(`<div class="paper">${readingHtml(z)}</div><div class="row" style="margin-top:12px"><button style="flex:1" data-a="printz">🖨 Print Sales Reading</button><button class="ghost" style="flex:1" data-a="closesheet">Done</button></div>`);
 }
 
 // ---------- events ----------
@@ -215,12 +249,12 @@ document.addEventListener('click', async e => {
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
   if (a === 'q') { const it = P.cart.items[+d.n]; it.qty += +d.d; if (it.qty <= 0) P.cart.items.splice(+d.n, 1); cartSheet(); return render(); }
   if (a === 'pickcust') { P.cart.cust = { id: d.id, name: d.n }; P.custHits = []; return cartSheet(); }
-  if (a === 'canceledit') { P.cart = { items: [], cust: null, name: '', barberId: '', mode: 'now', editing: null }; return render(); }
+  if (a === 'canceledit') { P.cart = { items: [], cust: null, name: '', barberId: '', mode: 'later', editing: null }; return render(); }
   if (a === 'newticket') { P.cart = { items: [], cust: null, name: '', barberId: '', mode: 'later', editing: null }; P.view = 'pos'; await refresh(); return render(); }
   if (a === 'openshift') return openSheet(`<h2 style="margin-top:0">Open shift</h2><label>Opening float (₱)</label><input id="float" type="number" inputmode="decimal" value="0"><p id="err" style="color:var(--bad)"></p><div class="row"><button data-a="doopen">Open shift</button><button class="ghost" data-a="closesheet">Cancel</button></div>`);
   if (a === 'doopen') { const r = await guard(() => api('POST', '/api/shifts/open', { branchId: P.branch, terminal: 'Terminal 1', openingFloat: +document.getElementById('float').value || 0 })); if (r) { closeSheet(); toast('Shift opened'); await refresh(); } return; }
   if (a === 'mkticket' || a === 'saveticket' || a === 'gopay') {
-    const c = P.cart, err = document.getElementById('err');
+    const c = P.cart, err = document.getElementById('err'); let created = null;
     try {
       const barberId = document.getElementById('cartbarber')?.value || '';
       const custId = await ensureCustomer(), hasSvc = c.items.some(i => i.type === 'service');
@@ -231,17 +265,15 @@ document.addEventListener('click', async e => {
         await api('PUT', '/api/orders/' + c.editing, body); toast('Ticket saved');
       } else {
         const o = await api('POST', '/api/orders', { customerId: c.cust?.id || '', customerName: c.cust?.name || c.name, items, barberId: a === 'gopay' ? barberId : barberId });
-        if (a === 'gopay') { P.cart = { items: [], cust: null, name: '', barberId: '', mode: 'now', editing: null }; await refresh(); return paySheet(o); }
-        toast('Ticket #' + o.no + ' created');
+        if (a === 'gopay') { P.cart = { items: [], cust: null, name: '', barberId: '', mode: 'later', editing: null }; await refresh(); return paySheet(o); }
+        toast('Ticket #' + o.no + ' created'); created = o;
       }
-      P.cart = { items: [], cust: null, name: '', barberId: '', mode: 'now', editing: null }; closeSheet(); P.view = 'queue'; await refresh(); render();
+      P.cart = { items: [], cust: null, name: '', barberId: '', mode: 'later', editing: null }; closeSheet(); P.view = 'queue'; await refresh(); render();
+      if (created && !created.barberId && created.items.some(i => i.type === 'service')) seatSheet(created.id);
     } catch (x) { if (err) err.textContent = x.message; }
     return;
   }
-  if (a === 'seat') {
-    const free = freeBarbers();
-    return openSheet(`<h2 style="margin-top:0">Seat customer</h2>${free.map(s => `<button class="block ghost" style="margin-bottom:8px" data-a="doseat" data-id="${d.id}" data-b="${s.id}">${esc(s.name)}</button>`).join('') || '<p class="mute">Walang available na barber. Mag-time in muna sa Attendance, o hintayin matapos ang iba.</p>'}<button class="block ghost" data-a="closesheet">Cancel</button>`);
-  }
+  if (a === 'seat') return seatSheet(d.id);
   if (a === 'doseat') { const r = await guard(() => api('PUT', '/api/orders/' + d.id, { barberId: d.b })); closeSheet(); if (r) toast('Customer seated'); return refresh(); }
   if (a === 'checkout') { const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (o) paySheet(o); return; }
   if (a === 'editticket') {
@@ -268,6 +300,9 @@ document.addEventListener('click', async e => {
     if (r) { closeSheet(); toast('Expense saved'); await refresh(); } return;
   }
   if (a === 'att') { const r = await guard(() => api('POST', '/api/attendance', { staffId: d.id, action: d.x })); if (r) toast('Saved'); return refresh(); }
+  if (a === 'printz') return printHtml(readingHtml(P.lastZ));
+  if (a === 'printsale') return printHtml(saleHtml(P.lastSale));
+  if (a === 'viewz') { const z = P.zs[+d.i]; return showReading({ no: z.no, businessDate: z.businessDate, ...z.data }); }
   if (a === 'tab') { P.tab = d.t; return render(); }
   if (a === 'den') { P.denoms[d.d] = Math.max(0, (P.denoms[d.d] || 0) + +d.n); return render(); }
   if (a === 'cashmove') return openSheet(`<h2 style="margin-top:0">Cash ${d.k === 'in' ? 'in' : 'out'}</h2><label>Amount (₱)</label><input id="camt" type="number" inputmode="decimal"><label>Note</label><input id="cnote"><p id="err" style="color:var(--bad)"></p><div class="row"><button data-a="docash" data-k="${d.k}">Save</button><button class="ghost" data-a="closesheet">Cancel</button></div>`);
@@ -276,7 +311,7 @@ document.addEventListener('click', async e => {
     const counted = DENOMS.reduce((t, x) => t + x * (P.denoms[x] || 0), 0);
     if (!confirm(`Isara ang Shift #${P.cur.shift.no}? Declared cash: ${peso(counted)}`)) return;
     const z = await guard(() => api('POST', `/api/shifts/${P.cur.shift.id}/close`, { denoms: P.denoms, remarks: document.getElementById('remarks')?.value || '' }));
-    if (z) { P.denoms = {}; P.remarks = ''; P.tab = 'z'; openSheet(`<h2 style="margin-top:0;color:var(--ok)">Shift closed · Z-${z.no}</h2><div class="row between"><span>Net sales</span><b>${peso(z.net)}</b></div><div class="row between"><span>Expected cash</span><span>${peso(z.expected)}</span></div><div class="row between"><span>Counted</span><span>${peso(z.counted)}</span></div><div class="row between"><span>Variance</span><b style="color:${z.variance < 0 ? 'var(--bad)' : 'var(--ok)'}">${peso(z.variance)}</b></div><br><button class="block" data-a="closesheet">Done</button>`); await refresh(); }
+    if (z) { P.denoms = {}; P.remarks = ''; P.tab = 'z'; showReading({ businessDate: P.cur.shift.businessDate, ...z }); await refresh(); }
     return;
   }
 });
@@ -305,7 +340,7 @@ document.addEventListener('input', e => {
 sheet.addEventListener('close', () => render());
 
 (async () => {
-  if (token) { try { const st = await api('GET', '/api/state'); P.me = st.me; P.branches = st.branches || []; if (P.me.role !== 'cashier') P.branch = P.branches[0]?.id || ''; await refresh(); } catch (e) { token = ''; P.me = null; } }
+  if (token) { try { const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || []; if (P.me.role !== 'cashier') P.branch = P.branches[0]?.id || ''; await refresh(); } catch (e) { token = ''; P.me = null; } }
   render();
   setInterval(() => { if (P.me && !sheet.open && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) refresh(); }, 10000);
 })();
