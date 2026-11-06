@@ -60,6 +60,11 @@ addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'int
 addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
 db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
 addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
+addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
+db.exec(`
+create table if not exists id_photos(id text primary key, orderId text, branchId text, idType text, mime text, data blob, byId text, createdAt text);
+create index if not exists idp_order on id_photos(orderId);
+`);
 db.exec(`
 create table if not exists reviews(id text primary key, branchId text, staffId text, name text, rating integer, text text, createdAt text);
 create index if not exists reviews_branch on reviews(branchId, createdAt);
@@ -72,12 +77,12 @@ const COLS = {
   chairs: ['branchId', 'name', 'sort', 'active'],
   staff: ['name', 'branchId', 'chairId', 'pct', 'allowance', 'active', 'photo'],
   categories: ['name', 'type'],
-  items: ['name', 'categoryId', 'type', 'price', 'mins', 'active', 'photo', 'bookable', 'apptOnly'],
+  items: ['name', 'categoryId', 'type', 'price', 'mins', 'active', 'photo', 'bookable', 'apptOnly', 'needId'],
   discounts: ['name', 'kind', 'value', 'active'],
   customers: ['name', 'phone', 'email', 'notes', 'createdAt', 'preferredCut'],
   users: ['name', 'username', 'role', 'branchId', 'active']
 };
-const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly', 'defaultPct']);
+const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly', 'defaultPct', 'needId']);
 const uid = () => crypto.randomBytes(5).toString('hex');
 const pad = n => String(n).padStart(2, '0');
 const dOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -135,6 +140,7 @@ if (!one('select count(*) n from discounts').n) insert('discounts', { name: 'Stu
 run("update branches set closeTime='21:00' where closeTime is null or closeTime=''");
 run("update items set bookable=case when type='service' then 1 else 0 end where bookable is null");
 run("update items set apptOnly=case when name='Vip Compadre' then 1 else 0 end where apptOnly is null");
+run("update items set needId=case when lower(name)='buddy' then 1 else 0 end where needId is null");   // Buddy = Senior / PWD / Student discount service: needs a photo of the ID
 
 // ---------- backups (daily snapshot on the volume + owner download) ----------
 const BK_DIR = path.join(path.dirname(DB_FILE), 'backups');
@@ -203,9 +209,16 @@ function priceItems(lines) {
   for (const l of Array.isArray(lines) ? lines : []) {
     const it = get('items', l.itemId); if (!it || !it.active) bad(400, 'Unknown or inactive item');
     const qty = Math.max(1, Math.min(99, Math.floor(+l.qty || 1)));
-    out.push({ itemId: it.id, name: it.name, type: it.type, price: it.price, qty });
+    out.push({ itemId: it.id, name: it.name, type: it.type, price: it.price, qty, ...(it.needId ? { needId: 1 } : {}) });
   }
   return out;
+}
+// Items marked "requires ID" (Buddy: Senior / PWD / Student) can only be sold with a photo of the customer's ID attached to the ticket.
+const idNeeded = items => items.filter(i => i.needId).map(i => i.name);
+const ID_TYPES = ['Senior', 'PWD', 'Student'];
+function attachIdPhoto(orderId, branchId, photoId) {
+  const p = get('id_photos', String(photoId || '')); if (!p || (p.orderId && p.orderId !== orderId) || p.branchId !== branchId) bad(400, 'ID photo not found. Please take the photo again.');
+  run('update id_photos set orderId=? where id=?', orderId, p.id); run('update orders set idPhoto=?, idType=? where id=?', p.id, p.idType, orderId);
 }
 function totals(items, disc) {
   const subtotal = r2(sum(items, i => i.price * i.qty));
@@ -525,6 +538,7 @@ function dayRows(from, to, br) {
     return { ...a, commission, topup, advance, pay: r2(commission + topup), due: r2(commission + topup - advance), paidAt: paid.get(a.staffId + '|' + a.date) || null };
   });
 }
+const cashierName = id => (id && get('users', id)?.name) || '';
 const paidOrders = (from, to, br) =>
   all(`select o.*, b.name branchName, s.name barberName from orders o left join branches b on b.id=o.branchId left join staff s on s.id=o.barberId
     where o.status='paid' and o.date>=? and o.date<=?${br ? ' and o.branchId=?' : ''} order by o.paidAt desc`, ...(br ? [from, to, br] : [from, to])).map(parseOrder);
@@ -627,8 +641,10 @@ const REPORTS = {
     return {
       cards: [{ label: 'Total discounts', value: tot, t: 'peso' }, { label: 'Discounted transactions', value: os.length, t: 'num', sub: 'of ' + all_.length }, { label: 'Average discount', value: os.length ? tot / os.length : 0, t: 'peso' }],
       tables: [{ title: 'By discount type', cols: [['Discount'], ['Times applied', 'num'], ['Amount', 'peso']], rows: Object.entries(m).map(([k, r]) => [k, r.n, r.a]) },
-        { title: 'Discounted transactions', cols: [['SI / Order'], ['Date / Time'], ['Branch'], ['Discount'], ['Customer'], ['Gross', 'peso'], ['Discount', 'peso'], ['Net', 'peso']],
-          rows: os.map(o => ['SI-' + String(o.si).padStart(6, '0'), stamp(o.paidAt), o.branchName, o.discountName, o.customerName, o.subtotal, o.discountAmt, o.total]) }]
+        { title: 'Discounted transactions', cols: [['SI / Order'], ['Date / Time'], ['Branch'], ['Discount'], ['Customer'], ['Gross', 'peso'], ['Discount', 'peso'], ['Net', 'peso'], ['ID photo', 'idlink']],
+          rows: os.map(o => ['SI-' + String(o.si).padStart(6, '0'), stamp(o.paidAt), o.branchName, o.discountName, o.customerName, o.subtotal, o.discountAmt, o.total, o.idPhoto ? o.idType + '~' + o.idPhoto : '']) },
+        { title: 'Buddy / ID discount sales (with ID photo on file)', cols: [['SI / Order'], ['Date / Time'], ['Branch'], ['Customer'], ['Service'], ['Cashier'], ['ID photo', 'idlink']],
+          rows: all_.filter(o => o.idPhoto || o.items.some(i => i.needId)).map(o => ['SI-' + String(o.si).padStart(6, '0'), stamp(o.paidAt), o.branchName, o.customerName, o.items.map(i => i.name + (i.qty > 1 ? ' x' + i.qty : '')).join(', '), cashierName(o.cashierId), o.idPhoto ? o.idType + '~' + o.idPhoto : 'MISSING']) }]
     };
   },
   cash(f) {
@@ -655,7 +671,7 @@ const REPORTS = {
 };
 function csv(rep) {
   const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  return '﻿' + rep.tables.map(t => [t.title, t.cols.map(c => c[0]).join(','), ...t.rows.map(r => r.map(q).join(','))].join('\n')).join('\n\n');
+  return '﻿' + rep.tables.map(t => [t.title, t.cols.map(c => c[0]).join(','), ...t.rows.map(r => r.map((v, j) => q(t.cols[j] && t.cols[j][1] === 'idlink' ? String(v).split('~')[0] : v)).join(','))].join('\n')).join('\n\n');
 }
 
 // ---------- http ----------
@@ -815,6 +831,7 @@ async function handle(req, res) {
       if (/^\/api\/expenses$/.test(p)) return 'expenses';
       if (/^\/api\/bookings/.test(p)) return 'bookings';
       if (p === '/api/orders' && method === 'POST') return 'pos';
+      if (p === '/api/pos/idphoto') return 'pos';
       if (/^\/api\/orders\/\w+\/(pay|void)$/.test(p)) return 'pos';
       if (/^\/api\/orders\/\w+$/.test(p) && method === 'PUT') return ['pos', 'queue'];
       if (p === '/api/cash') return ['expenses', 'reading'];
@@ -947,6 +964,20 @@ async function handle(req, res) {
     const r = await sendEmail({ to, subject: 'TEST: ' + w.subject, html: w.html.replaceAll('{{UNSUB}}', unsub), text: w.text.replaceAll('{{UNSUB}}', unsub) });
     if (!r.ok) bad(502, r.error); log(me, 'test-email', 'settings', '', to); return send(res, 200, { ok: true });
   }
+  // ----- customer ID photos (Senior / PWD / Student discount). Private: only logged-in staff can view them, never via the public /img route. -----
+  if (p === '/api/pos/idphoto' && method === 'POST') {
+    const b = await readBody(req, 1_800_000), branchId = branchScope(me, b.branchId);
+    const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.data || '')); if (!m) bad(400, 'The ID photo must be a JPEG, PNG or WebP image');
+    const buf = Buffer.from(m[2], 'base64'); if (buf.length > 1_000_000) bad(413, 'The photo is too large. Please try again.');
+    const type = ID_TYPES.includes(b.idType) ? b.idType : bad(400, 'Choose the ID type: Senior, PWD or Student');
+    const id = uid() + uid(); run('insert into id_photos(id,orderId,branchId,idType,mime,data,byId,createdAt) values(?,?,?,?,?,?,?,?)', id, '', branchId, type, m[1], buf, me.id, nowISO());
+    log(me, 'id-photo', 'id_photos', id, type); return send(res, 201, { id, idType: type });
+  }
+  const idm = p.match(/^\/api\/idphoto\/(\w+)$/);
+  if (idm && method === 'GET') {
+    const ph = get('id_photos', idm[1]); if (!ph || (isBranchUser(me) && ph.branchId !== me.branchId)) bad(404, 'Not found');
+    res.writeHead(200, { 'Content-Type': ph.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(ph.data);
+  }
   // ----- photos (admin) -----
   if (p === '/api/upload' && method === 'POST') {
     adminOnly(); const b = await readBody(req, 1_500_000);
@@ -1068,11 +1099,14 @@ async function handle(req, res) {
     const b = await readBody(req), branchId = branchScope(me, b.branchId), t = todayStr();
     const cust = resolveCustomer(b, 'pos', branchId), name = cust.name.slice(0, 200); if (!name) bad(400, 'Customer name required');
     const items = priceItems(b.items), tt = totals(items, null);
+    const need = idNeeded(items); if (need.length && !b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is required for ${need.join(', ')}.`);
+    if (need.length) { const p = get('id_photos', String(b.idPhotoId)); if (!p || p.orderId || p.branchId !== branchId) bad(400, 'ID photo not found. Please take the photo again.'); }
     const no = (one('select max(no) m from orders where branchId=? and date=?', branchId, t).m || 0) + 1, ord = (one('select max(ord) m from orders').m || 0) + 1, id = uid();
     const dsc = b.discountId && get('discounts', String(b.discountId))?.active ? String(b.discountId) : '';
     run(`insert into orders(id,ord,no,branchId,date,customerId,customerName,barberId,chairId,status,items,subtotal,discountName,discountAmt,total,tenders,cashierId,createdAt,discountId)
       values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, cust.id, name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO(), dsc);
     const o = { id, ord, no, branchId };
+    if (need.length) attachIdPhoto(id, branchId, b.idPhotoId);
     if (b.barberId) { const a = checkAssign(o, b); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); }
     log(me, 'ticket', 'orders', id, `#${no} ${name}`);
     return send(res, 201, parseOrder(get('orders', id)));
@@ -1087,7 +1121,12 @@ async function handle(req, res) {
       if (!['waiting', 'in_chair'].includes(o.status)) bad(409, 'Order is already closed');
       const b = await readBody(req); const upd = {}; let queued = false;
       if (!admin && Object.keys(b).some(k => !['barberId', 'chairId'].includes(k))) needAny(me, 'pos');
-      if ('items' in b) { const items = priceItems(b.items), tt = totals(items, null); upd.items = JSON.stringify(items); upd.subtotal = tt.subtotal; upd.total = tt.total; }
+      if ('items' in b) {
+        const items = priceItems(b.items), tt = totals(items, null), need = idNeeded(items);
+        if (need.length && !o.idPhoto && !b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is required for ${need.join(', ')}.`);
+        upd.items = JSON.stringify(items); upd.subtotal = tt.subtotal; upd.total = tt.total;
+      }
+      if (b.idPhotoId) attachIdPhoto(o.id, o.branchId, b.idPhotoId);
       if ('discountId' in b) upd.discountId = b.discountId && get('discounts', String(b.discountId))?.active ? String(b.discountId) : '';
       if ('customer' in b || 'customerName' in b || 'customerId' in b) {
         const c = resolveCustomer({ ...b, customerName: b.customerName || o.customerName }, 'pos', o.branchId); upd.customerId = c.id; upd.customerName = c.name.slice(0, 200) || o.customerName;

@@ -205,7 +205,7 @@ function ticketHtml(o, actions) {
   const names = o.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ');
   const live = o.status === 'waiting' || o.status === 'in_chair';
   return `<div class="ticket ${o.status}"><div class="no">#${String(o.no).padStart(3, '0')}</div><div class="bd"><div class="row between" style="flex-wrap:nowrap"><b>${esc(o.customerName)}</b><span class="tag ${o.status}">${o.status === 'in_chair' ? 'In Chair' : o.status === 'paid' ? 'Paid' : o.status === 'void' ? 'Void' : o.barberId ? 'Queued' : 'Waiting'}</span></div>
-    <small>${names || 'No items yet'}</small><br><small>${o.barberName ? ic('scissors', 'sm') + ' ' + esc(o.barberName) + (o.chairId ? ' · ' + esc(chairName(o.chairId)) : '') : 'No barber yet'}${live ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>${o.cust ? `<br><small><span class="${tierCls(o.cust.tier)}">${o.cust.tier}</span> ${o.cust.visits} visit${o.cust.visits === 1 ? '' : 's'}${o.cust.preferredCut ? ' · ✂ ' + esc(o.cust.preferredCut) : ''}</small>` : ''}
+    <small>${names || 'No items yet'}</small>${o.idPhoto ? ` <a href="#" class="tag paid" data-a="viewticketid" data-id="${o.idPhoto}" style="margin-left:4px;text-decoration:none">${esc(o.idType || 'ID')} ID</a>` : ''}<br><small>${o.barberName ? ic('scissors', 'sm') + ' ' + esc(o.barberName) + (o.chairId ? ' · ' + esc(chairName(o.chairId)) : '') : 'No barber yet'}${live ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>${o.cust ? `<br><small><span class="${tierCls(o.cust.tier)}">${o.cust.tier}</span> ${o.cust.visits} visit${o.cust.visits === 1 ? '' : 's'}${o.cust.preferredCut ? ' · ✂ ' + esc(o.cust.preferredCut) : ''}</small>` : ''}
     ${actions === 'queue' && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ghost" data-a="gopl">Open at POS</button>`}</div>` : ''}
     ${actions === true && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div></div>`;
 }
@@ -234,11 +234,40 @@ async function naSlots() {
 const cartHasService = () => P.cart.items.some(i => i.type === 'service');
 const cartTotal = () => P.cart.items.reduce((s, i) => s + i.price * i.qty, 0);
 function discountOf() { const d = P.boot.discounts.find(x => x.id === P.cart.discountId); if (!d) return 0; const sub = cartTotal(); return Math.min(sub, d.kind === 'percent' ? sub * d.value / 100 : d.value); }
-function pushItem(it) { const c = P.cart.items.find(x => x.itemId === it.id); if (c) c.qty++; else P.cart.items.push({ itemId: it.id, name: it.name, type: it.type, price: it.price, qty: 1 }); }
+function pushItem(it) { const c = P.cart.items.find(x => x.itemId === it.id); if (c) c.qty++; else P.cart.items.push({ itemId: it.id, name: it.name, type: it.type, price: it.price, qty: 1, ...(it.needId ? { needId: 1 } : {}) }); }
+// Items marked "requires ID" (Buddy: Senior / PWD / Student) can only be added after a photo of the customer's ID is taken.
+async function resizeToJpeg(file, max = 1100) {
+  const bmp = await createImageBitmap(file), s = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.8);
+}
+const idOk = () => !!(P.cart.idPhotoId || P.cart.hasId);
+const cartNeedsId = () => P.cart.items.some(i => i.needId);
+function syncId() { if (!cartNeedsId() && !P.cart.editing) { P.cart.idPhotoId = ''; P.cart.idPreview = ''; P.cart.idType = ''; } }
+function idSheet(item) { P.idDraft = { item: item || null, type: P.cart.idType || '', data: '' }; idRender(); }
+function idRender() {
+  const dr = P.idDraft, name = dr.item ? dr.item.name : 'This order';
+  openSheet(`<div class="row between"><h2 style="margin:0">ID required</h2><button class="ghost sm" data-a="idcancel">Cancel</button></div>
+    <p class="mute" style="margin:8px 0 0">${esc(name)} is for <b>Senior, PWD and Student</b> customers. Take a clear photo of the customer's ID first. It cannot be added to the cart without it.</p>
+    <label>Type of ID</label><div class="chips" style="flex-wrap:wrap">${['Senior', 'PWD', 'Student'].map(x => `<button class="chip ${dr.type === x ? 'on' : ''}" data-a="idtype" data-t="${x}">${x}</button>`).join('')}</div>
+    <label>Photo of the ID</label><button type="button" class="ghost block" data-a="idpick">📷 ${dr.data ? 'Retake photo' : 'Take photo or choose from gallery'}</button>
+    <input type="file" id="idfile" accept="image/*" capture="environment" hidden>
+    ${dr.data ? `<img class="idprev" src="${dr.data}" alt="ID photo">` : '<p class="mute" style="font-size:12.5px;margin:8px 0 0">Make sure the name, photo and ID number are readable.</p>'}
+    <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
+    <button class="block" data-a="idgo" ${dr.type && dr.data ? '' : 'disabled'}>${dr.item ? 'Add ' + esc(dr.item.name) + ' to cart' : 'Save ID photo'}</button>`);
+}
+async function viewIdPhoto(id) {
+  try {
+    const r = await fetch('/api/idphoto/' + id, { headers: { Authorization: 'Bearer ' + token } }); if (!r.ok) throw new Error('Could not load the ID photo');
+    const url = URL.createObjectURL(await r.blob());
+    openSheet(`<div class="row between"><h2 style="margin:0">Customer ID</h2><button class="ghost sm" data-a="closesheet">Close</button></div><img class="idprev" src="${url}" alt="ID photo">`);
+  } catch (x) { toast(x.message, true); }
+}
 function addItem(id) {
   const it = P.boot.items.find(i => i.id === id);
   if (it.apptOnly && !P.cart.items.some(x => x.itemId === id)) { toast(it.name + ' is by appointment only. Use the Bookings tab.', true); return; }
   if (!cu().name.trim()) return customerSheet(it);   // first item: ask who the customer is (same as the other POS)
+  if (it.needId && !idOk()) return idSheet(it);
   pushItem(it); render();
 }
 function sessionsBoard() {
@@ -290,6 +319,7 @@ function cartInner() {
   const c = P.cart, u = cu(), card = u.card, sub = cartTotal(), disc = discountOf(), svc = cartHasService(), dn = P.boot.discounts.find(d => d.id === c.discountId), sess = !!c.editing;
   const sv = c.items.filter(i => i.type === 'service').map(i => i.name).join(', ');
   return `<div class="custchip"><span class="av">${esc(initials(u.name || '?'))}</span><div style="flex:1;min-width:0"><b>${esc(u.name || 'No customer specified')}</b><br><small class="mute">${sess && c.barber ? 'Barber: <b style="color:var(--info)">' + esc(c.barber) + '</b>' : card ? `${esc(card.tier)} · ${card.visits} visits` : (u.phone || u.email ? 'New customer · joins the directory' : 'Walk-in · not in the directory')}</small></div><button class="ghost sm" data-a="changecust">${ic('menu', 'sm')} Change</button></div>
+    ${(c.idPhotoId || c.hasId) ? `<div class="idchip">${c.idPreview ? `<img src="${c.idPreview}" alt="">` : ic('doc')}<div style="flex:1;min-width:0"><b>${esc(c.idType || 'ID')} ID on file</b><br><small class="mute">Photo attached to this ticket</small></div>${c.hasId && c.idPhoto && !c.idPhotoId ? '<button class="ghost sm" data-a="viewid">View</button>' : ''}<button class="ghost sm" data-a="idretake">Retake</button></div>` : ''}
     ${c.items.map((i, n) => `<div class="cartrow"><div style="flex:1;min-width:0"><b>${esc(i.name)}</b><br><small class="mute">${sess && c.barber && i.type === 'service' ? 'Barber: ' + esc(c.barber) + '<br>' : ''}${peso(i.price)} each</small></div><div class="qty"><button class="ghost sm" data-a="q" data-n="${n}" data-d="-1">−</button><b>${i.qty}</b><button class="ghost sm" data-a="q" data-n="${n}" data-d="1">＋</button></div><b style="min-width:76px;text-align:right">${peso(i.price * i.qty)}</b><button class="ghost sm" data-a="rm" data-n="${n}" aria-label="Remove">✕</button></div>`).join('') || `<div class="emptycart">${ic('cart')}<p>Cart is empty. Tap an item to add it.</p></div>`}
     <div class="totals"><div class="row between"><span class="mute">Subtotal</span><span>${peso(sub)}</span></div>${disc ? `<div class="row between"><span class="mute">Discount${dn ? ' (' + esc(dn.name) + ')' : ''}</span><span>−${peso(disc)}</span></div>` : ''}<div class="row between" style="margin-top:6px"><b>Total Amount:</b><b style="font-size:24px;font-family:Oswald;color:var(--info)">${peso(sub - disc)}</b></div></div>
     ${svc && !sess ? `<div class="notice"><b>Chair assignment required before payment</b><br><small>Service items (${esc(sv)}) must be charged later on a chair and barber. Settle the payment afterwards from the chair session.</small></div>` : ''}
@@ -454,19 +484,31 @@ document.addEventListener('click', async e => {
   if (a === 'cat') { P.cat = d.c; return render(); }
   if (a === 'add') return addItem(d.id);
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
-  if (a === 'rm') { P.cart.items.splice(+d.n, 1); cartSheet(); return render(); }
+  if (a === 'rm') { P.cart.items.splice(+d.n, 1); syncId(); cartSheet(); return render(); }
+  if (a === 'idpick') { document.getElementById('idfile')?.click(); return; }
+  if (a === 'idtype') { P.idDraft.type = d.t; return idRender(); }
+  if (a === 'idcancel') { P.idDraft = null; closeSheet(); return render(); }
+  if (a === 'idretake') { return idSheet(null); }
+  if (a === 'viewid') return viewIdPhoto(P.cart.idPhoto);
+  if (a === 'viewticketid') { e.preventDefault(); return viewIdPhoto(d.id); }
+  if (a === 'idgo') {
+    const dr = P.idDraft; if (!dr || !dr.type || !dr.data) return;
+    const r = await guard(() => api('POST', '/api/pos/idphoto', { data: dr.data, idType: dr.type, branchId: P.boot.branch.id })); if (!r) return;
+    P.cart.idPhotoId = r.id; P.cart.idType = dr.type; P.cart.idPreview = dr.data; P.cart.hasId = false;
+    if (dr.item) pushItem(dr.item); P.idDraft = null; closeSheet(); render(); toast('ID photo saved'); if (P.cart.editing && !dr.item) toast('ID photo will be saved with the order'); return;
+  }
   if (a === 'changecust') { P.fromCart = true; P.custHits = []; return customerSheet(null); }
   if (a === 'custdone') {
     const err = document.getElementById('err');
     try { customerPayload(); } catch (x) { if (err) err.textContent = x.message; return; }
-    if (P.pendingItem) { pushItem(P.pendingItem); P.pendingItem = null; }
+    if (P.pendingItem) { const it = P.pendingItem; P.pendingItem = null; if (it.needId && !idOk()) { P.fromCart = false; return idSheet(it); } pushItem(it); }
     const back = P.fromCart; P.fromCart = false; closeSheet(); render(); if (back) cartSheet(); return;
   }
   if (a === 'discount') return discountSheet();
   if (a === 'pickdisc') { P.cart.discountId = d.id; return cartSheet(); }
   if (a === 'cartback') return cartSheet();
   if (a === 'clearcart') { if (!confirm('Clear the cart and the customer?')) return; P.cart = freshCart(); closeSheet(); return render(); }
-  if (a === 'q') { const it = P.cart.items[+d.n]; it.qty += +d.d; if (it.qty <= 0) P.cart.items.splice(+d.n, 1); cartSheet(); return render(); }
+  if (a === 'q') { const it = P.cart.items[+d.n]; it.qty += +d.d; if (it.qty <= 0) P.cart.items.splice(+d.n, 1); syncId(); cartSheet(); return render(); }
   if (a === 'pickcust') { const h = P.custHits.find(x => x.id === d.id); P.custHits = []; if (h) { const u = cu(); u.name = h.name; u.phone = ''; u.email = ''; u.cut = ''; applyCard({ id: h.id, name: h.name, phone: h.phone, email: h.email, preferredCut: h.preferredCut, consent: h.consent, visits: h.visits, spent: h.spent, lastVisit: h.lastVisit, tier: h.tier, next: null }); } return customerSheet(P.pendingItem); }
   if (a === 'terms') { e.preventDefault(); return termsSheet('termsback'); }
   if (a === 'termsback') return customerSheet(P.pendingItem);
@@ -479,13 +521,13 @@ document.addEventListener('click', async e => {
     try {
       const customer = customerPayload(), items = c.items.map(i => ({ itemId: i.itemId, qty: i.qty }));
       if (c.editing) {
-        await api('PUT', '/api/orders/' + c.editing, { items, customer, discountId: c.discountId || '' });
+        await api('PUT', '/api/orders/' + c.editing, { items, customer, discountId: c.discountId || '', ...(c.idPhotoId ? { idPhotoId: c.idPhotoId } : {}) });
         const o = a === 'paynow' ? await api('GET', '/api/orders/' + c.editing) : null;
         P.cart = freshCart(); P.cart.mode = 'now'; closeSheet(); await refresh(); render();
         if (o) return paySheet(o);
         return toast('Order saved to chair session.');
       }
-      const o = await api('POST', '/api/orders', { customer, items, discountId: c.discountId || '' });
+      const o = await api('POST', '/api/orders', { customer, items, discountId: c.discountId || '', ...(c.idPhotoId ? { idPhotoId: c.idPhotoId } : {}) });
       P.cart = freshCart(); await refresh();
       if (a === 'paynow') { closeSheet(); render(); return paySheet(o); }
       toast('Ticket #' + o.no + ' created'); closeSheet(); render(); return assignSheet(o.id);
@@ -494,7 +536,7 @@ document.addEventListener('click', async e => {
   }
   if (a === 'opensession') {
     const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (!o) return;
-    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id, mode: 'later', barber: o.barberName || P.boot.staff.find(s => s.id === o.barberId)?.name || '' };
+    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id, mode: 'later', barber: o.barberName || P.boot.staff.find(s => s.id === o.barberId)?.name || '', hasId: !!o.idPhoto, idPhoto: o.idPhoto || '', idType: o.idType || '' };
     await refresh(); return render();
   }
   if (a === 'cancelsession') {
@@ -514,7 +556,7 @@ document.addEventListener('click', async e => {
     if (a === 'checkout') { const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (o) paySheet(o); return; }
   if (a === 'editticket') {
     const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (!o) return;
-    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id, mode: 'later', barber: o.barberName || '' };
+    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id, mode: 'later', barber: o.barberName || '', hasId: !!o.idPhoto, idPhoto: o.idPhoto || '', idType: o.idType || '' };
     P.view = 'pos'; await refresh(); render(); return cartSheet();
   }
   if (a === 'void') { const reason = prompt('Reason for void?'); if (reason === null) return; const r = await guard(() => api('POST', `/api/orders/${d.id}/void`, { reason })); if (r) toast('Ticket voided'); return refresh(); }
@@ -560,6 +602,7 @@ document.addEventListener('change', async e => {
   if (a === 'exprange') { P.expRange = t.value; return refresh(); }
   if (a === 'paydisc') { P.pay.disc = t.value; return renderPay(P.pay); }
   if (a === 'custtier') { P.cust.tier = t.value; refresh().then(render); return; }
+  if (t.id === 'idfile') { const file = t.files[0]; if (!file || !P.idDraft) return; try { P.idDraft.data = await resizeToJpeg(file, 1100); } catch (x) { return toast('Could not read that photo. Please try again.', true); } return idRender(); }
   if (t.id === 'cartbarber') P.cart.barberId = t.value;
   if (t.id === 'cu-consent') cu().consent = t.checked;
   if (t.dataset.den) { P.denoms[t.dataset.den] = Math.max(0, Math.floor(+t.value || 0)); return render(); }

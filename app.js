@@ -58,7 +58,7 @@ async function download(url, name) {
 const brName = id => S.branches.find(b => b.id === id)?.name || '';
 const chName = id => { const c = S.chairs.find(x => x.id === id); return c ? `${brName(c.branchId)} · ${c.name}` : ''; };
 const catName = id => S.categories.find(c => c.id === id)?.name || '';
-const fmtVal = (v, t) => t === 'peso' ? peso(v) : t === 'num' ? Number(v).toLocaleString('en-PH') : esc(v);
+const fmtVal = (v, t) => t === 'idlink' ? (v ? (String(v) === 'MISSING' ? '<b style="color:var(--bad)">MISSING</b>' : '<a href="#" data-act="viewid" data-id="' + esc(String(v).split('~')[1]) + '">' + esc(String(v).split('~')[0]) + ' · View ID</a>') : '') : t === 'peso' ? peso(v) : t === 'num' ? Number(v).toLocaleString('en-PH') : esc(v);
 
 // ---------- navigation ----------
 const ICONS = {
@@ -169,9 +169,9 @@ const M = {
     form: () => [['branchId', 'Branch', 'select', { opts: BR(), def: ui.branch !== 'all' ? ui.branch : S.branches[0]?.id }], ['name', 'Name', 'text'], ['sort', 'Order', 'number', { def: 1 }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   categories: { cols: [['name', 'Name'], ['type', 'Type']], rows: () => S.categories,
     form: () => [['name', 'Name', 'text'], ['type', 'Type', 'select', { opts: [['service', 'Service'], ['product', 'Product']] }]] },
-  items: { cols: [['photo', ''], ['name', 'Name'], ['categoryId', 'Category', catName], ['type', 'Type'], ['price', 'Price', peso], ['mins', 'Minutes'], ['bookable', 'Online', yn], ['apptOnly', 'Appt only', yn], ['active', 'Active', yn]], rows: () => S.items,
+  items: { cols: [['photo', ''], ['name', 'Name'], ['categoryId', 'Category', catName], ['type', 'Type'], ['price', 'Price', peso], ['mins', 'Minutes'], ['bookable', 'Online', yn], ['apptOnly', 'Appt only', yn], ['needId', 'Needs ID', yn], ['active', 'Active', yn]], rows: () => S.items,
     form: () => [['name', 'Name', 'text'], ['categoryId', 'Category', 'select', { opts: S.categories.map(c => [c.id, `${c.name} (${c.type})`]) }], ['type', 'Type', 'select', { opts: [['service', 'Service'], ['product', 'Product']] }],
-      ['price', 'Price (₱)', 'number'], ['mins', 'Minutes', 'number', { def: 30 }], ['photo', 'Photo', 'photo', { req: false }], ['bookable', 'Show on online booking', 'select', { opts: [[1, 'Yes'], [0, 'No']] }], ['apptOnly', 'Appointment only (not for walk-ins)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
+      ['price', 'Price (₱)', 'number'], ['mins', 'Minutes', 'number', { def: 30 }], ['photo', 'Photo', 'photo', { req: false }], ['bookable', 'Show on online booking', 'select', { opts: [[1, 'Yes'], [0, 'No']] }], ['apptOnly', 'Appointment only (not for walk-ins)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['needId', 'Requires a photo of the customer ID (Senior / PWD / Student)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   discounts: { cols: [['name', 'Name'], ['kind', 'Kind'], ['value', 'Value'], ['active', 'Active', yn]], rows: () => S.discounts,
     form: () => [['name', 'Name', 'text'], ['kind', 'Kind', 'select', { opts: [['amount', 'Amount off (₱)'], ['percent', 'Percent off (%)']] }], ['value', 'Value', 'number'], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   users: { cols: [['name', 'Name'], ['username', 'Username'], ['role', 'Role'], ['branchId', 'Branch', v => v ? brName(v) : 'All'], ['active', 'Active', yn]], rows: () => S.users,
@@ -311,6 +311,12 @@ function parseCSV(text) {
 }
 
 // ---------- events ----------
+async function showIdPhoto(id) {
+  try {
+    const r = await fetch('/api/idphoto/' + id, { headers: { Authorization: 'Bearer ' + token } }); if (!r.ok) throw new Error('Could not load the ID photo');
+    openModal('<h2 style="margin-top:0">Customer ID photo</h2><img src="' + URL.createObjectURL(await r.blob()) + '" alt="ID photo" style="width:100%;border-radius:14px;border:1px solid var(--line)"><p class="mute" style="font-size:12px">Private. Only the owner and staff of that branch can see this photo.</p><button class="btn ghost" data-act="close">Close</button>');
+  } catch (x) { alert(x.message); }
+}
 document.addEventListener('click', async e => {
   if (e.target.closest('[data-act="menu"]')) { const o = document.getElementById('nav').classList.toggle('open'); document.getElementById('scrim').classList.toggle('show', o); return; }
   const nb = e.target.closest('[data-view]');
@@ -318,6 +324,7 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
+  if (act === 'viewid') { e.preventDefault(); return showIdPhoto(d.id); }
   if (act === 'logout') { token = ''; try { localStorage.removeItem('bp.token'); } catch (x) { } loggedIn = false; return render(); }
   if (act === 'edit') return form(d.kind, d.id);
   if (act === 'del') { if (confirm('Are you sure?')) mut(async () => { const r = await api('DELETE', `/api/${d.kind}/${d.id}`); if (r.deactivated) alert('This record has history, so it was deactivated instead of deleted.'); }); return; }
