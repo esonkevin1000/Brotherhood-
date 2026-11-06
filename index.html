@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BarberPro</title>
+<style>
+:root{--bg:#121214;--panel:#1c1c20;--panel2:#26262c;--line:#33333b;--text:#f1f1f3;--mute:#9a9aa6;--gold:#d4a24c;--ok:#4cc38a;--bad:#ef5b5b;--info:#5b9bef}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
+nav{width:200px;background:var(--panel);border-right:1px solid var(--line);padding:16px 10px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;height:100vh}
+nav h1{font-size:18px;margin:0 8px 14px;color:var(--gold);letter-spacing:.5px}
+nav button{background:none;border:0;color:var(--mute);text-align:left;padding:10px 12px;border-radius:8px;font:inherit;cursor:pointer}
+nav button:hover{background:var(--panel2);color:var(--text)}
+nav button.on{background:var(--gold);color:#111;font-weight:600}
+main{flex:1;padding:24px;min-width:0}
+h2{margin:0 0 16px;font-size:22px}
+h3{margin:0 0 10px;font-size:15px;color:var(--gold)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.stat b{display:block;font-size:26px;margin-top:4px}
+.stat span{color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+button.btn,.btn{background:var(--gold);color:#111;border:0;padding:8px 14px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
+.btn.ghost{background:var(--panel2);color:var(--text)}
+.btn.bad{background:var(--bad);color:#fff}
+.btn.sm{padding:4px 10px;font-size:12px}
+input,select,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;font:inherit;width:100%}
+label{display:block;font-size:12px;color:var(--mute);margin:10px 0 4px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--mute);font-size:12px;text-transform:uppercase;font-weight:500}
+.sched{table-layout:fixed;min-width:560px}
+.sched td{height:34px;padding:2px 4px;border:1px solid var(--line);vertical-align:top}
+.sched th:first-child,.sched td:first-child{width:78px;color:var(--mute);font-size:12px}
+.sched td.free{cursor:pointer}
+.sched td.free:hover{background:#2c2a22}
+.appt{border-radius:6px;padding:4px 8px!important;cursor:pointer;font-size:12px}
+.appt.booked{background:#2a3a55;border-left:3px solid var(--info)!important}
+.appt.done{background:#1f3a2f;border-left:3px solid var(--ok)!important}
+.appt b{display:block}
+.tag{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;background:var(--panel2)}
+.tag.booked{color:var(--info)}.tag.done{color:var(--ok)}.tag.cancelled,.tag.noshow{color:var(--bad)}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:22px;width:min(480px,94vw);max-height:90vh;overflow:auto}
+dialog::backdrop{background:#000a}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:6px 12px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);cursor:pointer}
+.chip.on{background:var(--gold);color:#111;border-color:var(--gold)}
+.chk{display:flex;gap:8px;align-items:center;margin:4px 0;color:var(--text);font-size:14px}
+.chk input{width:auto}
+.mute{color:var(--mute)}
+.overflow{overflow-x:auto}
+.online{max-width:520px;margin:0 auto}
+@media(max-width:700px){body{flex-direction:column}nav{width:100%;height:auto;position:static;flex-direction:row;overflow-x:auto}nav h1{display:none}main{padding:14px}}
+</style>
+</head>
+<body>
+<nav id="nav"></nav>
+<main id="view"></main>
+<dialog id="modal"></dialog>
+<script src="app.js"></script>
+</body>
+</html>
