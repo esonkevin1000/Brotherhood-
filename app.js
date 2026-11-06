@@ -11,7 +11,7 @@ const ago = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso
 let S = { shop: 'Brotherhood', me: null, branches: [], chairs: [], staff: [], categories: [], items: [], discounts: [], users: [] };
 let token = ''; try { token = localStorage.getItem('bp.token') || ''; } catch (e) { }
 let loggedIn = false, loadErr = '';
-const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', bp: 'week', reviews: [], picked: new Set(), open: new Set() };
+const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', bp: 'week', reviews: [], picked: new Set(), navClosed: new Set((() => { try { return JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { return []; } })()) };
 const modal = document.getElementById('modal');
 const openModal = h => { modal.innerHTML = h; if (!modal.open) modal.showModal(); };
 const closeModal = () => modal.close();
@@ -119,16 +119,13 @@ function branchBar() {
   if (['settings', 'activity', 'inbox'].includes(ui.view)) return '';
   return `<div class="pagebar"><label for="branchsel2">Branch</label><select id="branchsel2"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></div>`;
 }
-// Collapsible block: closed by default, remembers what the user opened
-const fold = (key, title, inner, hint = '') => `<details class="fold" data-k="${esc(key)}" ${ui.open.has(key) ? 'open' : ''}><summary><b>${title}</b>${hint ? `<span class="mute">${hint}</span>` : ''}</summary><div class="fb">${inner}</div></details>`;
 
 // ---------- report rendering ----------
 function renderCards(cards) {
   return `<div class="grid">${cards.map(c => `<div class="card stat"><span>${esc(c.label)}</span><b>${fmtVal(c.value, c.t)}</b>${c.sub ? `<small class="mute">${esc(c.sub)}</small>` : ''}</div>`).join('')}</div>`;
 }
-function renderTable(t, folded) {
+function renderTable(t) {
   const sel = t.selectable;
-  if (folded) return fold('dash:' + t.title, esc(t.title), `<div class="overflow"><table><tr>${t.cols.map(c => `<th>${esc(c[0])}</th>`).join('')}</tr>${t.rows.map(r => `<tr>${r.map((v, j) => `<td>${fmtVal(v, t.cols[j][1])}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${t.cols.length}" class="mute">No data in this period.</td></tr>`}</table></div>`, t.rows.length + (t.rows.length === 1 ? ' row' : ' rows'));
   return `<div class="card overflow" style="margin-bottom:14px"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">${esc(t.title)}</h3>
     ${sel ? `<button class="btn sm" data-act="paid" ${ui.picked.size ? '' : 'disabled'}>✔ Mark as paid (${ui.picked.size})</button>` : ''}</div>
     <table><tr>${sel ? '<th></th>' : ''}${t.cols.map(c => `<th>${esc(c[0])}</th>`).join('')}</tr>
@@ -197,10 +194,11 @@ async function pollNotif(first) {
   } catch (e) { }
 }
 function navGroups(on) {
-  return NAVG.map(([h, list]) => `<div class="navh">${h}</div>` + list.map(([v, l, i]) => {
+  return NAVG.map(([h, list]) => { const closed = ui.navClosed.has(h); const body = list.map(([v, l, i]) => {
     if (!l) { const k = v.slice(v.indexOf(':') + 1), r = (v.startsWith('rep:') ? REPORTS : MGMT).find(x => x[0] === k); if (!r) return ''; l = r[1]; i = r[2]; }
     return `<button class="${on(v)}" data-view="${v}" style="width:100%">${ic(i)}${l.replace('&', '&amp;')}${badge(v)}</button>`;
-  }).join('')).join('');
+  }).join(''); const cnt = list.reduce((a, [v]) => a + (notifCount(v) || 0), 0);
+  return `<div class="navh" data-grp="${esc(h)}"><span class="car">${closed ? '▸' : '▾'}</span>${h.replace('&', '&amp;')}${closed && cnt ? `<span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${cnt}</span>` : ''}</div>` + (closed ? '' : body); }).join('');
 }
 function vLeave() {
   const r = ui.leave, st = ui.lstatus || '';
@@ -242,7 +240,7 @@ function vChkToday() {
   const c = ui.chkToday; if (!c) return '';
   const open = c.rows.flatMap(r => r.items.filter(i => !i.done).map(i => ({ br: r.branchName, kind: r.kind, text: i.text, note: i.note })));
   if (!c.missing.length && !open.length) return '<div class="card" style="margin-bottom:14px"><b style="color:var(--ok)">✔ All branch checklists are complete today.</b></div>';
-  return `<div class="foldwarn">${fold('dash:chk', '<span style="color:#b26a00">Incomplete checklists today</span>', `${c.missing.length ? `<p style="margin:0 0 6px"><b>Not submitted:</b> ${c.missing.map(m => esc(m.branchName) + ' (' + m.kind + ')').join(', ')}</p>` : ''}${open.length ? `<p style="margin:6px 0 2px"><b>Tasks not done:</b></p>${open.map(o => `<div style="padding:3px 0">✗ <b>${esc(o.br)}</b> · ${esc(o.kind)}: ${esc(o.text)} <span class="mute">${esc(o.note)}</span></div>`).join('')}` : ''}<button class="btn ghost sm" data-view="chk" style="margin-top:8px">Open checklists</button>`, (c.missing.length + open.length) + ' to check')}</div>`;
+  return `<div class="card" style="margin-bottom:14px;border-color:#f1d98a"><h3 style="color:#b26a00">Incomplete checklists today</h3>${c.missing.length ? `<p style="margin:0 0 6px"><b>Not submitted:</b> ${c.missing.map(m => esc(m.branchName) + ' (' + m.kind + ')').join(', ')}</p>` : ''}${open.length ? `<p style="margin:6px 0 2px"><b>Tasks not done:</b></p>${open.map(o => `<div style="padding:3px 0">✗ <b>${esc(o.br)}</b> · ${esc(o.kind)}: ${esc(o.text)} <span class="mute">${esc(o.note)}</span></div>`).join('')}` : ''}<button class="btn ghost sm" data-view="chk" style="margin-top:8px">Open checklists</button></div>`;
 }
 function vProb() {
   const r = ui.prob, st = ui.pstatus || '', FLOW = ['SUBMITTED', 'ACKNOWLEDGED', 'IN PROGRESS', 'RESOLVED', 'CLOSED'];
@@ -310,13 +308,13 @@ function vRemit() {
 }
 function vDashboard() {
   const l = ui.live, r = ui.rep;
-  const live = l ? fold('dash:live', '<span style="color:var(--ok)">●</span> Live floor', `<div class="grid">
+  const live = l ? `<h3 style="margin:0 0 8px"><span style="color:var(--ok)">●</span> Live floor</h3><div class="grid">
     <div class="card stat"><span>Barbers on duty</span><b>${l.onDuty}</b><small class="mute">${l.available} available · ${l.cutting} cutting</small></div>
     <div class="card stat"><span>Waiting in queue</span><b>${l.waiting}</b><small class="mute">${l.waiting ? 'Longest wait ' + l.longestWaitMin + ' min' : 'Nobody is waiting'}</small></div>
     <div class="card stat"><span>In the chair</span><b>${l.cutting}</b><small class="mute">Walk-ins being served now</small></div></div>
-    <div class="overflow"><h3>Live walk-in floor queue</h3><table><tr><th>Ticket</th><th>Customer</th><th>Branch</th><th>Services</th><th>Status</th><th>Barber</th><th>Time</th></tr>
-    ${l.queue.map(q => `<tr><td>#${String(q.no).padStart(3, '0')}</td><td>${esc(q.customer)}</td><td>${esc(q.branch)}</td><td>${esc(q.services)}</td><td><span class="tag ${q.status === 'in_chair' ? 'done' : 'booked'}">${q.status === 'in_chair' ? 'In Chair' : 'Waiting'}</span></td><td>${esc(q.barber)}</td><td>${ago(q.since)}</td></tr>`).join('') || '<tr><td colspan="7" class="mute">No customers on the floor right now.</td></tr>'}</table></div>`, `${l.onDuty} on duty · ${l.waiting} waiting · ${l.cutting} cutting`) : '';
-  return `<h2>Dashboard <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${vChkToday()}${live}${r ? fold('dash:sum', 'Summary', renderCards(r.cards), r.cards.slice(0, 3).map(c => esc(c.label) + ' ' + fmtVal(c.value, c.t)).join(' · ')) + r.tables.map(x => renderTable(x, true)).join('') : ''}<p class="mute" style="margin-top:6px">Tap a title to open it.</p>`;
+    <div class="card overflow" style="margin-bottom:14px"><h3>Live walk-in floor queue</h3><table><tr><th>Ticket</th><th>Customer</th><th>Branch</th><th>Services</th><th>Status</th><th>Barber</th><th>Time</th></tr>
+    ${l.queue.map(q => `<tr><td>#${String(q.no).padStart(3, '0')}</td><td>${esc(q.customer)}</td><td>${esc(q.branch)}</td><td>${esc(q.services)}</td><td><span class="tag ${q.status === 'in_chair' ? 'done' : 'booked'}">${q.status === 'in_chair' ? 'In Chair' : 'Waiting'}</span></td><td>${esc(q.barber)}</td><td>${ago(q.since)}</td></tr>`).join('') || '<tr><td colspan="7" class="mute">No customers on the floor right now.</td></tr>'}</table></div>` : '';
+  return `<h2>Dashboard <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${vChkToday()}${live}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : ''}`;
 }
 const vActivity = () => `<div class="row" style="justify-content:space-between;margin-bottom:14px"><h2 style="margin:0">Activity</h2>${S.me.role === 'owner' ? '<button class="btn" data-act="backup">⬇ Download backup</button>' : ''}</div>
   <p class="mute">The server saves an automatic daily backup. Also download one now and then and keep it somewhere else (Google Drive, a flash drive).</p>
@@ -505,6 +503,8 @@ async function showIdPhoto(id, base = '/api/idphoto/', heading = 'Customer ID ph
 }
 document.addEventListener('click', async e => {
   if (e.target.closest('[data-act="menu"]')) { const o = document.getElementById('nav').classList.toggle('open'); document.getElementById('scrim').classList.toggle('show', o); return; }
+  const gh = e.target.closest('[data-grp]');
+  if (gh) { const g = gh.dataset.grp; if (ui.navClosed.has(g)) ui.navClosed.delete(g); else ui.navClosed.add(g); try { localStorage.setItem('navClosed', JSON.stringify([...ui.navClosed])); } catch { } return render(); }
   const nb = e.target.closest('[data-view]');
   if (nb) { document.getElementById('nav').classList.remove('open'); document.getElementById('scrim').classList.remove('show'); ui.view = nb.dataset.view; ui.picked.clear(); if (ui.view === 'mgmt:customers') ui.cust.page = 1; render(); await loadView(); return render(); }
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
@@ -679,7 +679,6 @@ document.addEventListener('click', async e => {
     mut(() => api('POST', '/api/payroll/pay', { staffIds: [...ui.picked], to: ui.to })).then(() => ui.picked.clear());
   }
 });
-document.addEventListener('toggle', e => { const d = e.target; if (d && d.classList && d.classList.contains('fold')) { if (d.open) ui.open.add(d.dataset.k); else ui.open.delete(d.dataset.k); } }, true);
 document.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'lstatus') { ui.lstatus = t.value; await loadView(); return render(); }
