@@ -61,11 +61,15 @@ addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'int
 addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
 db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
 addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
-addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
+addCol('payroll_days', 'deduction', 'real'); addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
 db.exec(`
 create table if not exists expense_claims(id text primary key, branchId text, date text, category text, description text, amount real, method text, receipts text, noReceiptReason text,
   status text, submittedById text, submittedBy text, staffId text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text, cashMoveId text, history text);
 create index if not exists exp_date on expense_claims(date, branchId);
+create table if not exists advances(id text primary key, branchId text, staffId text, staffName text, type text, amount real, reason text, installments integer, status text, approvedAmt real, firstDue text,
+  releasedAmt real, method text, proofId text, requestedById text, requestedBy text, createdAt text, consentAt text, reviewedBy text, reviewedAt text, reviewNote text, releasedBy text, releasedAt text, cashMoveId text, history text);
+create table if not exists advance_deductions(id text primary key, advanceId text, staffId text, branchId text, amount real, dueDate text, status text, seq integer, appliedAt text, payrollDate text);
+create index if not exists advd_staff on advance_deductions(staffId, status, dueDate);
 create table if not exists files(id text primary key, kind text, branchId text, mime text, data blob, byId text, byName text, createdAt text);
 create table if not exists remittances(id text primary key, branchId text, date text, posSales real, cashSales real, gcashSales real, mayaSales real, otherSales real,
   cashIn real, cashExpenses real, expected real, actual real, variance real, responsible text, proofId text, notes text, status text, flagReason text,
@@ -193,7 +197,7 @@ function whoami(req) {
 const isAdmin = me => me.role === 'owner' || me.role === 'admin';
 const isBranchUser = me => me.role === 'cashier' || me.role === 'barber';
 // Which parts of the POS each role may open (editable by the owner in Settings → Access)
-const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance'];
+const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release'];
 const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue'] };
 const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber }; } catch { return { ...DEFAULT_PERMS }; } };
 const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
@@ -558,6 +562,12 @@ const movesIn = (from, to, br) => all(`select m.*, b.name branchName, s.name sta
 const stamp = iso => iso ? new Date(iso).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 const staffLabel = (sid) => get('staff', sid)?.name || '';
 
+// Scheduled release-pay deductions that fall due up to `to`. Whole installments only, and never more than the pay available, so net pay can never go below zero.
+function planDeductions(staffId, to, avail) {
+  const list = []; let tot = 0;
+  for (const d of all("select * from advance_deductions where staffId=? and status='SCHEDULED' and dueDate<=? order by dueDate, seq", staffId, to)) { if (r2(tot + d.amount) > r2(avail)) break; list.push(d); tot = r2(tot + d.amount); }
+  return { list, total: tot };
+}
 const REPORTS = {
   dashboard(f) {
     const t = todayStr(), w = dOf(new Date(Date.now() - 6 * 864e5));
@@ -615,14 +625,14 @@ const REPORTS = {
   payroll(f) {
     const days = dayRows('2000-01-01', f.to, f.br), unpaid = days.filter(d => !d.paidAt).sort((a, b) => a.date.localeCompare(b.date));
     const by = new Map(); for (const d of unpaid) { const r = by.get(d.staffId) || { d: [], name: d.name, branchId: d.branchId }; r.d.push(d); by.set(d.staffId, r); }
-    const rows = [...by.entries()].map(([id, r]) => ({ id, ...r, comm: sum(r.d, x => x.commission), top: sum(r.d, x => x.topup), adv: sum(r.d, x => x.advance) }));
+    const rows = [...by.entries()].map(([id, r]) => ({ id, ...r, comm: sum(r.d, x => x.commission), top: sum(r.d, x => x.topup), adv: sum(r.d, x => x.advance) })).map(r => ({ ...r, ded: planDeductions(r.id, f.to, r2(r.comm + r.top - r.adv)).total }));
     const paidP = all('select * from payroll_days where date>=? and date<=?', f.from, f.to);
     return {
-      cards: [{ label: 'Payroll due', value: sum(rows, r => r.comm + r.top - r.adv), t: 'peso', sub: 'Unpaid days up to ' + f.to }, { label: 'Barbers', value: rows.length, t: 'num' },
-        { label: 'Released during the day', value: sum(rows, r => r.adv), t: 'peso', sub: 'Already deducted' }, { label: 'Paid in period', value: sum(paidP, p => p.commission + p.topup - p.advance), t: 'peso' }],
+      cards: [{ label: 'Payroll due', value: sum(rows, r => r.comm + r.top - r.adv - r.ded), t: 'peso', sub: 'Unpaid days up to ' + f.to }, { label: 'Barbers', value: rows.length, t: 'num' },
+        { label: 'Released during the day', value: sum(rows, r => r.adv), t: 'peso', sub: 'Already deducted' }, { label: 'Paid in period', value: sum(paidP, p => p.commission + p.topup - p.advance - (p.deduction || 0)), t: 'peso' }],
       tables: [{
-        title: 'Payroll', selectable: true, ids: rows.map(r => r.id), cols: [['Barber'], ['Branch'], ['Days', 'num'], ['Dates'], ['Commission', 'peso'], ['Top-up', 'peso'], ['Advances', 'peso'], ['Net due', 'peso']],
-        rows: rows.map(r => [r.name, get('branches', r.branchId)?.name || '', r.d.length, r.d[0].date + (r.d.length > 1 ? ' → ' + r.d[r.d.length - 1].date : ''), r.comm, r.top, r.adv, r.comm + r.top - r.adv])
+        title: 'Payroll', selectable: true, ids: rows.map(r => r.id), cols: [['Barber'], ['Branch'], ['Days', 'num'], ['Dates'], ['Commission', 'peso'], ['Top-up', 'peso'], ['Advances', 'peso'], ['Release pay deductions', 'peso'], ['Net due', 'peso']],
+        rows: rows.map(r => [r.name, get('branches', r.branchId)?.name || '', r.d.length, r.d[0].date + (r.d.length > 1 ? ' → ' + r.d[r.d.length - 1].date : ''), r.comm, r.top, r.adv, r.ded, r.comm + r.top - r.adv - r.ded])
       }]
     };
   },
@@ -845,6 +855,7 @@ async function handle(req, res) {
       if (p === '/api/orders' && method === 'POST') return 'pos';
       if (p === '/api/pos/idphoto') return 'pos';
       if (/^\/api\/remittances/.test(p)) return 'remittance';
+      if (/^\/api\/advances/.test(p)) return 'release';
       if (/^\/api\/files/.test(p)) return ['remittance', 'expenses', 'pos'];
       if (/^\/api\/orders\/\w+\/(pay|void)$/.test(p)) return 'pos';
       if (/^\/api\/orders\/\w+$/.test(p) && method === 'PUT') return ['pos', 'queue'];
@@ -1057,6 +1068,61 @@ async function handle(req, res) {
     run('update expense_claims set status=?, reviewedBy=?, reviewedAt=?, reviewNote=?, history=? where id=?', act, me.name, nowISO(), note, JSON.stringify(hist), x.id);
     log(me, 'expense-' + b.action, 'expense_claims', x.id, note); return send(res, 200, expView(get('expense_claims', x.id)));
   }
+  // ----- release pay / cash advance (deducted automatically in payroll) -----
+  const ADV_TYPES = ['Cash Advance', 'Salary Advance', 'Partial Salary Release', 'Emergency Assistance', 'Other Authorized Deduction'], REL_METHODS = ['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Other'];
+  const advView = a => { const ds = all('select * from advance_deductions where advanceId=? order by dueDate, rowid', a.id); return { ...a, history: jp(a.history), branchName: get('branches', a.branchId)?.name || '', deductions: ds, balance: r2(sum(ds.filter(d => d.status === 'SCHEDULED'), d => d.amount)), deducted: r2(sum(ds.filter(d => d.status === 'APPLIED'), d => d.amount)) }; };
+  const staffBalance = sid => { const ds = all("select * from advance_deductions where staffId=? and status in ('SCHEDULED','APPLIED') order by dueDate", sid); return { balance: r2(sum(ds.filter(d => d.status === 'SCHEDULED'), d => d.amount)), deducted: r2(sum(ds.filter(d => d.status === 'APPLIED'), d => d.amount)), deductions: ds }; };
+  if (p === '/api/advances/options' && method === 'GET') return send(res, 200, { types: ADV_TYPES, methods: REL_METHODS });
+  if (p === '/api/advances/balance' && method === 'GET') {
+    const s = get('staff', String(q.staffId || '')); if (!s || (isBranchUser(me) && s.branchId !== me.branchId)) bad(404, 'Employee not found');
+    return send(res, 200, { staffId: s.id, name: s.name, ...staffBalance(s.id) });
+  }
+  if (p === '/api/advances' && method === 'GET') {
+    const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = ['REQUESTED', 'APPROVED', 'RELEASED', 'REJECTED', 'CANCELLED'].includes(q.status) ? q.status : null;
+    const rows = all(`select * from advances where 1=1${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''}${q.staffId ? ' and staffId=?' : ''} order by createdAt desc limit 500`, ...(br ? [br] : []), ...(st ? [st] : []), ...(q.staffId ? [String(q.staffId)] : [])).map(advView);
+    return send(res, 200, { rows, outstanding: r2(sum(rows, r => r.balance)) });
+  }
+  if (p === '/api/advances' && method === 'POST') {
+    const b = await readBody(req), branchId = branchScope(me, b.branchId), s = get('staff', String(b.staffId || '')); if (!s || s.branchId !== branchId) bad(400, 'Choose the employee');
+    const type = ADV_TYPES.includes(b.type) ? b.type : bad(400, 'Choose the request type'), amount = r2(b.amount); if (!(amount > 0)) bad(400, 'Enter the requested amount');
+    const reason = String(b.reason || '').trim().slice(0, 300); if (reason.length < 5) bad(400, 'Enter the reason for the request');
+    const inst = Math.max(1, Math.min(12, Math.floor(+b.installments || 1)));
+    if (b.consent !== true) bad(400, 'The employee must agree in writing to the deduction from their wages. Tick the confirmation box.');
+    const id = uid(); run('insert into advances(id,branchId,staffId,staffName,type,amount,reason,installments,status,requestedById,requestedBy,createdAt,consentAt,history) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      id, branchId, s.id, s.name, type, amount, reason, inst, 'REQUESTED', me.id, me.name, nowISO(), nowISO(), JSON.stringify([{ at: nowISO(), by: me.name, action: 'REQUESTED', note: `${type} ₱${amount} in ${inst} installment(s). Employee agreed to the deduction.` }]));
+    log(me, 'advance-request', 'advances', id, `${s.name} ${type} ${amount}`); return send(res, 201, advView(get('advances', id)));
+  }
+  const avm = p.match(/^\/api\/advances\/(\w+)\/(approve|reject|release|cancel)$/);
+  if (avm && method === 'PUT') {
+    adminOnly(); const a = get('advances', avm[1]); if (!a) bad(404, 'Not found'); const b = await readBody(req), note = String(b.note || '').trim().slice(0, 300), hist = jp(a.history), act = avm[2];
+    const push = (action, n) => hist.push({ at: nowISO(), by: me.name, action, note: n });
+    if (act === 'cancel') { if (!['REQUESTED', 'APPROVED'].includes(a.status)) bad(409, 'Only requests that are not yet released can be cancelled'); push('CANCELLED', note); run("update advances set status='CANCELLED', history=? where id=?", JSON.stringify(hist), a.id); }
+    else if (act === 'reject') { if (a.status !== 'REQUESTED') bad(409, 'This request was already handled'); if (!note) bad(400, 'A note is required to reject a request'); push('REJECTED', note); run("update advances set status='REJECTED', reviewedBy=?, reviewedAt=?, reviewNote=?, history=? where id=?", me.name, nowISO(), note, JSON.stringify(hist), a.id); }
+    else if (act === 'approve') {
+      if (a.status !== 'REQUESTED') bad(409, 'This request was already handled');
+      const amt = r2(b.approvedAmt ?? a.amount); if (!(amt > 0) || amt > a.amount) bad(400, 'The approved amount must be more than 0 and not more than the requested amount');
+      const inst = Math.max(1, Math.min(12, Math.floor(+b.installments || a.installments))), first = /^\d{4}-\d{2}-\d{2}$/.test(b.firstDue || '') ? b.firstDue : todayStr();
+      if (b.consent !== true) bad(400, 'Confirm that you have the employee\'s written authorization to deduct from their wages');
+      push('APPROVED', `₱${amt} in ${inst} installment(s) starting ${first}. ${note}`.trim());
+      run("update advances set status='APPROVED', approvedAmt=?, installments=?, firstDue=?, reviewedBy=?, reviewedAt=?, reviewNote=?, history=? where id=?", amt, inst, first, me.name, nowISO(), note, JSON.stringify(hist), a.id);
+    } else {   // release: money actually handed over -> only now deductions are scheduled
+      if (a.status !== 'APPROVED') bad(409, 'Only approved requests can be released');
+      const deductionOnly = a.type === 'Other Authorized Deduction', amt = deductionOnly ? a.approvedAmt : r2(b.releasedAmt); if (!(amt > 0) || amt > a.approvedAmt) bad(400, 'The released amount must be more than 0 and not more than the approved amount');
+      const method2 = deductionOnly ? 'N/A' : (REL_METHODS.includes(b.method) ? b.method : bad(400, 'Choose how the money was released'));
+      let proof = ''; if (!deductionOnly) { const f = get('files', String(b.proofId || '')); if (!f || f.branchId !== a.branchId) bad(400, 'Upload a photo as proof of release first'); proof = f.id; }
+      const n = a.installments, each = r2(amt / n); let cm = '';
+      const sh = method2 === 'Cash' ? openShift(a.branchId) : null;
+      if (sh) { cm = uid(); run('insert into cash_moves(id,shiftId,branchId,date,kind,amount,note,staffId,ts,by) values(?,?,?,?,?,?,?,?,?,?)', cm, sh.id, a.branchId, todayStr(), 'out', amt, `Release pay: ${a.staffName} (${a.type})`.slice(0, 200), '', nowISO(), me.name); }
+      db.exec('begin');
+      try {
+        for (let i = 0; i < n; i++) { const d = new Date(a.firstDue + 'T00:00'); d.setDate(d.getDate() + 15 * i); run("insert into advance_deductions(id,advanceId,staffId,branchId,amount,dueDate,status,seq) values(?,?,?,?,?,?,'SCHEDULED',?)", uid(), a.id, a.staffId, a.branchId, i === n - 1 ? r2(amt - each * (n - 1)) : each, dOf(d), i + 1); }
+        push('RELEASED', `₱${amt} via ${method2}. ${note}`.trim());
+        run("update advances set status='RELEASED', releasedAmt=?, method=?, proofId=?, releasedBy=?, releasedAt=?, cashMoveId=?, history=? where id=?", amt, method2, proof, me.name, nowISO(), cm, JSON.stringify(hist), a.id);
+        db.exec('commit');
+      } catch (e) { db.exec('rollback'); throw e; }
+    }
+    log(me, 'advance-' + act, 'advances', a.id, note); return send(res, 200, advView(get('advances', a.id)));
+  }
   // ----- daily sales remittance (separate from expenses) -----
   const remitCalc = (branchId, date) => {
     const os = all("select * from orders where branchId=? and date=? and status='paid'", branchId, date).map(parseOrder), tender = {};
@@ -1153,10 +1219,18 @@ async function handle(req, res) {
   }
   if (p === '/api/payroll/pay' && method === 'POST') {
     adminOnly(); const b = await readBody(req), to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : todayStr(); let n = 0;
-    for (const sid of Array.isArray(b.staffIds) ? b.staffIds : [])
-      for (const d of dayRows('2000-01-01', to, null).filter(x => x.staffId === sid && !x.paidAt)) {
-        run('insert or ignore into payroll_days(staffId,date,branchId,commission,topup,advance,paidAt,paidBy) values(?,?,?,?,?,?,?,?)', sid, d.date, d.branchId, d.commission, d.topup, d.advance, nowISO(), me.name); n++;
-      }
+    for (const sid of Array.isArray(b.staffIds) ? b.staffIds : []) {
+      const days = dayRows('2000-01-01', to, null).filter(x => x.staffId === sid && !x.paidAt).sort((x, y) => x.date.localeCompare(y.date)); if (!days.length) continue;
+      const plan = planDeductions(sid, to, r2(sum(days, x => x.commission + x.topup - x.advance))), last = days[days.length - 1].date;
+      db.exec('begin');
+      try {
+        for (const d of days) { run('insert or ignore into payroll_days(staffId,date,branchId,commission,topup,advance,paidAt,paidBy) values(?,?,?,?,?,?,?,?)', sid, d.date, d.branchId, d.commission, d.topup, d.advance, nowISO(), me.name); n++; }
+        let applied = 0;
+        for (const d of plan.list) { if (Number(run("update advance_deductions set status='APPLIED', appliedAt=?, payrollDate=? where id=? and status='SCHEDULED'", nowISO(), last, d.id).changes) === 1) applied = r2(applied + d.amount); }
+        if (applied) run('update payroll_days set deduction=? where staffId=? and date=?', applied, sid, last);
+        db.exec('commit');
+      } catch (e) { db.exec('rollback'); throw e; }
+    }
     log(me, 'payroll-paid', 'payroll', '', `${n} barber-days up to ${to}`);
     return send(res, 200, { ok: true, days: n });
   }

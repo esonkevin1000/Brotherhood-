@@ -30,6 +30,7 @@ async function loadView() {
     if (v === 'dashboard') { [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}&branch=${ui.branch}`)); }
+    else if (v === 'adv') ui.adv = await api('GET', `/api/advances?branch=${ui.branch}&status=${ui.astatus || ''}`);
     else if (v === 'exp') ui.exp = await api('GET', `/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}`);
     else if (v === 'remit') ui.remit = await api('GET', `/api/remittances?${qs()}&status=${ui.rstatus || ''}`);
     else if (v === 'activity') ui.audit = await api('GET', '/api/audit');
@@ -78,7 +79,7 @@ const ICONS = {
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
@@ -105,13 +106,14 @@ function render() {
     <button class="${on('reviews')}" data-view="reviews">${ic('star')}Reviews</button>
     <button class="${on('remit')}" data-view="remit">${ic('coin')}Daily Remittance</button>
     <button class="${on('exp')}" data-view="exp">${ic('wallet')}Expenses &amp; Receipts</button>
+    <button class="${on('adv')}" data-view="adv">${ic('tag')}Release Pay</button>
     <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
     <button class="${on('settings')}" data-view="settings">${ic('gear')}Settings</button>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).trim();
-  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -145,6 +147,18 @@ function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
   return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
+}
+function vAdv() {
+  const r = ui.adv, st = ui.astatus || '';
+  const tag = s => ({ REQUESTED: ['#b26a00', 'rgba(245,166,35,.16)'], APPROVED: ['#2b7de9', 'rgba(90,167,255,.13)'], RELEASED: ['var(--ok)', 'rgba(62,207,142,.13)'], REJECTED: ['var(--bad)', 'rgba(255,93,108,.13)'], CANCELLED: ['#6b6b76', '#ececef'] }[s]);
+  const sel = `<select id="astatus" style="width:auto"><option value="">All statuses</option>${['REQUESTED', 'APPROVED', 'RELEASED', 'REJECTED', 'CANCELLED'].map(s => `<option ${st === s ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
+  return `<h2>Release Pay &amp; Cash Advances <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2><div class="row" style="margin-bottom:14px">${sel}</div>
+  ${r ? `<div class="grid"><div class="card stat"><span>Outstanding balance</span><b>${peso(r.outstanding)}</b><small class="mute">Scheduled to be deducted in payroll</small></div><div class="card stat"><span>Waiting for approval</span><b>${r.rows.filter(a => a.status === 'REQUESTED').length}</b></div><div class="card stat"><span>To release</span><b>${r.rows.filter(a => a.status === 'APPROVED').length}</b></div></div>
+  <div class="card overflow"><table><tr><th>Date</th><th>Employee</th><th>Branch</th><th>Type</th><th>Requested</th><th>Approved</th><th>Released</th><th>Installments</th><th>Balance</th><th>Reason</th><th>Status</th><th></th></tr>
+  ${r.rows.map(a => { const [c, bg] = tag(a.status); return `<tr><td>${esc(a.createdAt.slice(0, 10))}</td><td><b>${esc(a.staffName)}</b><br><span class="mute" style="font-size:11px">by ${esc(a.requestedBy)}</span></td><td>${esc(a.branchName)}</td><td>${esc(a.type)}</td><td>${peso(a.amount)}</td><td>${a.approvedAmt ? peso(a.approvedAmt) : '—'}</td><td>${a.releasedAmt ? peso(a.releasedAmt) + '<br><span class="mute" style="font-size:11px">' + esc(a.method) + '</span>' : '—'}</td><td>${a.installments}</td><td><b>${a.status === 'RELEASED' ? peso(a.balance) : '—'}</b></td>
+    <td style="white-space:normal;min-width:150px">${esc(a.reason)}</td><td><span class="tag" style="color:${c};background:${bg}">${a.status}</span></td>
+    <td style="white-space:normal;min-width:220px"><button class="btn ghost sm" data-act="advhist" data-id="${a.id}">Details</button> ${a.proofId ? `<button class="btn ghost sm" data-act="viewfiles" data-ids="${a.proofId}">Proof</button>` : ''} ${a.status === 'REQUESTED' ? `<button class="btn sm" data-act="advapprove" data-id="${a.id}">Approve</button> <button class="btn bad sm" data-act="advreject" data-id="${a.id}">Reject</button>` : ''}${a.status === 'APPROVED' ? `<button class="btn sm" data-act="advrelease" data-id="${a.id}">Release</button> <button class="btn ghost sm" data-act="advcancel" data-id="${a.id}">Cancel</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="12" class="mute">No requests yet.</td></tr>'}</table></div>
+  <p class="mute" style="font-size:12.5px;margin-top:10px">Released amounts are deducted automatically in <b>Payroll</b> when you mark a barber as paid, one installment per payroll, and never below zero pay. Deductions need the employee's written authorization.</p>` : '<p class="mute">Loading…</p>'}`;
 }
 function vExp() {
   const r = ui.exp, st = ui.estatus || '', ct = ui.ecat || '', cats = ['Supplies', 'Utilities', 'Repairs & Maintenance', 'Food & Meals', 'Transportation', 'Marketing', 'Equipment', 'Staff Welfare', 'Other'];
@@ -366,6 +380,44 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
+  if (act === 'advhist') {
+    const a = ui.adv.rows.find(r => r.id === d.id);
+    return openModal(`<h2 style="margin-top:0">${esc(a.staffName)} · ${esc(a.type)}</h2><p class="mute">${esc(a.reason)}</p>
+      <h3>Deduction schedule</h3>${a.deductions.map(x => `<div class="row" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span>#${x.seq} · ${esc(x.dueDate)}</span><b>${peso(x.amount)}</b><span class="tag">${x.status === 'APPLIED' ? 'Deducted ' + esc((x.appliedAt || '').slice(0, 10)) : 'Scheduled'}</span></div>`).join('') || '<p class="mute">Not released yet, so nothing is scheduled.</p>'}
+      <h3 style="margin-top:14px">History</h3>${a.history.map(h => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>${esc(h.action)}</b> · ${esc(h.by)} <span class="mute" style="font-size:12px">${new Date(h.at).toLocaleString('en-PH')}</span>${h.note ? '<br>' + esc(h.note) : ''}</div>`).join('')}<br><button class="btn ghost" data-act="close">Close</button>`);
+  }
+  if (act === 'advapprove') {
+    const a = ui.adv.rows.find(r => r.id === d.id);
+    return openModal(`<h2 style="margin-top:0">Approve request</h2><p>${esc(a.staffName)} · ${esc(a.type)} · requested <b>${peso(a.amount)}</b><br><span class="mute">${esc(a.reason)}</span></p>
+      <label>Approved amount (₱)</label><input id="ap-amt" type="number" value="${a.amount}"><label>Installments (one per payroll)</label><input id="ap-inst" type="number" min="1" max="12" value="${a.installments}">
+      <label>First deduction date</label><input id="ap-first" type="date" value="${today()}"><label>Note (optional)</label><input id="ap-note">
+      <label class="chk" style="display:flex;gap:10px;align-items:flex-start;text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--text);font-weight:500"><input type="checkbox" id="ap-consent" style="width:20px;height:20px;accent-color:#000;flex:none"><span>I have the employee's <b>written authorization</b> to deduct this amount from their wages.</span></label>
+      <p id="ap-err" style="color:var(--bad)"></p><div class="row"><button class="btn" data-act="advapprovego" data-id="${a.id}">Approve</button><button class="btn ghost" data-act="close">Cancel</button></div>`);
+  }
+  if (act === 'advapprovego') {
+    const v = i => document.getElementById(i);
+    try { await api('PUT', '/api/advances/' + d.id + '/approve', { approvedAmt: +v('ap-amt').value, installments: +v('ap-inst').value, firstDue: v('ap-first').value, note: v('ap-note').value, consent: v('ap-consent').checked }); closeModal(); await loadView(); render(); } catch (x) { v('ap-err').textContent = x.message; } return;
+  }
+  if (act === 'advrelease') {
+    const a = ui.adv.rows.find(r => r.id === d.id), only = a.type === 'Other Authorized Deduction';
+    return openModal(`<h2 style="margin-top:0">${only ? 'Start deduction' : 'Release the money'}</h2><p>${esc(a.staffName)} · approved <b>${peso(a.approvedAmt)}</b> in ${a.installments} installment(s)</p>
+      ${only ? '<p class="mute">This is a deduction only. No money is paid out.</p>' : `<label>Actual amount released (₱)</label><input id="rl-amt" type="number" value="${a.approvedAmt}"><label>Payment method</label><select id="rl-method">${['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Other'].map(m => `<option>${m}</option>`).join('')}</select>
+      <label>Proof of release (photo)</label><input id="rl-file" type="file" accept="image/*" capture="environment"><img id="rl-prev" alt="" style="display:none;width:100%;margin-top:8px;border-radius:12px">`}
+      <label>Note (optional)</label><input id="rl-note"><p id="rl-err" style="color:var(--bad)"></p><div class="row"><button class="btn" data-act="advreleasego" data-id="${a.id}" data-only="${only ? 1 : ''}">${only ? 'Start deduction' : 'Confirm release'}</button><button class="btn ghost" data-act="close">Cancel</button></div>`);
+  }
+  if (act === 'advreleasego') {
+    const v = i => document.getElementById(i);
+    try {
+      let proofId = ''; if (!d.only) { const file = v('rl-file').files[0]; if (!file) throw new Error('Upload a photo as proof of release first'); proofId = (await api('POST', '/api/files', { data: await resizeToJpeg(file, 1300), kind: 'release', branchId: ui.adv.rows.find(r => r.id === d.id).branchId })).id; }
+      await api('PUT', '/api/advances/' + d.id + '/release', d.only ? { note: v('rl-note').value } : { releasedAmt: +v('rl-amt').value, method: v('rl-method').value, proofId, note: v('rl-note').value });
+      closeModal(); await loadView(); render();
+    } catch (x) { v('rl-err').textContent = x.message; } return;
+  }
+  if (act === 'advreject' || act === 'advcancel') {
+    const note = prompt(act === 'advreject' ? 'Why is this request rejected? The cashier will see this note.' : 'Reason for cancelling (optional)'); if (note === null) return;
+    if (act === 'advreject' && !note.trim()) return alert('A note is required.');
+    try { await api('PUT', '/api/advances/' + d.id + '/' + (act === 'advreject' ? 'reject' : 'cancel'), { note }); await loadView(); render(); } catch (x) { alert(x.message); } return;
+  }
   if (act === 'viewfiles') { e.preventDefault(); return showFiles(String(d.ids).split(',').filter(Boolean), 'Receipt photos'); }
   if (act === 'expcsv') return download(`/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}&format=csv`, 'expenses.csv');
   if (act === 'exphist') { const x = ui.exp.rows.find(r => r.id === d.id); return openModal('<h2 style="margin-top:0">Expense history</h2>' + x.history.map(h => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(h.action)}</b> · ${esc(h.by)}<br><span class="mute" style="font-size:12px">${new Date(h.at).toLocaleString('en-PH')}</span>${h.note ? '<br>' + esc(h.note) : ''}</div>`).join('') + '<br><button class="btn ghost" data-act="close">Close</button>'); }
@@ -439,6 +491,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.id === 'astatus') { ui.astatus = t.value; await loadView(); return render(); }
   if (t.id === 'estatus') { ui.estatus = t.value; await loadView(); return render(); }
   if (t.id === 'ecat') { ui.ecat = t.value; await loadView(); return render(); }
   if (t.id === 'rstatus') { ui.rstatus = t.value; await loadView(); return render(); }

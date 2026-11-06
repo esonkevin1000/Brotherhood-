@@ -35,7 +35,7 @@ const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: 
   cart: { items: [], barberId: '', mode: 'later', editing: null }, cust: { q: '', tier: '', rows: [], total: 0 }, rm: { date: '', calc: null, list: [], proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 // which sections this login may open (the owner sets this in Settings → Access)
-const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance' };
+const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance', release: 'release' };
 const freshCart = () => ({ items: [], editing: null, mode: (typeof P !== 'undefined' && P.cart && P.cart.mode) || 'later' });
 const isAdminRole = () => P.me && ['owner', 'admin'].includes(P.me.role);
 const canOpen = v => (P.mods || []).includes(VMAP[v]);
@@ -75,6 +75,7 @@ async function refresh() {
     if (P.view === 'pos') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
     if (P.view === 'customers') await loadCustomers();
     if (P.view === 'remit') await loadRemit();
+    if (P.view === 'release') { P.adv = await api('GET', withBr('/api/advances')); if (P.advBal) P.advBal = await api('GET', '/api/advances/balance?staffId=' + P.advBal.staffId); }
     if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
     if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expense-claims?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
@@ -98,7 +99,7 @@ async function afterLogin(j) {
 }
 
 // ---------- shell ----------
-const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance' };
+const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay' };
 function render() {
   if (!P.me) {
     app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
@@ -108,7 +109,7 @@ function render() {
   const b = P.boot; app.classList.toggle('in', !!P.me);
   if (!canOpen(P.view)) P.view = firstView();
   if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
-  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance']];
+  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance'], ['release', 'tag', 'Release Pay']];
   const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div><span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
@@ -169,6 +170,18 @@ const VIEWS = {
       <div class="row" style="margin-top:8px;gap:18px"><div><div class="num" style="font-size:30px;line-height:1">${h.visits}</div><small class="mute">points</small></div><div style="flex:1;min-width:0"><small class="mute">${nt ? nt.need + ' more visit' + (nt.need === 1 ? '' : 's') + ' to reach ' + nt.name : 'Top tier reached'}</small>${nt ? `<div style="height:6px;border-radius:6px;background:var(--s3);margin-top:6px;overflow:hidden"><div style="height:100%;width:${Math.min(100, Math.round(h.visits / (h.visits + nt.need) * 100))}%;background:#000"></div></div>` : ''}</div></div>
       <small class="mute" style="display:block;margin-top:8px">${esc(h.phone || '')}${h.phone && h.email ? ' · ' : ''}${esc(h.email || '')}</small>
       <small class="mute">Last visit: ${h.lastVisit ? new Date(h.lastVisit).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : 'none yet'} · Spent ${peso(h.spent)}${h.preferredCut ? ' · ✂ ' + esc(h.preferredCut) : ''}</small></div>`; }).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No customers found for this branch.</p></div>'}`;
+  },
+  release() {
+    const l = P.adv; if (!l) return '<p class="mute">Loading…</p>';
+    const st = s => ({ REQUESTED: 'waiting', APPROVED: 'in_chair', RELEASED: 'paid', REJECTED: 'void', CANCELLED: 'void' }[s] || '');
+    return `<button class="block" data-a="newadv" style="margin-bottom:12px;padding:16px">${ic('plus')} New release pay request</button>
+    <div class="card"><label style="margin-top:0">Check an employee's balance</label><select data-a="advbal"><option value="">Choose an employee</option>${P.boot.staff.map(s => `<option value="${s.id}" ${P.advBal?.staffId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+      ${P.advBal ? `<div class="paybox" style="margin-top:10px"><small>Remaining advance balance · ${esc(P.advBal.name)}</small><div class="num">${peso(P.advBal.balance)}</div><small>Already deducted: ${peso(P.advBal.deducted)}</small></div>
+      ${P.advBal.deductions.map(d => `<div class="row between" style="padding:5px 0;border-bottom:1px solid var(--line)"><span class="mute">${esc(d.dueDate)}</span><span>${peso(d.amount)}</span><span class="tag ${d.status === 'APPLIED' ? 'paid' : 'waiting'}">${d.status === 'APPLIED' ? 'Deducted' : 'Scheduled'}</span></div>`).join('') || '<p class="mute">No deductions yet.</p>'}` : ''}</div>
+    <div class="sect"><h3>Requests</h3><span class="mute">${l.rows.length}</span></div>
+    ${l.rows.map(a => `<div class="card" style="padding:14px"><div class="row between" style="flex-wrap:nowrap"><b>${esc(a.staffName)}</b><span class="tag ${st(a.status)}">${a.status}</span></div>
+      <small class="mute">${esc(a.type)} · ${peso(a.amount)} · ${a.installments} installment${a.installments > 1 ? 's' : ''} · ${esc(a.createdAt.slice(0, 10))}</small><br><small>${esc(a.reason)}</small>
+      ${a.status === 'RELEASED' ? `<br><small>Released ${peso(a.releasedAmt)} (${esc(a.method)}) · Balance <b>${peso(a.balance)}</b> · Deducted ${peso(a.deducted)}</small>` : ''}${a.reviewNote ? `<br><small>Owner note: ${esc(a.reviewNote)}</small>` : ''}</div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No requests yet.</p></div>'}`;
   },
   remit() {
     const m = P.rm, c = m.calc; if (!c) return '<p class="mute">Loading…</p>';
@@ -339,6 +352,18 @@ async function viewFiles(ids, title = 'Photos') {
     openSheet(`<div class="row between"><h2 style="margin:0">${esc(title)}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>${imgs.map(u => `<img class="idprev" src="${u}" alt="">`).join('')}`);
   } catch (x) { toast(x.message, true); }
 }
+const ADV_TYPES = ['Cash Advance', 'Salary Advance', 'Partial Salary Release', 'Emergency Assistance', 'Other Authorized Deduction'];
+function advSheet() {
+  const x = P.av;
+  openSheet(`<div class="row between"><h2 style="margin:0">Release pay request</h2><button class="ghost sm" data-a="closesheet">Cancel</button></div>
+    <label>Employee</label><select id="avstaff"><option value="">Choose an employee</option>${P.boot.staff.map(s => `<option value="${s.id}" ${x.staffId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+    <label>Request type</label><select id="avtype">${ADV_TYPES.map(t => `<option ${x.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <label>Amount (₱)</label><input id="avamt" type="number" inputmode="decimal" value="${esc(x.amount)}">
+    <label>Deduct over how many payrolls?</label><select id="avinst">${[1, 2, 3, 4, 6, 8, 12].map(n => `<option value="${n}" ${+x.inst === n ? 'selected' : ''}>${n} installment${n > 1 ? 's' : ''}</option>`).join('')}</select>
+    <label>Reason</label><input id="avreason" value="${esc(x.reason)}" maxlength="300" placeholder="Why is this needed?">
+    <label class="consent"><input type="checkbox" id="avconsent" ${x.consent ? 'checked' : ''}><span>The employee has agreed in writing that this amount will be deducted from their wages on the schedule above.</span></label>
+    <p id="err" style="color:var(--bad);margin:8px 0 0"></p><button class="block" data-a="avsave" ${x.busy ? 'disabled' : ''}>${x.busy ? 'Sending…' : 'Send request'}</button>`);
+}
 function freeBarbers() { const cut = cuttingIds(); return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && !cut.has(s.id)); }
 const chairName = id => P.boot?.chairs.find(c => c.id === id)?.name || '';
 // "Assign to Chair": each chair is a card with its barber. Free chair = seated now; busy chair = joins that barber's line.
@@ -507,7 +532,7 @@ document.addEventListener('click', async e => {
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
-      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
@@ -540,6 +565,13 @@ document.addEventListener('click', async e => {
   if (a === 'add') return addItem(d.id);
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
   if (a === 'rm') { P.cart.items.splice(+d.n, 1); syncId(); cartSheet(); return render(); }
+  if (a === 'newadv') { P.av = { staffId: '', type: 'Cash Advance', amount: '', inst: 1, reason: '', consent: false, busy: false }; return advSheet(); }
+  if (a === 'avsave') {
+    const x = P.av; x.busy = true; advSheet();
+    try { await api('POST', '/api/advances', { branchId: P.boot.branch.id, staffId: x.staffId, type: x.type, amount: x.amount, installments: x.inst, reason: x.reason, consent: x.consent }); closeSheet(); toast('Request sent to the owner'); await refresh(); }
+    catch (er) { x.busy = false; advSheet(); const e2 = document.getElementById('err'); if (e2) e2.textContent = er.message; }
+    return;
+  }
   if (a === 'rmpick') { document.getElementById('rmfile')?.click(); return; }
   if (a === 'rmsubmit') {
     const m = P.rm; m.busy = true; render();
@@ -672,6 +704,11 @@ document.addEventListener('change', async e => {
   if (a === 'exprange') { P.expRange = t.value; return refresh(); }
   if (a === 'paydisc') { P.pay.disc = t.value; return renderPay(P.pay); }
   if (a === 'custtier') { P.cust.tier = t.value; refresh().then(render); return; }
+  if (a === 'advbal') { P.advBal = t.value ? await api('GET', '/api/advances/balance?staffId=' + t.value) : null; return render(); }
+  if (t.id === 'avstaff') { P.av.staffId = t.value; return; }
+  if (t.id === 'avtype') { P.av.type = t.value; return; }
+  if (t.id === 'avinst') { P.av.inst = t.value; return; }
+  if (t.id === 'avconsent') { P.av.consent = t.checked; return; }
   if (a === 'rmdate' || t.id === 'rmdate') { P.rm.date = t.value || ymd(0); P.rm.proofId = ''; P.rm.preview = ''; refresh().then(render); return; }
   if (t.id === 'xcat') { P.ex.category = t.value; return; }
   if (t.id === 'xfile') {
@@ -708,6 +745,8 @@ document.addEventListener('input', e => {
     return;
   }  if (t.id === 'expq') { P.expQ = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('expq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
   if (t.id === 'remarks') P.remarks = t.value;
+  if (t.id === 'avamt') { P.av.amount = t.value; return; }
+  if (t.id === 'avreason') { P.av.reason = t.value; return; }
   if (t.id === 'xdesc') { P.ex.desc = t.value; return; }
   if (t.id === 'xamt') { P.ex.amount = t.value; return; }
   if (t.id === 'xreason') { P.ex.reason = t.value; return; }
