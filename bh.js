@@ -21,7 +21,7 @@ const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url
 const rate = (a, n) => n ? `<span class="star">★</span> ${a.toFixed(1)} <span class="mute">(${n})</span>` : '<span class="mute sm">New</span>';
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { } } };
 
-const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), toastMsg: '' };
+const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', dash: null, dashDays: 30, toastMsg: '' };
 
 async function api(path, opt = {}, token = S.token) {
   const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
@@ -158,14 +158,33 @@ function vPro() {
   const sel = S.pro.staff.find(s => s.id === S.proSel) || S.pro.staff[0]; S.proSel = sel?.id;
   if (!sel) return header('Pro tools', '/me') + '<div class="empty">No barbers found.</div>';
   return header('Pro tools', '/me') + `${S.pro.admin ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
-  <div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
+  <div class="tabs"><button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">Dashboard</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button></div>
+  ${S.proTab === 'dash' ? vDash() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}><div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
   <label class="f">Years of experience<input name="years" type="number" min="0" max="60" value="${sel.years || ''}"></label><label class="f">Specialties (comma separated)<input name="specialties" value="${esc(sel.specialties.join(', '))}" placeholder="Skin Fade, Taper, Pompadour"></label>
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
-  ${S.pro.admin ? `<label class="f row"><input type="checkbox" name="verified" style="width:auto" ${sel.verified ? 'checked' : ''}><span style="margin:0">Verified professional (owner only)</span></label>` : ''}<button class="btn block" style="margin-top:14px">Save profile</button></form>
-  <div class="sec-h"><h2>Portfolio</h2><label class="btn sm" style="cursor:pointer">${ic('plus')} Add photos<input type="file" id="pfile" accept="image/*" multiple hidden></label></div>
-  <div class="grid3">${sel.portfolio.map(p => `<div style="position:relative"><img src="${esc(p.url)}" alt="" data-lb="${esc(p.url)}"><button class="btn sm danger" style="position:absolute;right:4px;top:4px;padding:2px 8px;background:var(--bg)" data-pdel="${p.id}">✕</button></div>`).join('')}</div>${sel.portfolio.length ? '' : '<div class="card empty">Add your best cuts. Customers choose barbers by their work.</div>'}
+  ${S.pro.admin ? `<label class="f row"><input type="checkbox" name="verified" style="width:auto" ${sel.verified ? 'checked' : ''}><span style="margin:0">Verified professional (owner only)</span></label>` : ''}<button class="btn block" style="margin-top:14px">Save profile</button></form></div>
+  <div ${S.proTab === 'port' ? '' : 'hidden'}><div class="sec-h"><h2>Portfolio</h2><label class="btn sm" style="cursor:pointer">${ic('plus')} Add photos<input type="file" id="pfile" accept="image/*" multiple hidden></label></div>
+  <div class="grid3">${sel.portfolio.map(p => `<div style="position:relative"><img src="${esc(p.url)}" alt="" data-lb="${esc(p.url)}"><button class="btn sm danger" style="position:absolute;right:4px;top:4px;padding:2px 8px;background:var(--bg)" data-pdel="${p.id}">✕</button></div>`).join('')}</div>${sel.portfolio.length ? '' : '<div class="card empty">Add your best cuts. Customers choose barbers by their work.</div>'}</div>
   <button class="btn ghost block" style="margin-top:22px" data-prologout>Sign out of pro tools</button>`;
+}
+
+const kpi = (l, v, sub = '') => `<div class="card" style="padding:12px"><div class="sm mute">${l}</div><div class="num" style="font-size:26px">${v}</div>${sub ? `<div class="sm mute">${sub}</div>` : ''}</div>`;
+function vDash() {
+  const d = S.dash; const per = `<div class="chips">${[7, 30, 90].map(n => `<button class="chip ${S.dashDays === n ? 'on' : ''}" data-ddays="${n}">Last ${n} days</button>`).join('')}</div>`;
+  if (!d) return per + '<div class="empty">Loading…</div>';
+  const m = d.metrics, today = ymd(new Date()), e = S.earn;
+  return per + `<div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${kpi('Haircuts', m.haircuts, `${m.daysWorked} days worked`)}${kpi('Revenue', peso(m.revenue), `avg ${peso(m.avgService)}`)}${kpi('Commission', peso(m.commission), 'earned this period')}${kpi('Rating', m.reviews ? m.rating.toFixed(1) + ' ★' : '—', `${m.reviews} review${m.reviews === 1 ? '' : 's'}`)}${kpi('Retention', m.retention + '%', `${m.clients} clients served`)}${kpi('Rebooking', d.clients.length ? m.rebooking + '%' : '—', 'clients with 2+ visits')}</div>
+  ${e ? `<div class="card" style="margin-top:10px"><div class="sm mute">MY PAY · NOT YET PAID OUT</div><div class="num" style="font-size:28px">${peso(e.unpaid.net)}</div><div class="sm mute">${e.unpaid.days} day${e.unpaid.days === 1 ? '' : 's'} · commission ${peso(e.unpaid.commission)}${e.unpaid.bonus ? ' · bonus ' + peso(e.unpaid.bonus) : ''}${e.unpaid.advance ? ' · advance −' + peso(e.unpaid.advance) : ''}</div><div class="sm" style="margin-top:6px">Today: ${e.today.cuts} cut${e.today.cuts === 1 ? '' : 's'} · ${peso(e.today.commission)}</div></div>` : ''}
+  <div class="sec-h"><h2>Appointments · next 7 days</h2></div><div class="list">${d.appointments.map(a => `<div class="card"><div class="row"><b>${a.date === today ? 'Today' : fmtDate(a.date)} · ${t12(a.time)}</b><span class="sp"></span><span class="tag ${a.status === 'arrived' ? 'ok' : 'on'}">${a.status === 'arrived' ? 'arrived' : 'booked'}</span></div><div>${esc(a.customer)}${a.phone ? ` <a class="sm" style="color:var(--blue)" href="tel:${esc(a.phone)}">${esc(a.phone)}</a>` : ''}</div><div class="sm mute">${esc(a.items.join(' + '))} · ${a.mins} min · ${peso(a.total)}</div>${a.notes ? `<div class="sm" style="margin-top:4px">“${esc(a.notes)}”</div>` : ''}</div>`).join('') || '<div class="card empty">No appointments in the next 7 days.</div>'}</div>
+  <div class="sec-h"><h2>My clients</h2><span class="mute sm">${d.clients.length}</span></div><div class="list">${d.clients.slice(0, 50).map(c => `<div class="card row"><span class="av" style="width:42px;height:42px;font-size:14px">${esc(initials(c.name))}</span><div class="sp"><div class="nm">${esc(c.name)}${c.visits >= 5 ? '<span class="tag">Regular</span>' : ''}</div><div class="sm mute">${c.visits} visit${c.visits === 1 ? '' : 's'} · last ${fmtDate(c.last)}${c.phone ? ' · ' + esc(c.phone) : ''}</div></div><b class="num">${peso(c.spent)}</b></div>`).join('') || '<div class="card empty">Clients appear here after their first paid visit with you.</div>'}</div>
+  <div class="sec-h"><h2>Latest reviews</h2></div><div class="list">${d.recentReviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? '<span class="tag ok">Verified visit</span>' : ''}<span class="sp"></span>${stars(r.rating)}</div>${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}</div>`).join('') || '<div class="card empty">No reviews yet.</div>'}</div>`;
+}
+async function loadDash() {
+  S.dash = null; S.earn = null; if (!S.pro || !S.proSel) return;
+  try { S.dash = await api(`/pro/dashboard?staffId=${S.proSel}&days=${S.dashDays}`, {}, S.proToken); } catch (e) { S.dash = null; toast(e.message); }
+  if (!S.pro.admin) { try { S.earn = await (await fetch('/api/me/earnings', { headers: { Authorization: 'Bearer ' + S.proToken } })).json(); if (!S.earn.unpaid) S.earn = null; } catch { S.earn = null; } }
+  render();
 }
 async function compress(file) {
   const bmp = await createImageBitmap(file), sc = Math.min(1, 1080 / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas');
@@ -191,7 +210,7 @@ async function onRoute() {
   const r = route(); window.scrollTo(0, 0);
   if (['discover', 'home', 'book', 'barber'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
-  if (r.a === 'pro' && S.proToken && !S.pro) await loadPro();
+  if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; loadDash(); }
   if (r.a === 'bookings' && S.token) loadBookings().then(render);
   if (r.a === 'book' && S.bk && !S.token) { nav('/auth'); return; }
   render();
@@ -206,7 +225,7 @@ app.addEventListener('input', e => {
 });
 app.addEventListener('change', async e => {
   if (e.target.id === 'sort') { S.sort = e.target.value; await loadDiscover(); render(); }
-  if (e.target.id === 'prosel') { S.proSel = e.target.value; S.proMsg = null; render(); }
+  if (e.target.id === 'prosel') { S.proSel = e.target.value; S.proMsg = null; render(); loadDash(); }
   if (e.target.id === 'pfile') {
     const files = [...e.target.files]; let n = 0; e.target.value = '';
     for (const f of files.slice(0, 10)) { try { await api('/pro/portfolio', { method: 'POST', body: { staffId: S.proSel, data: await compress(f) } }, S.proToken); n++; } catch (x) { toast(x.message); } }
@@ -224,13 +243,13 @@ app.addEventListener('submit', async e => {
     try { S.user = (await api('/me', { method: 'PUT', body: d })).user; S.meMsg = { ok: true, t: 'Saved' }; } catch (x) { S.meMsg = { ok: false, t: x.message }; } render();
   } else if (f.id === 'prolf') {
     try { const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }), j = await r.json(); if (!r.ok) throw new Error(j.error);
-      S.proToken = j.token; store.set('bh_pro', j.token); await loadPro(); } catch (x) { S.proErr = x.message; } render();
+      S.proToken = j.token; store.set('bh_pro', j.token); await loadPro(); S.proSel = S.pro?.staff[0]?.id; loadDash(); } catch (x) { S.proErr = x.message; } render();
   } else if (f.id === 'prof') {
     try { await api('/pro/profile', { method: 'PUT', body: { staffId: S.proSel, ...d, verified: S.pro.admin ? !!d.verified : undefined } }, S.proToken); S.proMsg = { ok: true, t: 'Profile saved' }; await loadPro(); } catch (x) { S.proMsg = { ok: false, t: x.message }; } render();
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) { S.branch = D.shop; S.tab = 'barbers'; await loadDiscover(); return nav('/discover'); }
@@ -259,6 +278,8 @@ app.addEventListener('click', async e => {
   }
   if (D.lb) { const o = document.createElement('div'); o.className = 'lb'; o.innerHTML = `<img src="${esc(D.lb)}" alt=""><button aria-label="Close">✕</button>`; o.onclick = () => o.remove(); document.body.appendChild(o); return; }
   if (D.pdel) { if (!confirm('Remove this photo?')) return; try { await api('/pro/portfolio/' + D.pdel, { method: 'DELETE' }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
+  if (D.ptab) { S.proTab = D.ptab; return render(); }
+  if (D.ddays) { S.dashDays = +D.ddays; render(); return loadDash(); }
   if (D.prologout != null) { S.proToken = null; S.pro = null; store.set('bh_pro', null); return render(); }
 });
 function openReview(bookingId) {

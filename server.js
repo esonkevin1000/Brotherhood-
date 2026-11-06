@@ -1855,7 +1855,7 @@ async function handle(req, res) {
   bad(405, 'Method not allowed');
 }
 
-const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, addCol, toMin });
+const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 
 http.createServer(async (req, res) => {
   if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);

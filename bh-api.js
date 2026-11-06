@@ -2,7 +2,7 @@
 // Mounted from server.js under /api/bh/*. Shares the same database, staff, branches, bookings and reviews as the POS.
 export function mountBH(c) {
   const { db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor,
-    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, addCol, toMin } = c;
+    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
 
   // ---------- schema ----------
   db.exec(`
@@ -188,6 +188,26 @@ create table if not exists bh_favorites(userId text, staffId text, createdAt tex
             instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, portfolio: all('select id,url,caption from bh_portfolio where staffId=? order by createdAt desc', s.id) };
         });
         return send(res, 200, { admin, name: me.name, staff });
+      }
+      if (sub === '/pro/dashboard' && method === 'GET') {
+        const s = target(q.staffId), days = [7, 30, 90].includes(+q.days) ? +q.days : 30, to = todayStr(), from = dOf(new Date(Date.now() - (days - 1) * 864e5));
+        const m = scoreData(from, to, s.branchId, s.id)[0] || { n: 0, sales: 0, avg: 0, comm: 0, rating: null, rc: 0, custs: 0, returning: 0, worked: 0 };
+        // clients: everyone this barber has completed a paid service for (all time), grouped by customer
+        const orders = all("select * from orders where status='paid' and barberId=? order by date", s.id).map(parseOrder), by = new Map();
+        for (const o of orders) {
+          const key = o.customerId || ('n:' + String(o.customerName || '').toLowerCase()); if (key === 'n:') continue;
+          const r = by.get(key) || { name: o.customerName || 'Walk-in', customerId: o.customerId || '', visits: 0, spent: 0, first: o.date, last: o.date };
+          r.visits++; r.spent += serviceNet(o); r.last = o.date; if (o.customerName) r.name = o.customerName; by.set(key, r);
+        }
+        const phones = new Map(all('select id,phone from customers').map(x => [x.id, x.phone || '']));
+        const clients = [...by.values()].map(r => ({ ...r, spent: Math.round(r.spent * 100) / 100, phone: phones.get(r.customerId) || '' })).sort((a, b) => b.last.localeCompare(a.last)).slice(0, 200);
+        const rebook = clients.length ? Math.round(clients.filter(x => x.visits > 1).length / clients.length * 100) : 0;
+        const appts = all("select * from bookings where staffId=? and date>=? and date<=? and status in ('booked','arrived') order by date, time", s.id, to, dOf(new Date(Date.now() + 7 * 864e5))).map(b => {
+          const v = bookingView(b); return { id: v.id, date: v.date, time: v.time, mins: v.mins, status: v.status, customer: v.customerName, phone: v.phone, items: v.items.map(i => i.name), total: v.total, notes: v.notes || '' };
+        });
+        const recent = all('select name,rating,text,createdAt,coalesce(verified,0) verified from reviews where staffId=? order by createdAt desc limit 5', s.id);
+        return send(res, 200, { staff: { id: s.id, name: s.name }, from, to, days, metrics: { haircuts: m.n, revenue: m.sales, avgService: Math.round(m.avg * 100) / 100, commission: m.comm, rating: m.rating ? Math.round(m.rating * 10) / 10 : 0, reviews: m.rc,
+          clients: m.custs, retention: m.custs ? Math.round(m.returning / m.custs * 100) : 0, rebooking: rebook, daysWorked: m.worked }, appointments: appts, clients, recentReviews: recent });
       }
       if (sub === '/pro/profile' && method === 'PUT') {
         const b = await readBody(req), s = target(b.staffId), cur = one('select * from bh_barber where staffId=?', s.id) || {};
