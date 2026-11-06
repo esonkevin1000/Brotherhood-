@@ -12,6 +12,15 @@ create table if not exists bh_barber(staffId text primary key, headline text, bi
 create table if not exists bh_portfolio(id text primary key, staffId text, url text, caption text, createdAt text);
 create index if not exists bh_port_staff on bh_portfolio(staffId, createdAt);
 create table if not exists bh_favorites(userId text, staffId text, createdAt text, primary key(userId, staffId));
+create table if not exists bh_posts(id text primary key, userId text, staffId text, text text, imageUrl text, createdAt text, hidden integer default 0);
+create index if not exists bh_posts_time on bh_posts(createdAt);
+create table if not exists bh_likes(postId text, userId text, primary key(postId, userId));
+create table if not exists bh_comments(id text primary key, postId text, userId text, text text, createdAt text, hidden integer default 0);
+create index if not exists bh_comments_post on bh_comments(postId, createdAt);
+create table if not exists bh_follows(userId text, targetId text, createdAt text, primary key(userId, targetId));
+create table if not exists bh_blocks(userId text, blockedId text, createdAt text, primary key(userId, blockedId));
+create table if not exists bh_reports(id text primary key, kind text, targetId text, userId text, reason text, createdAt text, status text default 'open');
+create unique index if not exists bh_reports_once on bh_reports(kind, targetId, userId);
 `);
   addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
@@ -94,7 +103,12 @@ create table if not exists bh_favorites(userId text, staffId text, createdAt tex
       const u = needUser(req), b = await readBody(req);
       if (!checkPw(String(b.password || ''), u.passHash)) bad(403, 'Password is wrong');
       run("update bookings set userId='' where userId=?", u.id); run("update reviews set userId='' where userId=?", u.id);
-      run('delete from bh_favorites where userId=?', u.id); run('delete from bh_users where id=?', u.id);
+      run('delete from bh_favorites where userId=?', u.id);
+      for (const t of ['bh_likes', 'bh_comments', 'bh_follows', 'bh_blocks', 'bh_reports']) run(`delete from ${t} where userId=?`, u.id);
+      run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
+      run('delete from bh_comments where postId in (select id from bh_posts where userId=?)', u.id);
+      for (const r of all('select imageUrl from bh_posts where userId=?', u.id)) { const im = /\/img\/(\w+)/.exec(r.imageUrl || ''); if (im) run('delete from images where id=?', im[1]); }
+      run('delete from bh_posts where userId=?', u.id); run('delete from bh_users where id=?', u.id);
       log({ name: 'App: ' + u.name }, 'app-delete-account', 'bh_users', u.id, ''); return send(res, 200, { ok: true });
     }
 
@@ -175,6 +189,76 @@ create table if not exists bh_favorites(userId text, staffId text, createdAt tex
       log({ name: 'App: ' + u.name }, 'review', 'reviews', id, `${rating} stars (verified)`); return send(res, 201, { ok: true });
     }
 
+
+    // ----- community -----
+    const blockedOf = id => id ? new Set([...all('select blockedId x from bh_blocks where userId=?', id), ...all('select userId x from bh_blocks where blockedId=?', id)].map(r => r.x)) : new Set();
+    const nameMap = () => new Map(all('select id,name from bh_users').map(u => [u.id, short(u.name)]));
+    const postView = (r, me, names) => ({ id: r.id, text: r.text, image: r.imageUrl || '', createdAt: r.createdAt, userId: r.userId, author: names.get(r.userId) || 'Member', mine: !!me && me.id === r.userId,
+      staffId: r.staffId || '', staffName: r.staffId ? get('staff', r.staffId)?.name || '' : '', likes: one('select count(*) n from bh_likes where postId=?', r.id).n, comments: one('select count(*) n from bh_comments where postId=? and hidden=0', r.id).n,
+      liked: !!me && !!one('select 1 x from bh_likes where postId=? and userId=?', r.id, me.id), following: !!me && !!one('select 1 x from bh_follows where userId=? and targetId=?', me.id, r.userId) });
+    const spammy = t => (String(t).match(/https?:\/\//gi) || []).length > 2;
+    if (sub === '/feed' && method === 'GET') {
+      const me = userOf(req), blocked = blockedOf(me?.id), names = nameMap(), before = clip(q.before, 40) || '9999';
+      let rows = all('select * from bh_posts where hidden=0 and createdAt<? order by createdAt desc limit 200', before);
+      if (q.scope === 'following' && me) { const f = new Set(all('select targetId x from bh_follows where userId=?', me.id).map(r => r.x)); rows = rows.filter(r => f.has(r.userId) || r.userId === me.id); }
+      rows = rows.filter(r => !blocked.has(r.userId)).slice(0, 20);
+      return send(res, 200, { posts: rows.map(r => postView(r, me, names)), more: rows.length === 20 });
+    }
+    if (sub === '/posts' && method === 'POST') {
+      const u = needUser(req); if (tooMany(ip, 'po', 10, 3600e3)) bad(429, 'You are posting too fast. Please try again later.');
+      const b = await readBody(req, 1_500_000), text = clip(b.text, 500); let image = '';
+      if (!text && !b.data) bad(400, 'Write something or add a photo'); if (spammy(text)) bad(400, 'Too many links in one post');
+      if (b.data) {
+        const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.data)); if (!m) bad(400, 'Image must be JPEG, PNG or WebP');
+        const buf = Buffer.from(m[2], 'base64'); if (buf.length > 700_000) bad(413, 'Image is too large (max about 700KB)');
+        const iid = uid() + uid(); run('insert into images(id,mime,data,createdAt) values(?,?,?,?)', iid, m[1], buf, nowISO()); image = '/img/' + iid;
+      }
+      const staffId = b.staffId && get('staff', String(b.staffId)) ? String(b.staffId) : '', id = uid();
+      run('insert into bh_posts(id,userId,staffId,text,imageUrl,createdAt,hidden) values(?,?,?,?,?,?,0)', id, u.id, staffId, text, image, nowISO()); hit(ip, 'po');
+      return send(res, 201, { post: postView(get('bh_posts', id), u, nameMap()) });
+    }
+    const pm0 = sub.match(/^\/posts\/(\w+)(?:\/(like|comments))?$/);
+    if (pm0) {
+      const post = get('bh_posts', pm0[1]); if (!post || post.hidden) bad(404, 'Post not found');
+      if (!pm0[2] && method === 'DELETE') {
+        const u = needUser(req); if (post.userId !== u.id) bad(403, 'You can only delete your own posts');
+        const im = /\/img\/(\w+)/.exec(post.imageUrl || ''); if (im) run('delete from images where id=?', im[1]);
+        run('delete from bh_likes where postId=?', post.id); run('delete from bh_comments where postId=?', post.id); run('delete from bh_posts where id=?', post.id); return send(res, 200, { ok: true });
+      }
+      if (pm0[2] === 'like' && (method === 'PUT' || method === 'DELETE')) {
+        const u = needUser(req); if (method === 'PUT') run('insert or ignore into bh_likes(postId,userId) values(?,?)', post.id, u.id); else run('delete from bh_likes where postId=? and userId=?', post.id, u.id);
+        return send(res, 200, { likes: one('select count(*) n from bh_likes where postId=?', post.id).n });
+      }
+      if (pm0[2] === 'comments' && method === 'GET') {
+        const me = userOf(req), blocked = blockedOf(me?.id), names = nameMap();
+        return send(res, 200, { comments: all('select * from bh_comments where postId=? and hidden=0 order by createdAt limit 100', post.id).filter(c => !blocked.has(c.userId)).map(c => ({ id: c.id, text: c.text, createdAt: c.createdAt, author: names.get(c.userId) || 'Member', userId: c.userId, mine: !!me && me.id === c.userId })) });
+      }
+      if (pm0[2] === 'comments' && method === 'POST') {
+        const u = needUser(req); if (tooMany(ip, 'cm', 30, 3600e3)) bad(429, 'You are commenting too fast. Please try again later.');
+        if (one('select 1 x from bh_blocks where (userId=? and blockedId=?) or (userId=? and blockedId=?)', u.id, post.userId, post.userId, u.id)) bad(403, 'You cannot comment on this post');
+        const text = clip((await readBody(req)).text, 300); if (!text) bad(400, 'Write a comment'); if (spammy(text)) bad(400, 'Too many links in one comment');
+        const id = uid(), at = nowISO(); run('insert into bh_comments(id,postId,userId,text,createdAt,hidden) values(?,?,?,?,?,0)', id, post.id, u.id, text, at); hit(ip, 'cm');
+        return send(res, 201, { comment: { id, text, createdAt: at, author: short(u.name), userId: u.id, mine: true } });
+      }
+    }
+    const cdm = sub.match(/^\/comments\/(\w+)$/);
+    if (cdm && method === 'DELETE') { const u = needUser(req), c = get('bh_comments', cdm[1]); if (!c || c.userId !== u.id) bad(404, 'Comment not found'); run('delete from bh_comments where id=?', c.id); return send(res, 200, { ok: true }); }
+    const flm = sub.match(/^\/(follow|block)\/(\w+)$/);
+    if (flm && (method === 'PUT' || method === 'DELETE')) {
+      const u = needUser(req), tid = flm[2]; if (tid === u.id) bad(400, 'You cannot do that to yourself'); if (!get('bh_users', tid)) bad(404, 'Member not found');
+      const [tbl, col] = flm[1] === 'follow' ? ['bh_follows', 'targetId'] : ['bh_blocks', 'blockedId'];
+      if (method === 'PUT') { run(`insert or ignore into ${tbl}(userId,${col},createdAt) values(?,?,?)`, u.id, tid, nowISO()); if (flm[1] === 'block') run('delete from bh_follows where (userId=? and targetId=?) or (userId=? and targetId=?)', u.id, tid, tid, u.id); }
+      else run(`delete from ${tbl} where userId=? and ${col}=?`, u.id, tid);
+      return send(res, 200, { ok: true });
+    }
+    if (sub === '/report' && method === 'POST') {
+      const u = needUser(req), b = await readBody(req), kind = String(b.kind), tid = String(b.id || '');
+      if (!['post', 'comment', 'user'].includes(kind)) bad(400, 'Bad report'); if (!get({ post: 'bh_posts', comment: 'bh_comments', user: 'bh_users' }[kind], tid)) bad(404, 'Not found');
+      run("insert or ignore into bh_reports(id,kind,targetId,userId,reason,createdAt,status) values(?,?,?,?,?,?,'open')", uid(), kind, tid, u.id, clip(b.reason, 200), nowISO());
+      if (kind !== 'user' && one("select count(*) n from bh_reports where kind=? and targetId=? and status='open'", kind, tid).n >= 3) run(`update ${kind === 'post' ? 'bh_posts' : 'bh_comments'} set hidden=1 where id=?`, tid);   // auto-hide until the owner reviews it
+      return send(res, 200, { ok: true });
+    }
+
     // ----- pro tools (barber / owner, signed in with their POS login) -----
     if (sub.startsWith('/pro/')) {
       const me = whoami(req); if (!me) bad(401, 'Please log in with your Brotherhood staff account');
@@ -208,6 +292,21 @@ create table if not exists bh_favorites(userId text, staffId text, createdAt tex
         const recent = all('select name,rating,text,createdAt,coalesce(verified,0) verified from reviews where staffId=? order by createdAt desc limit 5', s.id);
         return send(res, 200, { staff: { id: s.id, name: s.name }, from, to, days, metrics: { haircuts: m.n, revenue: m.sales, avgService: Math.round(m.avg * 100) / 100, commission: m.comm, rating: m.rating ? Math.round(m.rating * 10) / 10 : 0, reviews: m.rc,
           clients: m.custs, retention: m.custs ? Math.round(m.returning / m.custs * 100) : 0, rebooking: rebook, daysWorked: m.worked }, appointments: appts, clients, recentReviews: recent });
+      }
+      if (sub === '/pro/reports' && method === 'GET') {
+        if (!admin) bad(403, 'Owner only'); const names = new Map(all('select id,name from bh_users').map(u => [u.id, u.name]));
+        const rows = all("select kind,targetId,count(*) n,max(createdAt) last,group_concat(reason,' | ') reasons from bh_reports where status='open' group by kind,targetId order by last desc limit 100").map(r => {
+          const t = r.kind === 'post' ? get('bh_posts', r.targetId) : r.kind === 'comment' ? get('bh_comments', r.targetId) : get('bh_users', r.targetId);
+          return { ...r, hidden: !!t?.hidden, gone: !t, text: r.kind === 'user' ? t?.name || '' : t?.text || '', image: r.kind === 'post' ? t?.imageUrl || '' : '', author: r.kind === 'user' ? '' : names.get(t?.userId) || '' };
+        });
+        return send(res, 200, { reports: rows });
+      }
+      if (sub === '/pro/moderate' && method === 'POST') {
+        if (!admin) bad(403, 'Owner only'); const b = await readBody(req), kind = String(b.kind), id = String(b.id || ''), tbl = { post: 'bh_posts', comment: 'bh_comments' }[kind];
+        if (!tbl || !get(tbl, id)) bad(404, 'Not found');
+        if (b.action === 'remove') { if (kind === 'post') { const im = /\/img\/(\w+)/.exec(get(tbl, id).imageUrl || ''); if (im) run('delete from images where id=?', im[1]); run('delete from bh_comments where postId=?', id); run('delete from bh_likes where postId=?', id); } run(`delete from ${tbl} where id=?`, id); }
+        else if (b.action === 'restore') run(`update ${tbl} set hidden=0 where id=?`, id); else bad(400, 'Bad action');
+        run("update bh_reports set status='closed' where kind=? and targetId=?", kind, id); log(me, 'moderate-' + b.action, tbl, id, ''); return send(res, 200, { ok: true });
       }
       if (sub === '/pro/profile' && method === 'PUT') {
         const b = await readBody(req), s = target(b.staffId), cur = one('select * from bh_barber where staffId=?', s.id) || {};

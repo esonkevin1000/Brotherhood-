@@ -13,7 +13,7 @@ const ICON = {
   heart: '<path d="M12 21s-8-5.2-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.8-8 11-8 11z"/>', back: '<path d="m15 18-6-6 6-6"/>',
   pin: '<path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>', check: '<path d="M20 6 9 17l-5-5"/>',
   ver: '<path d="M12 2 9.5 4.5 6 4.6 5.4 8 3 10.5 4.6 13.5 4 17l3.3 1.1L9.5 21l2.5-1.4 2.5 1.4 2.2-2.9L20 17l-.6-3.5L21 10.5 18.6 8 18 4.6l-3.5-.1z"/><path d="m8.5 12 2.5 2.5 4.5-5" stroke="#fff"/>',
-  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', plus: '<path d="M12 5v14M5 12h14"/>'
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', plus: '<path d="M12 5v14M5 12h14"/>', chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>', team: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2.5.6 4 2.2 4 5.2"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
 const stars = n => '<span class="star">' + '★'.repeat(Math.round(n)) + '</span><span style="color:var(--line)">' + '★'.repeat(5 - Math.round(n)) + '</span>';
@@ -21,7 +21,7 @@ const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url
 const rate = (a, n) => n ? `<span class="star">★</span> ${a.toFixed(1)} <span class="mute">(${n})</span>` : '<span class="mute sm">New</span>';
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { } } };
 
-const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', dash: null, dashDays: 30, toastMsg: '' };
+const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashDays: 30, toastMsg: '' };
 
 async function api(path, opt = {}, token = S.token) {
   const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
@@ -158,8 +158,8 @@ function vPro() {
   const sel = S.pro.staff.find(s => s.id === S.proSel) || S.pro.staff[0]; S.proSel = sel?.id;
   if (!sel) return header('Pro tools', '/me') + '<div class="empty">No barbers found.</div>';
   return header('Pro tools', '/me') + `${S.pro.admin ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
-  <div class="tabs"><button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">Dashboard</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button></div>
-  ${S.proTab === 'dash' ? vDash() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}><div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
+  <div class="tabs"><button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">Dashboard</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
+  ${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}><div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
   <label class="f">Years of experience<input name="years" type="number" min="0" max="60" value="${sel.years || ''}"></label><label class="f">Specialties (comma separated)<input name="specialties" value="${esc(sel.specialties.join(', '))}" placeholder="Skin Fade, Taper, Pompadour"></label>
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
@@ -186,6 +186,39 @@ async function loadDash() {
   if (!S.pro.admin) { try { S.earn = await (await fetch('/api/me/earnings', { headers: { Authorization: 'Bearer ' + S.proToken } })).json(); if (!S.earn.unpaid) S.earn = null; } catch { S.earn = null; } }
   render();
 }
+
+// ----- community -----
+const ago = iso => { const m = Math.max(0, (Date.now() - new Date(iso)) / 60000); return m < 1 ? 'just now' : m < 60 ? Math.floor(m) + 'm' : m < 1440 ? Math.floor(m / 60) + 'h' : Math.floor(m / 1440) + 'd'; };
+async function loadFeed() { try { S.feed = await api('/feed?scope=' + S.feedScope); } catch { S.feed = { posts: [], more: false }; } }
+function postCard(p) {
+  const c = S.open[p.id];
+  return `<div class="card pop"><div class="row"><span class="av" style="width:40px;height:40px;font-size:14px">${esc(initials(p.author))}</span><div class="sp"><b>${esc(p.author)}</b><div class="sm mute">${ago(p.createdAt)}${p.staffName ? ` · cut by <a href="#/barber/${p.staffId}" style="color:var(--blue)">${esc(p.staffName)}</a>` : ''}</div></div>
+    ${!p.mine && S.user ? `<button class="btn sec sm" data-pfollow="${p.userId}" data-on="${p.following ? 1 : 0}">${p.following ? 'Following' : 'Follow'}</button>` : ''}</div>
+    ${p.text ? `<p style="margin:10px 0 0;white-space:pre-wrap;word-break:break-word">${esc(p.text)}</p>` : ''}${p.image ? `<img src="${esc(p.image)}" alt="Post photo" data-lb="${esc(p.image)}" loading="lazy" style="width:100%;border-radius:12px;margin-top:10px;max-height:480px;object-fit:cover;cursor:zoom-in">` : ''}
+    <div class="row" style="margin-top:10px"><button class="btn sec sm heart ${p.liked ? 'on' : ''}" data-plike="${p.id}">${ic('heart')} ${p.likes}</button><button class="btn sec sm" data-pcomm="${p.id}">${ic('chat')} ${p.comments}</button><span class="sp"></span>
+    <details style="position:relative"><summary class="btn sec sm" style="list-style:none">•••</summary><div class="card" style="position:absolute;right:0;z-index:4;width:170px;padding:6px;display:grid;gap:4px">${p.mine ? `<button class="btn ghost sm" data-pdel="${p.id}" data-ptype="post">Delete post</button>` : `<button class="btn ghost sm" data-preport="${p.id}">Report post</button><button class="btn ghost sm" data-pblock="${p.userId}">Block ${esc(p.author)}</button>`}</div></details></div>
+    ${c ? `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">${c.list.map(x => `<div class="sm" style="margin-bottom:8px"><b>${esc(x.author)}</b> <span class="mute">${ago(x.createdAt)}</span>${x.mine ? ` <button class="link" data-cdel="${x.id}" data-post="${p.id}">delete</button>` : ''}<div style="white-space:pre-wrap;word-break:break-word">${esc(x.text)}</div></div>`).join('') || '<div class="sm mute" style="margin-bottom:8px">No comments yet.</div>'}
+      ${S.user ? `<div class="row"><input id="cin-${p.id}" maxlength="300" placeholder="Add a comment"><button class="btn sm" data-csend="${p.id}">Send</button></div>` : '<button class="link" data-go="/auth">Log in to comment</button>'}</div>` : ''}</div>`;
+}
+function vCommunity() {
+  const f = S.feed, cp = S.comp;
+  return header('Community') + `<div class="tabs"><button class="${S.feedScope === 'all' ? 'on' : ''}" data-fscope="all">Latest</button><button class="${S.feedScope === 'following' ? 'on' : ''}" data-fscope="following">Following</button></div>
+  ${S.user ? `<div class="card" style="margin-bottom:12px"><textarea id="ctext" rows="2" maxlength="500" placeholder="Share a cut, a tip, or something for the brotherhood">${esc(cp.text)}</textarea>
+    ${cp.img ? `<div style="position:relative;margin-top:8px"><img src="${cp.img}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:12px"><button class="btn sm danger" style="position:absolute;top:6px;right:6px;background:var(--bg)" data-cimgx>✕</button></div>` : ''}
+    ${cp.err ? `<div class="err">${esc(cp.err)}</div>` : ''}<div class="row" style="margin-top:8px"><label class="btn sec sm" style="cursor:pointer">${ic('plus')} Photo<input type="file" id="cfile" accept="image/*" hidden></label><span class="sp"></span><button class="btn sm" data-cpost ${cp.busy ? 'disabled' : ''}>${cp.busy ? 'Posting…' : 'Post'}</button></div></div>`
+    : `<div class="card row" style="margin-bottom:12px"><div class="sp mute sm">Join the conversation. Log in to post, like and comment.</div><button class="btn sm" data-go="/auth">Log in</button></div>`}
+  <div class="list">${!f ? '<div class="empty">Loading…</div>' : f.posts.map(postCard).join('') || `<div class="empty">${S.feedScope === 'following' ? 'Follow members to see their posts here.' : 'No posts yet. Be the first!'}</div>`}</div>
+  <p class="mute sm" style="text-align:center;margin-top:18px">Be respectful. Report anything that breaks the brotherhood rules. Posts reported by 3 members are hidden for review.</p>`;
+}
+const REASONS = ['Spam', 'Harassment or hate', 'Nudity or sexual content', 'Violence', 'Other'];
+function vMod() {
+  const r = S.reports; if (!r) return '<div class="empty">Loading…</div>';
+  return `<div class="sec-h"><h2>Reported content</h2><span class="mute sm">${r.length}</span></div><div class="list">${r.map(x => `<div class="card"><div class="row"><span class="tag ${x.hidden ? 'bad' : ''}">${x.kind}${x.hidden ? ' · hidden' : ''}</span><span class="tag">${x.n} report${x.n > 1 ? 's' : ''}</span></div>
+    ${x.author ? `<div class="sm mute" style="margin-top:6px">by ${esc(x.author)}</div>` : ''}<p style="margin:6px 0;white-space:pre-wrap;word-break:break-word">${esc(x.text) || '<span class="mute">(no text)</span>'}</p>${x.image ? `<img src="${esc(x.image)}" alt="" style="width:100%;max-height:200px;object-fit:cover;border-radius:10px">` : ''}
+    <div class="sm mute" style="margin:6px 0">${esc(x.reasons || '')}</div>${x.kind === 'user' ? '<div class="sm mute">Account reports are reviewed manually.</div>' : `<div class="row">${x.hidden ? `<button class="btn sec sm" data-mod="restore" data-mkind="${x.kind}" data-mid="${x.targetId}">Restore</button>` : ''}<button class="btn danger sm" data-mod="remove" data-mkind="${x.kind}" data-mid="${x.targetId}">Remove</button></div>`}</div>`).join('') || '<div class="card empty">Nothing to review.</div>'}</div>`;
+}
+async function loadReports() { try { S.reports = (await api('/pro/reports', {}, S.proToken)).reports; } catch (e) { S.reports = []; toast(e.message); } render(); }
+async function compressImg(file) { return compress(file); }
 async function compress(file) {
   const bmp = await createImageBitmap(file), sc = Math.min(1, 1080 / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas');
   cv.width = Math.round(bmp.width * sc); cv.height = Math.round(bmp.height * sc); cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
@@ -198,10 +231,10 @@ let rendering = 0;
 async function render() {
   const my = ++rendering, r = route(); let html = '';
   if (r.a === 'home') html = vHome(); else if (r.a === 'discover') html = vDiscover(); else if (r.a === 'barber') html = await vBarber(r.b);
-  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else html = vHome();
+  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else html = vHome();
   if (my !== rendering) return;
   const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart, sy = window.scrollY;
-  const showNav = !['barber', 'book', 'auth', 'pro'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
+  const showNav = !['barber', 'book', 'auth', 'pro'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
   app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'home' && r.a === 'home') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
   if (focus === 'q') { const el = document.getElementById('q'); el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
   if (r.a === 'barber' || r.a === 'book') window.scrollTo(0, r.a === 'book' ? sy : 0);
@@ -212,6 +245,7 @@ async function onRoute() {
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; loadDash(); }
   if (r.a === 'bookings' && S.token) loadBookings().then(render);
+  if (r.a === 'community') loadFeed().then(render);
   if (r.a === 'book' && S.bk && !S.token) { nav('/auth'); return; }
   render();
 }
@@ -222,10 +256,12 @@ let qTimer;
 app.addEventListener('input', e => {
   if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(async () => { await loadDiscover().catch(() => { }); render(); }, 250); }
   if (e.target.id === 'bnotes' && S.bk) S.bk.notes = e.target.value;
+  if (e.target.id === 'ctext') S.comp.text = e.target.value;
 });
 app.addEventListener('change', async e => {
   if (e.target.id === 'sort') { S.sort = e.target.value; await loadDiscover(); render(); }
   if (e.target.id === 'prosel') { S.proSel = e.target.value; S.proMsg = null; render(); loadDash(); }
+  if (e.target.id === 'cfile') { const f = e.target.files[0]; e.target.value = ''; if (f) { try { S.comp.img = await compress(f); S.comp.err = ''; } catch (x) { S.comp.err = x.message; } render(); } }
   if (e.target.id === 'pfile') {
     const files = [...e.target.files]; let n = 0; e.target.value = '';
     for (const f of files.slice(0, 10)) { try { await api('/pro/portfolio', { method: 'POST', body: { staffId: S.proSel, data: await compress(f) } }, S.proToken); n++; } catch (x) { toast(x.message); } }
@@ -249,7 +285,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) { S.branch = D.shop; S.tab = 'barbers'; await loadDiscover(); return nav('/discover'); }
@@ -277,8 +313,47 @@ app.addEventListener('click', async e => {
     try { await api('/me', { method: 'DELETE', body: { password: pw } }); S.token = null; S.user = null; store.set('bh_token', null); toast('Account deleted'); nav('/'); } catch (x) { toast(x.message); } return;
   }
   if (D.lb) { const o = document.createElement('div'); o.className = 'lb'; o.innerHTML = `<img src="${esc(D.lb)}" alt=""><button aria-label="Close">✕</button>`; o.onclick = () => o.remove(); document.body.appendChild(o); return; }
+  if (D.fscope) { S.feedScope = D.fscope; S.feed = null; render(); await loadFeed(); return render(); }
+  if (D.cimgx != null) { S.comp.img = null; return render(); }
+  if (D.cpost != null) {
+    const c = S.comp; c.busy = true; c.err = ''; render();
+    try { await api('/posts', { method: 'POST', body: { text: c.text, data: c.img || undefined } }); S.comp = { text: '', img: null, busy: false, err: '' }; await loadFeed(); toast('Posted'); }
+    catch (x) { c.err = x.message; c.busy = false; } return render();
+  }
+  if (D.plike) {
+    if (!S.token) return nav('/auth'); const p = S.feed.posts.find(x => x.id === D.plike);
+    try { const j = await api(`/posts/${p.id}/like`, { method: p.liked ? 'DELETE' : 'PUT' }); p.liked = !p.liked; p.likes = j.likes; render(); } catch (x) { toast(x.message); } return;
+  }
+  if (D.pcomm) {
+    if (S.open[D.pcomm]) { delete S.open[D.pcomm]; return render(); }
+    try { S.open[D.pcomm] = { list: (await api(`/posts/${D.pcomm}/comments`)).comments }; } catch (x) { toast(x.message); } return render();
+  }
+  if (D.csend) {
+    const inp = document.getElementById('cin-' + D.csend), text = inp.value.trim(); if (!text) return;
+    try { const j = await api(`/posts/${D.csend}/comments`, { method: 'POST', body: { text } }); S.open[D.csend].list.push(j.comment); S.feed.posts.find(x => x.id === D.csend).comments++; } catch (x) { return toast(x.message); } return render();
+  }
+  if (D.cdel) { try { await api('/comments/' + D.cdel, { method: 'DELETE' }); const c = S.open[D.post]; c.list = c.list.filter(x => x.id !== D.cdel); S.feed.posts.find(x => x.id === D.post).comments--; } catch (x) { toast(x.message); } return render(); }
+  if (D.pfollow) {
+    const on = D.on === '1'; try { await api('/follow/' + D.pfollow, { method: on ? 'DELETE' : 'PUT' }); S.feed.posts.forEach(x => { if (x.userId === D.pfollow) x.following = !on; }); render(); } catch (x) { toast(x.message); } return;
+  }
+  if (D.preport) {
+    if (!S.token) return nav('/auth'); const r = prompt('Why are you reporting this?\n' + REASONS.map((x, i) => `${i + 1}. ${x}`).join('\n') + '\nType a number or your own reason:'); if (!r) return;
+    try { await api('/report', { method: 'POST', body: { kind: 'post', id: D.preport, reason: REASONS[+r - 1] || r } }); toast('Thanks. We will review it.'); } catch (x) { toast(x.message); } return;
+  }
+  if (D.pblock) {
+    if (!confirm('Block this member? You will no longer see each other\'s posts or comments.')) return;
+    try { await api('/block/' + D.pblock, { method: 'PUT' }); toast('Member blocked'); await loadFeed(); } catch (x) { toast(x.message); } return render();
+  }
+  if (D.mod) {
+    if (D.mod === 'remove' && !confirm('Remove this permanently?')) return;
+    try { await api('/pro/moderate', { method: 'POST', body: { kind: D.mkind, id: D.mid, action: D.mod } }, S.proToken); await loadReports(); toast('Done'); } catch (x) { toast(x.message); } return;
+  }
+  if (D.pdel && D.ptype === 'post') {
+    if (!confirm('Delete this post?')) return;
+    try { await api('/posts/' + D.pdel, { method: 'DELETE' }); await loadFeed(); toast('Post deleted'); } catch (x) { toast(x.message); } return render();
+  }
   if (D.pdel) { if (!confirm('Remove this photo?')) return; try { await api('/pro/portfolio/' + D.pdel, { method: 'DELETE' }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
-  if (D.ptab) { S.proTab = D.ptab; return render(); }
+  if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); return render(); }
   if (D.ddays) { S.dashDays = +D.ddays; render(); return loadDash(); }
   if (D.prologout != null) { S.proToken = null; S.pro = null; store.set('bh_pro', null); return render(); }
 });
