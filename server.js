@@ -844,7 +844,7 @@ async function handle(req, res) {
   if (SITE_HOST || APP_HOST) {
     const host = normHost(req.headers['x-forwarded-host'] || req.headers.host), go = (h, to) => { res.writeHead(302, { Location: 'https://' + h + (to ?? req.url) }); return res.end(); };
     if (SITE_HOST && host === SITE_HOST) {
-      const ok = PUBLIC_PATHS.has(p) || p.startsWith('/api/public/') || /^\/img\/\w+$/.test(p);
+      const ok = PUBLIC_PATHS.has(p) || p.startsWith('/api/public/') || /^\/img\/\w+$/.test(p) || p.startsWith('/site/');
       if (!ok) { if (APP_HOST && method === 'GET' && !p.startsWith('/api/')) return go(APP_HOST); return send(res, 404, { error: 'Not found' }); }
     } else if (APP_HOST && host === APP_HOST) {
       if (method === 'GET' && p === '/') { res.writeHead(302, { Location: '/backend' }); return res.end(); }
@@ -855,6 +855,8 @@ async function handle(req, res) {
   if (method === 'GET' && p === '/sw.js') { res.writeHead(200, { 'Content-Type': MIME.js, 'Cache-Control': 'no-cache' }); return res.end(`const VERSION=${JSON.stringify(APP_VERSION)};\n` + fs.readFileSync(path.join(DIR, 'sw.js'), 'utf8')); }
   if (method === 'GET' && p === '/api/version') return send(res, 200, { version: APP_VERSION });
   if (method === 'GET' && STATIC[p]) return serveStatic(req, res, STATIC[p]);
+  const sm0 = p.match(/^\/site\/([\w-]+\.(?:jpg|png))$/);   // promo-site photos (shop, barbers, storefront)
+  if (sm0 && method === 'GET') { if (!fs.existsSync(path.join(DIR, 'site', sm0[1]))) return send(res, 404, { error: 'Not found' }); return serveStatic(req, res, 'site/' + sm0[1]); }
   const im = p.match(/^\/img\/(\w+)$/);
   if (im && method === 'GET') {
     const r = one('select mime,data from images where id=?', im[1]); if (!r) return send(res, 404, { error: 'Not found' });

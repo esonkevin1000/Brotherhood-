@@ -34,7 +34,7 @@ header.nav nav a{text-decoration:none;font-weight:600;font-size:14px;color:#3333
 header.nav nav a.btn{padding:10px 18px;font-size:14px;color:#fff}
 /* hero */
 .hero{position:relative;background:#000;color:#fff;overflow:hidden}
-.hero .bg{position:absolute;inset:0;background-size:cover;background-position:center;opacity:.38}
+.hero .bg{position:absolute;inset:0;background:url('/site/hero.jpg') center/cover;opacity:.42}
 .hero:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#000 8%,rgba(0,0,0,.35) 100%)}
 .hero .wrap{position:relative;z-index:2;display:grid;grid-template-columns:1.25fr .75fr;gap:30px;align-items:center;padding-top:76px;padding-bottom:84px}
 .kick{font:700 12px Inter;letter-spacing:2.4px;text-transform:uppercase;color:#d6d6dc}
@@ -59,6 +59,15 @@ section{padding:78px 0}
 .eyebrow{font:700 12px Inter;letter-spacing:2.4px;text-transform:uppercase;color:var(--mute);margin-bottom:10px}
 h2{font-size:clamp(34px,5.4vw,60px)}
 .sub{color:var(--mute);max-width:640px;margin:14px 0 0;font-size:17px}
+/* photos: ritual steps, inside gallery, storefront */
+.step img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:14px;margin-bottom:14px;display:block}
+.gal{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:190px;gap:12px;margin-top:32px;grid-auto-flow:dense}
+.gal a,.front a{position:relative;border-radius:18px;overflow:hidden;background:#111;display:block;cursor:zoom-in}
+.gal img,.front img{width:100%;height:100%;object-fit:cover;object-position:center 28%;display:block;transition:transform .5s}.gal a:hover img,.front a:hover img{transform:scale(1.05)}
+.gal .tall{grid-row:span 2}.gal .wide{grid-column:span 2}
+.front{display:grid;grid-template-columns:1.5fr 1fr;gap:12px;margin-top:12px}.front a{aspect-ratio:16/9}
+.front span{position:absolute;left:14px;bottom:12px;color:#fff;font:600 15px Oswald;letter-spacing:1.4px;text-transform:uppercase;text-shadow:0 2px 12px rgba(0,0,0,.8)}
+#lb{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;padding:20px;cursor:zoom-out}#lb.on{display:flex}#lb img{max-width:100%;max-height:100%;border-radius:12px}
 /* ritual */
 .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:34px}
 .step{border:1px solid var(--line);border-radius:20px;padding:22px;background:#fff}
@@ -115,13 +124,13 @@ footer .legal{grid-column:1/-1;border-top:1px solid #26262c;padding-top:18px;col
 .menu-btn{display:none;background:none;border:0;font-size:26px;margin-left:auto;cursor:pointer}
 @media(max-width:980px){
   .hero .wrap{grid-template-columns:1fr;padding-top:44px;padding-bottom:54px}.hero .seal{order:-1;width:150px}
-  .shops{grid-template-columns:1fr 1fr}.tiers{grid-template-columns:1fr 1fr}.rv{grid-template-columns:1fr 1fr}
+  .shops{grid-template-columns:1fr 1fr}.gal{grid-template-columns:repeat(3,1fr)}.tiers{grid-template-columns:1fr 1fr}.rv{grid-template-columns:1fr 1fr}
   .card-wrap{grid-template-columns:1fr}.app{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}
 }
 @media(max-width:700px){
   header.nav nav{display:none;position:absolute;left:0;right:0;top:68px;background:#fff;flex-direction:column;align-items:stretch;padding:14px 20px 20px;border-bottom:1px solid var(--line);gap:14px}
   header.nav nav.open{display:flex}.menu-btn{display:block}header.nav .brand b{font-size:17px}
-  section{padding:54px 0}.mlist,.shops,.steps,.rv{grid-template-columns:1fr}.bar,.bar .ph{width:170px}.bar .ph{height:215px}.bar.more{height:215px}.tiers{grid-template-columns:1fr 1fr}
+  section{padding:54px 0}.mlist,.shops,.steps,.rv{grid-template-columns:1fr}.gal{grid-template-columns:1fr 1fr;grid-auto-rows:150px;gap:8px}.gal .wide{grid-column:span 2}.front{grid-template-columns:1fr}.bar,.bar .ph{width:170px}.bar .ph{height:215px}.bar.more{height:215px}.tiers{grid-template-columns:1fr 1fr}
   footer .wrap{grid-template-columns:1fr}.hero .cta .btn{flex:1}
 }
 </style>
@@ -130,7 +139,7 @@ footer .legal{grid-column:1/-1;border-top:1px solid #26262c;padding-top:18px;col
 <header class="nav"><div class="wrap">
   <a class="brand" href="/"><img src="/logo-sm.png" alt="Brotherhood Barber logo"><b>BROTHERHOOD</b></a>
   <button class="menu-btn" id="mb" aria-label="Menu">☰</button>
-  <nav id="nav"><a href="#menu">Menu</a><a href="#shops">Shops</a><a href="#barbers">Barbers</a><a href="#rewards">Rewards</a><a href="#app">Book on your phone</a><a class="btn" href="/book">Book a chair</a></nav>
+  <nav id="nav"><a href="#menu">Menu</a><a href="#inside">Inside</a><a href="#shops">Shops</a><a href="#barbers">Barbers</a><a href="#rewards">Rewards</a><a href="#app">Book on your phone</a><a class="btn" href="/book">Book a chair</a></nav>
 </div></header>
 
 <div class="hero" id="hero"><div class="bg" id="herobg"></div><div class="wrap">
@@ -151,9 +160,9 @@ footer .legal{grid-column:1/-1;border-top:1px solid #26262c;padding-top:18px;col
   <div class="eyebrow">Every visit</div><h2>It is more than a haircut.</h2>
   <p class="sub">A good cut starts with listening. Here is how every visit goes, in every branch.</p>
   <div class="steps">
-    <div class="step"><div class="n">01</div><h3>Consult</h3><p>A quick chat about what you want and how your hair behaves.</p></div>
-    <div class="step"><div class="n">02</div><h3>The cut</h3><p>Scissors, clippers or razor. Whatever the cut needs, done clean.</p></div>
-    <div class="step"><div class="n">03</div><h3>Finish</h3><p>Lined up, styled and sent out the door looking sharp.</p></div>
+    <div class="step"><img src="/site/cut.jpg" alt="A Brotherhood barber working on a customer" loading="lazy"><div class="n">01</div><h3>Consult</h3><p>A quick chat about what you want and how your hair behaves.</p></div>
+    <div class="step"><img src="/site/clipper.jpg" alt="Clipper on a fresh fade" loading="lazy"><div class="n">02</div><h3>The cut</h3><p>Scissors, clippers or razor. Whatever the cut needs, done clean.</p></div>
+    <div class="step"><img src="/site/work.jpg" alt="Finishing touches at the chair" loading="lazy"><div class="n">03</div><h3>Finish</h3><p>Lined up, styled and sent out the door looking sharp.</p></div>
   </div>
 </div></section>
 
@@ -163,6 +172,27 @@ footer .legal{grid-column:1/-1;border-top:1px solid #26262c;padding-top:18px;col
   <div class="mlist" id="mlist"></div>
   <p style="margin-top:26px"><a class="btn" href="/book">Book now</a></p>
 </div></section>
+
+<section id="inside"><div class="wrap">
+  <div class="eyebrow">Walk in before you walk in</div><h2>Take a look inside.</h2>
+  <p class="sub">Real chairs, real barbers, real cuts. This is what a Brotherhood shop looks and feels like.</p>
+  <div class="gal" id="gal">
+    <a class="wide" href="/site/cut.jpg"><img src="/site/cut.jpg" alt="Barber at work" loading="lazy"></a>
+    <a class="tall" href="/site/barber-a.jpg"><img src="/site/barber-a.jpg" alt="Barber with a customer" loading="lazy"></a>
+    <a href="/site/card.jpg"><img src="/site/card.jpg" alt="The Brotherhood membership card on the barber chair" loading="lazy"></a>
+    <a href="/site/tools.jpg"><img src="/site/tools.jpg" alt="Clippers, scissors and combs" loading="lazy"></a>
+    <a class="tall" href="/site/kid.jpg"><img src="/site/kid.jpg" alt="A young customer getting a fresh cut" loading="lazy"></a>
+    <a class="wide" href="/site/lounge.jpg"><img src="/site/lounge.jpg" alt="Waiting area" loading="lazy"></a>
+    <a class="tall" href="/site/barber-b.jpg"><img src="/site/barber-b.jpg" alt="Barber focused on a fade" loading="lazy"></a>
+    <a href="/site/work.jpg"><img src="/site/work.jpg" alt="Finishing touches" loading="lazy"></a>
+    <a href="/site/tools2.jpg"><img src="/site/tools2.jpg" alt="Barber station" loading="lazy"></a>
+  </div>
+  <div class="front">
+    <a href="/site/alaminos.jpg"><img src="/site/alaminos.jpg" alt="Brotherhood Barber storefront in Poblacion, Alaminos, Laguna" loading="lazy"><span>Poblacion, Alaminos, Laguna</span></a>
+    <a href="/site/sign.jpg"><img src="/site/sign.jpg" alt="The Brotherhood Barber sign" loading="lazy"><span>Look for the sign</span></a>
+  </div>
+</div></section>
+<div id="lb"><img alt=""></div>
 
 <section id="shops"><div class="wrap">
   <div class="eyebrow">Locations</div><h2 id="shopsH">Find your shop.</h2>
@@ -203,7 +233,7 @@ footer .legal{grid-column:1/-1;border-top:1px solid #26262c;padding-top:18px;col
 
 <footer><div class="wrap">
   <div><img class="fl" src="/logo-sm.png" alt="Brotherhood Barber"><p style="margin:14px 0 0;max-width:300px">Clean cuts, real brotherhood. Book your chair online or walk in.</p></div>
-  <div><h4>Explore</h4><a href="/book">Book a chair</a><a href="#menu">Menu</a><a href="#shops">Shops</a><a href="#barbers">Barbers</a><a href="#rewards">Rewards</a></div>
+  <div><h4>Explore</h4><a href="/book">Book a chair</a><a href="#menu">Menu</a><a href="#inside">Inside</a><a href="#shops">Shops</a><a href="#barbers">Barbers</a><a href="#rewards">Rewards</a></div>
   <div><h4>Shops</h4><div id="fshops"></div></div>
   <div class="legal"><span>© <span id="yr"></span> Brotherhood Barber. All rights reserved.</span><a href="/backend" style="display:inline">Staff login</a></div>
 </div></footer>
@@ -215,6 +245,11 @@ const t12 = t => { const [h, m] = String(t).split(':').map(Number); return `${h 
 const stars = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 const init = s => String(s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 document.getElementById('yr').textContent = new Date().getFullYear();
+// tap a photo to see it big
+const lb = document.getElementById('lb');
+document.querySelectorAll('.gal a,.front a').forEach(a => a.addEventListener('click', e => { e.preventDefault(); lb.querySelector('img').src = a.getAttribute('href'); lb.classList.add('on'); }));
+lb.addEventListener('click', () => lb.classList.remove('on'));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') lb.classList.remove('on'); });
 document.getElementById('mb').onclick = () => document.getElementById('nav').classList.toggle('open');
 document.querySelectorAll('#nav a').forEach(a => a.addEventListener('click', () => document.getElementById('nav').classList.remove('open')));
 const nowMin = () => { const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' })); return d.getHours() * 60 + d.getMinutes(); };
@@ -223,7 +258,6 @@ const isOpen = b => { const n = nowMin(); return n >= toMin(b.openTime || '09:00
 fetch('/api/public/info').then(r => r.json()).then(async I => {
   const B = I.branches, n = B.length, rating = I.ratings || {};
   document.getElementById('bn').textContent = n;
-  const photo = B.find(b => b.photo); if (photo) document.getElementById('herobg').style.backgroundImage = `url('${photo.photo}')`;
   document.getElementById('kick').textContent = `Brotherhood Barber · ${n} shop${n === 1 ? '' : 's'}`;
   document.getElementById('shopsH').textContent = n === 1 ? 'Find your shop.' : `${n} shops. Yours is close.`;
   document.getElementById('lead').textContent = `Walk in or book your chair. ${n} shop${n === 1 ? '' : 's'}, one standard, and a barber who gets your cut right.`;
@@ -241,7 +275,8 @@ fetch('/api/public/info').then(r => r.json()).then(async I => {
   const g = b => b.google || {};
   document.getElementById('shops').innerHTML = B.map(b => {
     const rt = rating[b.id], gr = g(b);
-    return `<div class="shop"><div class="im" style="${b.photo ? `background-image:url('${esc(b.photo)}')` : ''}">${b.photo ? '' : '<img class="lg" src="/logo.png" alt="">'}<span class="st"><span class="dot ${isOpen(b) ? 'on' : ''}"></span>${isOpen(b) ? 'Open now' : 'Closed'}</span></div>
+    const ph = b.photo || (/alaminos/i.test(b.name) ? '/site/alaminos.jpg' : '');   // the Alaminos storefront photo until a branch picture is set in the back office
+    return `<div class="shop"><div class="im" style="${ph ? `background-image:url('${esc(ph)}')` : ''}">${ph ? '' : '<img class="lg" src="/logo.png" alt="">'}<span class="st"><span class="dot ${isOpen(b) ? 'on' : ''}"></span>${isOpen(b) ? 'Open now' : 'Closed'}</span></div>
       <div class="bd"><h3>${esc(b.name)}</h3><small>${esc(b.address || 'Brotherhood Barber')}</small><small>Open ${t12(b.openTime || '09:00')} – ${t12(b.closeTime || '21:00')}${b.phone ? ' · ' + esc(b.phone) : ''}</small>
       ${gr.rating ? `<span class="rt"><span class="stars">★</span> ${Number(gr.rating).toFixed(1)} on Google (${gr.count})</span>` : rt ? `<span class="rt"><span class="stars">★</span> ${rt.avg} (${rt.count} review${rt.count === 1 ? '' : 's'})</span>` : ''}
       <div class="acts"><a class="btn" href="/book?branch=${esc(b.id)}">Book here</a>${b.mapUrl ? `<a class="btn alt" href="${esc(b.mapUrl)}" target="_blank" rel="noopener">Directions</a>` : b.phone ? `<a class="btn alt" href="tel:${esc(b.phone)}">Call</a>` : ''}</div></div></div>`;
