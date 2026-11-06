@@ -17,13 +17,14 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   printer: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
   bottle: '<path d="M10 2h4M10 2v4l-2 3v11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V9l-2-3V2"/>', coin: '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>',
-  cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>', star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.3-6.2 3.3L7 14.2 2 9.3l6.9-1z"/>', lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+  cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>', tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1"/>', chair: '<path d="M6 12V6a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v6"/><path d="M4 12h16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M12 17v4M8 21h8"/>', star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.3-6.2 3.3L7 14.2 2 9.3l6.9-1z"/>', lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
 };
 const ic = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
 const t12 = t => { const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
 const ymd = (n = 0) => { const d = new Date(Date.now() + n * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const av = (name, photo, cls = '') => photo ? `<img class="av ${cls}" src="${esc(photo)}" alt="${esc(name)}" loading="lazy">` : `<span class="av ${cls}">${esc(initials(name))}</span>`;
 function beep() { try { const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + 0.18); } catch (e) { } }
+const isWide = () => window.matchMedia('(min-width: 900px)').matches;
 const initials = s => String(s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 const openSheet = h => { sheet.innerHTML = h; if (!sheet.open) sheet.showModal(); };
 const closeSheet = () => { if (sheet.open) sheet.close(); };
@@ -66,7 +67,7 @@ async function refresh() {
     P.boot = await api('GET', withBr('/api/pos/bootstrap')); P.shift = P.boot.shift;
     if (canOpen('appts')) { P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings(); } else P.bk = [];
     if (P.view === 'dashboard') P.dash = await api('GET', withBr('/api/pos/dashboard'));
-    if (P.view === 'pos' && P.cart.mode !== 'now') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
+    if (P.view === 'pos') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
     if (P.view === 'customers') await loadCustomers();
     if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
@@ -98,15 +99,16 @@ function render() {
       <div class="dots">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i < P.pin.length ? 'on' : ''}"></i>`).join('')}</div><p style="color:var(--bad);min-height:22px;font-size:13px">${esc(P.err) || 'Enter your 6-digit PIN'}</p>
       <div class="pin">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-a="pin" data-n="${n}">${n}</button>`).join('')}<button data-a="pinclr" class="ghost">CLR</button><button data-a="pin" data-n="0">0</button><button data-a="pinbk" class="ghost">⌫</button></div></main>`;    return;
   }
-  const b = P.boot;
+  const b = P.boot; app.classList.toggle('in', !!P.me);
   if (!canOpen(P.view)) P.view = firstView();
   if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
-  const nav = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers']].filter(([k]) => canOpen(k));
+  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading']];
+  const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div><span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
     <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
-    ${P.view === 'pos' && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
-    <nav class="bottom"><div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="${k === 'more' ? 'more' : 'go'}" data-v="${k}">${ic(icn)}${l}</button>`).join('')}</div></nav>`;
+    ${P.view === 'pos' && P.cart.mode !== 'now' && !isWide() && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
+    <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`;
 }
 const staffById = id => P.boot?.staff.find(s => s.id === id);
 const cuttingIds = () => new Set((P.boot?.queue || []).filter(o => o.status === 'in_chair').map(o => o.barberId));
@@ -122,12 +124,14 @@ const VIEWS = {
     ${bookingsCard()}
     <div class="sect"><h3>Live walk-in floor</h3><span class="mute">${d.queue.length} active</span></div>${d.queue.map(o => ticketHtml(o)).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No customers on the floor right now.</p></div>'}`;
   },  pos() {
-    const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat);
-    return `${s ? '' : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Open a shift first so you can take payments.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}
-    ${P.cart.editing ? `<div class="card">Editing ticket · <button class="sm ghost" data-a="canceledit">cancel</button></div>` : `<div class="seg"><button class="${P.cart.mode === 'now' ? 'on' : ''}" data-a="mode" data-m="now">Pay As You Order</button><button class="${P.cart.mode !== 'now' ? 'on' : ''}" data-a="mode" data-m="later">Pay Later${P.cart.mode !== 'now' && (P.queue || []).filter(o => ['waiting', 'in_chair'].includes(o.status)).length ? ' (' + (P.queue || []).filter(o => ['waiting', 'in_chair'].includes(o.status)).length + ')' : ''}</button></div>`}
-    ${P.cart.mode !== 'now' && !P.cart.editing ? payLaterList() : ''}
-    <div class="chips"><button class="chip ${P.cat === 'all' ? 'on' : ''}" data-a="cat" data-c="all">All</button>${cats.map(c => `<button class="chip ${P.cat === c.id ? 'on' : ''}" data-a="cat" data-c="${c.id}">${esc(c.name)}</button>`).join('')}</div>
+    const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat), later = P.cart.mode !== 'now';
+    const top = `<div class="posh">Fast checkout, discount vouchers, and cash change calculator.</div>
+    ${s ? `<div class="shiftbn">✓ Shift #${s.no} Active (Float: ${peso(s.openingFloat || 0)})</div>` : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Open a shift first so you can take payments.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}
+    <div class="seg"><button class="${!later ? 'on' : ''}" data-a="mode" data-m="now">${ic('cart', 'sm')} Pay As You Order</button><button class="${later ? 'on' : ''}" data-a="mode" data-m="later">${ic('hourglass', 'sm')} Pay Later</button></div>`;
+    if (!later) return top + sessionsBoard();
+    const menu = `<div class="chips"><button class="chip ${P.cat === 'all' ? 'on' : ''}" data-a="cat" data-c="all">All</button>${cats.map(c => `<button class="chip ${P.cat === c.id ? 'on' : ''}" data-a="cat" data-c="${c.id}">${esc(c.name)}</button>`).join('')}</div>
     <div class="grid">${items.map(i => `<button class="item ${i.type} ${i.photo ? 'hasphoto' : ''}" data-a="add" data-id="${i.id}">${i.photo ? `<img class="pic" src="${esc(i.photo)}" alt="" loading="lazy">` : `<span class="mono">${ic(i.type === 'service' ? 'scissors' : 'bottle')}</span>`}<span class="body"><span class="nm">${esc(i.name)}</span><small>${i.type === 'service' ? i.mins + ' min' : 'Product'}${i.apptOnly ? ' · Appt only' : ''}</small><b>${peso(i.price)}</b></span><span class="plus">${ic('plus', 'sm')}</span></button>`).join('')}</div>`;
+    return isWide() ? `${top}<div class="pos2"><div>${menu}</div><aside class="cartpane"><h3>${P.cart.editing ? 'Chair session' : 'Current order'}</h3>${cartInner()}</aside></div>` : top + menu;
   },
   appts() {
     const days = [0, 1, 2, 3, 4, 5, 6].map(n => ({ v: ymd(n), l: n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : new Date(Date.now() + n * 864e5).toLocaleDateString('en-PH', { weekday: 'short', day: 'numeric' }) }));
@@ -197,16 +201,12 @@ const VIEWS = {
       <label>Closing remarks (optional)</label><textarea id="remarks">${esc(P.remarks)}</textarea><br><br><button class="block" data-a="closeshift">${ic('lock')} Submit & Close Shift</button></div>`;
   }
 };
-function payLaterList() {
-  const open = (P.queue || []).filter(o => ['waiting', 'in_chair'].includes(o.status)).sort((a, b) => (a.status === 'in_chair' ? 0 : 1) - (b.status === 'in_chair' ? 0 : 1) || String(a.createdAt).localeCompare(String(b.createdAt)));
-  return `<details class="card" style="padding:12px" ${open.length ? 'open' : ''}><summary style="cursor:pointer;font-weight:700;list-style:none;display:flex;justify-content:space-between;align-items:center"><span>Pay Later tickets</span><span class="mute">${open.length} open · check out here</span></summary><div style="margin-top:10px">${open.map(o => ticketHtml(o, true)).join('') || '<p class="mute" style="margin:6px 0;text-align:center">No open tickets. Add a service below to start one.</p>'}</div></details>`;
-}
 function ticketHtml(o, actions) {
   const names = o.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ');
   const live = o.status === 'waiting' || o.status === 'in_chair';
   return `<div class="ticket ${o.status}"><div class="no">#${String(o.no).padStart(3, '0')}</div><div class="bd"><div class="row between" style="flex-wrap:nowrap"><b>${esc(o.customerName)}</b><span class="tag ${o.status}">${o.status === 'in_chair' ? 'In Chair' : o.status === 'paid' ? 'Paid' : o.status === 'void' ? 'Void' : o.barberId ? 'Queued' : 'Waiting'}</span></div>
     <small>${names || 'No items yet'}</small><br><small>${o.barberName ? ic('scissors', 'sm') + ' ' + esc(o.barberName) + (o.chairId ? ' · ' + esc(chairName(o.chairId)) : '') : 'No barber yet'}${live ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>${o.cust ? `<br><small><span class="${tierCls(o.cust.tier)}">${o.cust.tier}</span> ${o.cust.visits} visit${o.cust.visits === 1 ? '' : 's'}${o.cust.preferredCut ? ' · ✂ ' + esc(o.cust.preferredCut) : ''}</small>` : ''}
-    ${actions === 'queue' && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ghost" data-a="gopl">Check out in Pay Later</button>`}</div>` : ''}
+    ${actions === 'queue' && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ghost" data-a="gopl">Open at POS</button>`}</div>` : ''}
     ${actions === true && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div></div>`;
 }
 function bookingsCard() {
@@ -241,6 +241,20 @@ function addItem(id) {
   if (!cu().name.trim()) return customerSheet(it);   // first item: ask who the customer is (same as the other POS)
   pushItem(it); render();
 }
+function sessionsBoard() {
+  const q = P.queue || [], chairs = P.boot.chairs;
+  const cards = chairs.map(ch => {
+    const cur = q.find(o => o.chairId === ch.id && o.status === 'in_chair'), wait = q.filter(o => o.chairId === ch.id && o.status === 'waiting').length;
+    const bar = P.boot.staff.find(x => x.id === (cur ? cur.barberId : '')) || P.boot.staff.find(x => x.chairId === ch.id);
+    return cur
+      ? `<button class="seat occ" data-a="opensession" data-id="${cur.id}"><span class="tg">OCCUPIED</span>${ic('chair', 'big')}<b>${esc(ch.name)}</b><span class="bn">${ic('scissors', 'sm')} ${esc(cur.barberName || bar?.name || '')}</span><span class="cn">${esc(cur.customerName)}</span><span class="pr">${peso(cur.total || cur.subtotal || 0)}</span>${wait ? `<small class="mute">+${wait} waiting</small>` : ''}</button>`
+      : `<div class="seat free"><span class="tg">AVAILABLE</span>${ic('chair', 'big')}<b>${esc(ch.name)}</b><span class="bn">${bar ? ic('scissors', 'sm') + ' ' + esc(bar.name) : 'No barber assigned'}</span><span class="cn mute">Empty</span></div>`;
+  }).join('');
+  const waiting = q.filter(o => o.status === 'waiting');
+  return `<div class="chairsb">${cards || '<p class="mute">No chairs are set up for this branch.</p>'}</div>
+    ${waiting.length ? `<div class="sect"><h3>Waiting in line</h3><span class="mute">${waiting.length}</span></div>${waiting.map(o => ticketHtml(o, 'queue')).join('')}` : ''}
+    <p class="mute" style="text-align:center;font-size:13px;margin-top:16px">Tap an occupied chair to open its order and check out.</p>`;
+}
 function freeBarbers() { const cut = cuttingIds(); return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && !cut.has(s.id)); }
 const chairName = id => P.boot?.chairs.find(c => c.id === id)?.name || '';
 // "Assign to Chair": each chair is a card with its barber. Free chair = seated now; busy chair = joins that barber's line.
@@ -255,7 +269,7 @@ function assignSheet(id, payAfter) {
   P.as = { id, payAfter: !!payAfter };
   openSheet(`<h2 style="margin:0 0 12px;text-align:center">Assign to Chair</h2><div class="chairs">${P.boot.chairs.map(ch => {
     const s = chairState(ch, id);
-    return `<button class="chair ${s.cls}" data-a="aspick" data-id="${ch.id}" ${s.ok ? '' : 'disabled'}><b>${esc(ch.name)}</b><span class="who">${s.barber ? ic('scissors', 'sm') + ' ' + esc(s.barber.name) : '—'}</span><span class="st">${s.label}</span></button>`;
+    return `<button class="chair ${s.cls}" data-a="aspick" data-id="${ch.id}" ${s.ok ? '' : 'disabled'}>${ic('chair', 'big')}<b>${esc(ch.name)}</b><span class="who">${s.barber ? ic('scissors', 'sm') + ' ' + esc(s.barber.name) : '—'}</span><span class="st">${s.label}</span></button>`;
   }).join('') || '<p class="mute">No chairs are set up for this branch. Add them in the back office under Chairs.</p>'}</div>
     <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
     <button class="ghost block" data-a="closesheet" style="margin-top:10px">Cancel</button>`);
@@ -272,17 +286,21 @@ function discountSheet() {
     <button class="opt ${P.cart.discountId ? '' : 'on'}" data-a="pickdisc" data-id=""><span><b>No discount</b></span></button>
     ${P.boot.discounts.map(d => `<button class="opt ${P.cart.discountId === d.id ? 'on' : ''}" data-a="pickdisc" data-id="${d.id}"><span><b>${esc(d.name)}</b><small>${d.kind === 'percent' ? d.value + '% off' : peso(d.value) + ' off'}</small></span></button>`).join('')}`);
 }
-function cartSheet() {
-  const c = P.cart, u = cu(), card = u.card, sub = cartTotal(), disc = discountOf(), svc = cartHasService(), dn = P.boot.discounts.find(d => d.id === c.discountId);
+function cartInner() {
+  const c = P.cart, u = cu(), card = u.card, sub = cartTotal(), disc = discountOf(), svc = cartHasService(), dn = P.boot.discounts.find(d => d.id === c.discountId), sess = !!c.editing;
   const sv = c.items.filter(i => i.type === 'service').map(i => i.name).join(', ');
-  openSheet(`<div class="row between"><h2 style="margin:0">${c.editing ? 'Edit ticket' : 'Cart'}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
-    <div class="custchip"><span class="av">${esc(initials(u.name || '?'))}</span><div style="flex:1;min-width:0"><b>${esc(u.name || 'No customer yet')}</b><br><small class="mute">${card ? `${esc(card.tier)} · ${card.visits} visits` : (u.phone || u.email ? 'New customer · joins the directory' : 'Walk-in · not in the directory')}</small></div><button class="ghost sm" data-a="changecust">Change</button></div>
-    ${c.items.map((i, n) => `<div class="cartrow"><div style="flex:1;min-width:0"><b>${esc(i.name)}</b><br><small class="mute">${peso(i.price)} each</small></div><div class="qty"><button class="ghost sm" data-a="q" data-n="${n}" data-d="-1">−</button><b>${i.qty}</b><button class="ghost sm" data-a="q" data-n="${n}" data-d="1">＋</button></div><b style="min-width:76px;text-align:right">${peso(i.price * i.qty)}</b><button class="ghost sm" data-a="rm" data-n="${n}" aria-label="Remove">✕</button></div>`).join('') || '<p class="mute">Your cart is empty.</p>'}
-    <div class="totals"><div class="row between"><span class="mute">Subtotal</span><span>${peso(sub)}</span></div>${disc ? `<div class="row between"><span class="mute">Discount${dn ? ' (' + esc(dn.name) + ')' : ''}</span><span>−${peso(disc)}</span></div>` : ''}<div class="row between" style="margin-top:6px"><b>Total Amount</b><b style="font-size:22px;font-family:Oswald">${peso(sub - disc)}</b></div></div>
-    ${svc && !c.editing && c.mode !== 'now' ? `<div class="notice"><b>Chair assignment required before payment</b><br><small>Service items (${esc(sv)}) must be charged later on a chair and barber. Settle the payment afterwards from the Walk-in Queue.</small></div>` : ''}
-    <div class="row" style="flex-wrap:nowrap"><button class="ghost block" data-a="discount">${ic('tag', 'sm')} Discount${dn ? ': ' + esc(dn.name) : ''}</button><button class="ghost block" data-a="clearcart">Clear</button></div>
-    <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
-    <button class="block" data-a="${c.editing ? 'saveticket' : svc ? 'chargelater' : 'paynow'}" ${c.items.length ? '' : 'disabled'}>${c.editing ? 'Save ticket' : svc ? (c.mode === 'now' ? 'Assign Chair &amp; Barber, then Pay' : 'Charge Later — Assign Chair &amp; Barber') : 'Pay Now'}</button>`);
+  return `<div class="custchip"><span class="av">${esc(initials(u.name || '?'))}</span><div style="flex:1;min-width:0"><b>${esc(u.name || 'No customer specified')}</b><br><small class="mute">${sess && c.barber ? 'Barber: <b style="color:var(--info)">' + esc(c.barber) + '</b>' : card ? `${esc(card.tier)} · ${card.visits} visits` : (u.phone || u.email ? 'New customer · joins the directory' : 'Walk-in · not in the directory')}</small></div><button class="ghost sm" data-a="changecust">${ic('menu', 'sm')} Change</button></div>
+    ${c.items.map((i, n) => `<div class="cartrow"><div style="flex:1;min-width:0"><b>${esc(i.name)}</b><br><small class="mute">${sess && c.barber && i.type === 'service' ? 'Barber: ' + esc(c.barber) + '<br>' : ''}${peso(i.price)} each</small></div><div class="qty"><button class="ghost sm" data-a="q" data-n="${n}" data-d="-1">−</button><b>${i.qty}</b><button class="ghost sm" data-a="q" data-n="${n}" data-d="1">＋</button></div><b style="min-width:76px;text-align:right">${peso(i.price * i.qty)}</b><button class="ghost sm" data-a="rm" data-n="${n}" aria-label="Remove">✕</button></div>`).join('') || `<div class="emptycart">${ic('cart')}<p>Cart is empty. Tap an item to add it.</p></div>`}
+    <div class="totals"><div class="row between"><span class="mute">Subtotal</span><span>${peso(sub)}</span></div>${disc ? `<div class="row between"><span class="mute">Discount${dn ? ' (' + esc(dn.name) + ')' : ''}</span><span>−${peso(disc)}</span></div>` : ''}<div class="row between" style="margin-top:6px"><b>Total Amount:</b><b style="font-size:24px;font-family:Oswald;color:var(--info)">${peso(sub - disc)}</b></div></div>
+    ${svc && !sess ? `<div class="notice"><b>Chair assignment required before payment</b><br><small>Service items (${esc(sv)}) must be charged later on a chair and barber. Settle the payment afterwards from the chair session.</small></div>` : ''}
+    <div class="row" style="flex-wrap:nowrap"><button class="ghost block" data-a="discount">${ic('tag', 'sm')} Discount${dn ? ': ' + esc(dn.name) : ''}</button>${sess ? '<button class="ghost block" data-a="cancelsession">Cancel Session</button>' : '<button class="ghost block" data-a="clearcart">Clear</button>'}</div>
+    <p id="cerr" style="color:var(--bad);margin:8px 0 0"></p>
+    ${sess ? `<div class="row" style="flex-wrap:nowrap"><button class="ghost block" data-a="saveticket" ${c.items.length ? '' : 'disabled'}>${ic('hourglass', 'sm')} Charge Later</button><button class="block blue" data-a="paynow" ${c.items.length ? '' : 'disabled'}>${ic('cart', 'sm')} Pay Now</button></div>`
+      : `<button class="block ${svc ? '' : 'blue'}" data-a="${svc ? 'chargelater' : 'paynow'}" ${c.items.length ? '' : 'disabled'}>${svc ? 'Charge Later — Assign Chair &amp; Barber' : 'Pay Now'}</button>`}`;
+}
+function cartSheet() {
+  if (isWide()) { closeSheet(); return render(); }
+  openSheet(`<div class="row between"><h2 style="margin:0">${P.cart.editing ? 'Chair session' : 'Cart'}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>${cartInner()}`);
 }
 
 // ----- customer details: full name, phone, email, preferred haircut, T&C consent -----
@@ -347,16 +365,16 @@ function payTotals(p) {
 }
 function renderPay(p) {
   const t = payTotals(p), tendered = p.method === 'Cash' ? (+p.tendered || 0) : t.total, change = tendered - t.total;
-  openSheet(`<div class="row between"><h2 style="margin:0">Payment · #${String(p.order.no).padStart(3, '0')}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
-    <p class="mute">${esc(p.order.customerName)} · ${p.order.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ')}</p>
-    <div class="row between"><span>Subtotal</span><span>${peso(t.sub)}</span></div>
-    <label>Discount voucher</label><select data-a="paydisc"><option value="">None</option>${P.boot.discounts.map(d => `<option value="${d.id}" ${p.disc === d.id ? 'selected' : ''}>${esc(d.name)} (${d.kind === 'percent' ? d.value + '%' : peso(d.value)})</option>`).join('')}</select>
-    <div class="row between" style="margin-top:8px"><span>Discount</span><span>−${peso(t.amt)}</span></div><div class="row between"><b style="font-size:20px">Total</b><b style="font-size:20px;color:var(--gold)">${peso(t.total)}</b></div>
-    <label>Payment method</label><div class="chips">${['Cash', 'GCash', 'Maya', 'Card'].map(m => `<button class="chip ${p.method === m ? 'on' : ''}" data-a="paym" data-m="${m}">${m}</button>`).join('')}</div>
-    ${p.method === 'Cash' ? `<label>Cash received</label><input id="tendered" type="number" inputmode="decimal" value="${p.tendered}" placeholder="0.00">
-      <div class="chips" style="margin-top:8px"><button class="chip" data-a="exact">Exact</button>${[100, 200, 500, 1000].map(n => `<button class="chip" data-a="quick" data-n="${n}">₱${n}</button>`).join('')}</div>
-      <div class="row between"><span>Change</span><b style="color:${change < 0 ? 'var(--bad)' : 'var(--ok)'}" id="chg">${peso(Math.max(0, change))}</b></div>` : ''}
-    <p id="err" style="color:var(--bad)"></p><button class="block ok" data-a="confirmpay" ${p.method === 'Cash' && change < 0 ? 'disabled' : ''}>✔ Confirm payment</button>`);
+  openSheet(`<div class="payhd">${ic('pos')}<h2>Process Payment &amp; Checkout</h2></div>
+    <div class="paybox"><small>Total Amount Due</small><div class="num">${peso(t.total)}</div><small>Customer: ${esc(p.order.customerName)} · #${String(p.order.no).padStart(3, '0')}</small></div>
+    <p class="mute" style="font-size:13px;margin:8px 2px 0">${p.order.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ')}${t.amt ? ' · Discount −' + peso(t.amt) : ''}</p>
+    <label>Select Payment Tender</label><div class="chips tender" style="flex-wrap:wrap">${[['Cash', 'Cash'], ['GCash', 'GCash'], ['Maya', 'Maya'], ['Card', 'Credit / Debit Card']].map(([m, l]) => `<button class="chip ${p.method === m ? 'on' : ''}" data-a="paym" data-m="${m}">${p.method === m ? '✓ ' : ''}${l}</button>`).join('')}</div>
+    ${p.method === 'Cash' ? `<label>Amount Tendered (₱)</label><input id="tendered" type="number" inputmode="decimal" value="${p.tendered}" placeholder="0.00">
+      <div class="chips" style="margin-top:8px"><button class="chip" data-a="exact">Exact</button>${[100, 500, 1000].map(n => `<button class="chip" data-a="quick" data-n="${n}">₱${n.toLocaleString('en-PH')}</button>`).join('')}</div>
+      <div class="changebox row between"><span>Change Due to Customer</span><b id="chg" style="color:${change < 0 ? 'var(--bad)' : 'var(--ok)'}">${peso(Math.max(0, change))}</b></div>` : ''}
+    <details style="margin-top:10px"><summary class="mute" style="cursor:pointer;font-size:13px">Discount voucher</summary><select data-a="paydisc" style="margin-top:6px"><option value="">None</option>${P.boot.discounts.map(d => `<option value="${d.id}" ${p.disc === d.id ? 'selected' : ''}>${esc(d.name)} (${d.kind === 'percent' ? d.value + '%' : peso(d.value)})</option>`).join('')}</select></details>
+    <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
+    <div class="row" style="flex-wrap:nowrap;margin-top:6px"><button class="ghost block" data-a="closesheet">Cancel</button><button class="block ok" data-a="confirmpay" ${p.method === 'Cash' && change < 0 ? 'disabled' : ''}>✔ Complete</button></div>`);
 }
 function receiptSheet(o) {
   P.lastSale = o;
@@ -432,7 +450,7 @@ document.addEventListener('click', async e => {
     return;
   }
   if (a === 'mode') { P.cart.mode = d.m; await refresh(); return render(); }
-  if (a === 'gopl') { P.cart.mode = 'later'; P.view = 'pos'; await refresh(); return render(); }
+  if (a === 'gopl') { P.cart.mode = 'now'; P.view = 'pos'; await refresh(); return render(); }
   if (a === 'cat') { P.cat = d.c; return render(); }
   if (a === 'add') return addItem(d.id);
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
@@ -457,33 +475,46 @@ document.addEventListener('click', async e => {
   if (a === 'openshift') return openSheet(`<h2 style="margin-top:0">Open shift</h2><label>Opening float (₱)</label><input id="float" type="number" inputmode="decimal" value="0"><p id="err" style="color:var(--bad)"></p><div class="row"><button data-a="doopen">Open shift</button><button class="ghost" data-a="closesheet">Cancel</button></div>`);
   if (a === 'doopen') { const r = await guard(() => api('POST', '/api/shifts/open', { branchId: P.branch, terminal: 'Terminal 1', openingFloat: +document.getElementById('float').value || 0 })); if (r) { closeSheet(); toast('Shift opened'); await refresh(); } return; }
   if (a === 'chargelater' || a === 'paynow' || a === 'saveticket') {
-    const c = P.cart, err = document.getElementById('err');
+    const c = P.cart, err = document.getElementById('cerr');
     try {
-      const customer = customerPayload(), items = c.items.map(i => ({ itemId: i.itemId, qty: i.qty })), fresh = freshCart();
-      if (a === 'saveticket') {
-        await api('PUT', '/api/orders/' + c.editing, { items, customer, discountId: c.discountId || '' }); toast('Ticket saved');
-        P.cart = fresh; closeSheet(); P.view = 'pos'; await refresh(); return render();
+      const customer = customerPayload(), items = c.items.map(i => ({ itemId: i.itemId, qty: i.qty }));
+      if (c.editing) {
+        await api('PUT', '/api/orders/' + c.editing, { items, customer, discountId: c.discountId || '' });
+        const o = a === 'paynow' ? await api('GET', '/api/orders/' + c.editing) : null;
+        P.cart = freshCart(); P.cart.mode = 'now'; closeSheet(); await refresh(); render();
+        if (o) return paySheet(o);
+        return toast('Order saved to chair session.');
       }
       const o = await api('POST', '/api/orders', { customer, items, discountId: c.discountId || '' });
-      P.cart = fresh; await refresh();
-      if (a === 'paynow') return paySheet(o);
-      toast('Ticket #' + o.no + ' created'); closeSheet(); P.view = 'pos'; await refresh(); render(); return assignSheet(o.id, c.mode === 'now');
+      P.cart = freshCart(); await refresh();
+      if (a === 'paynow') { closeSheet(); render(); return paySheet(o); }
+      toast('Ticket #' + o.no + ' created'); closeSheet(); render(); return assignSheet(o.id);
     } catch (x) { if (err) err.textContent = x.message; else toast(x.message, true); }
     return;
+  }
+  if (a === 'opensession') {
+    const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (!o) return;
+    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id, mode: 'later', barber: o.barberName || P.boot.staff.find(s => s.id === o.barberId)?.name || '' };
+    await refresh(); return render();
+  }
+  if (a === 'cancelsession') {
+    if (!confirm('Cancel this chair session? The ticket will be voided.')) return;
+    const r = await guard(() => api('POST', `/api/orders/${P.cart.editing}/void`, { reason: 'Cancelled at POS' })); if (!r) return;
+    toast('Session cancelled'); P.cart = freshCart(); P.cart.mode = 'now'; closeSheet(); await refresh(); return render();
   }
   if (a === 'seat') { await refresh(); return assignSheet(d.id); }
   if (a === 'aspick') {
     const as = P.as, r = await guard(() => api('PUT', '/api/orders/' + as.id, { chairId: d.id })); if (!r) return;
     const who = P.boot.staff.find(s => s.id === r.barberId)?.name || 'the barber', cn = chairName(r.chairId);
-    closeSheet(); toast(r.queued ? 'Added to queue for ' + cn + ' · ' + who : 'Seated at ' + cn + ' with ' + who);
+    closeSheet(); toast(r.queued ? 'Added to queue for ' + cn + ' · ' + who : 'Order saved to chair session.');
+    if (P.view === 'pos') P.cart.mode = 'now';
     await refresh(); render();
-    if (as.payAfter) { const o = await guard(() => api('GET', '/api/orders/' + as.id)); if (o) paySheet(o); }
     return;
   }
     if (a === 'checkout') { const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (o) paySheet(o); return; }
   if (a === 'editticket') {
     const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (!o) return;
-    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id, mode: 'later' };
+    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id, mode: 'later', barber: o.barberName || '' };
     P.view = 'pos'; await refresh(); render(); return cartSheet();
   }
   if (a === 'void') { const reason = prompt('Reason for void?'); if (reason === null) return; const r = await guard(() => api('POST', `/api/orders/${d.id}/void`, { reason })); if (r) toast('Ticket voided'); return refresh(); }
@@ -494,7 +525,7 @@ document.addEventListener('click', async e => {
   if (a === 'confirmpay') {
     const p = P.pay, t = payTotals(p), amount = p.method === 'Cash' ? +p.tendered : t.total;
     const o = await (async () => { try { return await api('POST', `/api/orders/${p.order.id}/pay`, { discountId: p.disc, tenders: [{ method: p.method, amount }] }); } catch (x) { const er = document.getElementById('err'); if (er) er.textContent = x.message; return null; } })();
-    if (o) { receiptSheet(o); P.view = P.view === 'pos' ? 'queue' : P.view; await refresh(); }
+    if (o) { receiptSheet(o); if (P.view === 'pos') P.cart.mode = 'now'; await refresh(); }
     return;
   }
   if (a === 'addexp') return openSheet(`<h2 style="margin-top:0">Add expense</h2><label>Amount (₱)</label><input id="xamt" type="number" inputmode="decimal"><label>Description</label><input id="xnote" placeholder="e.g. Staff meal, supplies">
@@ -553,6 +584,7 @@ document.addEventListener('input', e => {
   if (t.id === 'custq') { P.cust.q = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('custq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
 });
 sheet.addEventListener('close', () => render());
+window.matchMedia('(min-width: 900px)').addEventListener('change', () => { closeSheet(); render(); });
 
 (async () => {
   if (token) { try { const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || []; P.mods = st.modules || Object.values(VMAP); if (isAdminRole()) P.branch = P.branches[0]?.id || ''; await refresh(); } catch (e) { token = ''; P.me = null; } }
