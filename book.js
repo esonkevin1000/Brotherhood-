@@ -183,6 +183,7 @@ document.addEventListener('input', e => {
 });
 
 Promise.all([fetch('/api/public/info').then(r => r.json()), fetch('/api/public/reviews').then(r => r.json()).catch(() => R)])
-  .then(([info, rev]) => { I = info; R = { ...R, ...rev }; if (I.branches.length === 1) { S.branch = I.branches[0].id; S.rv.branchId = S.branch; } render(); })
+  .then(([info, rev]) => { I = info; R = { ...R, ...rev }; const want = new URLSearchParams(location.search).get('branch'), pre = I.branches.length === 1 ? I.branches[0] : I.branches.find(b => b.id === want);
+    if (pre) { S.branch = pre.id; S.rv.branchId = pre.id; loadGoogle(pre.id); } render(); })
   .catch(() => { app.innerHTML = '<div class="top"><h1>Brotherhood</h1><p>Could not load. Please try again in a moment.</p></div>'; });
 render();
