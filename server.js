@@ -59,11 +59,16 @@ create index if not exists orders_cust on orders(customerId);
 addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'integer'); addCol('customers', 'consentAt', 'text'); addCol('customers', 'welcomedAt', 'text');
 addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
 db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
+addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
+db.exec(`
+create table if not exists reviews(id text primary key, branchId text, staffId text, name text, rating integer, text text, createdAt text);
+create index if not exists reviews_branch on reviews(branchId, createdAt);
+`);
 db.exec("create table if not exists settings(k text primary key, v text)");
 db.exec("create unique index if not exists users_pin on users(pinKey) where pinKey is not null and pinKey<>''");
 
 const COLS = {
-  branches: ['name', 'phone', 'address', 'openTime', 'graceMins', 'closeTime'],
+  branches: ['name', 'phone', 'address', 'openTime', 'graceMins', 'closeTime', 'photo', 'mapUrl', 'defaultPct'],
   chairs: ['branchId', 'name', 'sort', 'active'],
   staff: ['name', 'branchId', 'chairId', 'pct', 'allowance', 'active', 'photo'],
   categories: ['name', 'type'],
@@ -72,7 +77,7 @@ const COLS = {
   customers: ['name', 'phone', 'email', 'notes', 'createdAt', 'preferredCut'],
   users: ['name', 'username', 'role', 'branchId', 'active']
 };
-const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly']);
+const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly', 'defaultPct']);
 const uid = () => crypto.randomBytes(5).toString('hex');
 const pad = n => String(n).padStart(2, '0');
 const dOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -166,9 +171,16 @@ function whoami(req) {
   if (o.u === 'owner') return { id: 'owner', role: 'owner', name: 'Owner' };
   const u = get('users', o.u);
   if (!u || !u.active || ![u.passHash, u.pinKey].some(h => h && h.slice(-8) === o.v)) return null;
-  return { id: u.id, role: u.role, name: u.name, branchId: u.role === 'cashier' ? u.branchId : null };
+  return { id: u.id, role: u.role, name: u.name, branchId: u.role === 'cashier' || u.role === 'barber' ? u.branchId : null };
 }
 const isAdmin = me => me.role === 'owner' || me.role === 'admin';
+const isBranchUser = me => me.role === 'cashier' || me.role === 'barber';
+// Which parts of the POS each role may open (editable by the owner in Settings → Access)
+const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading'];
+const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue'] };
+const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber }; } catch { return { ...DEFAULT_PERMS }; } };
+const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
+const needAny = (me, mods) => { if (isAdmin(me)) return; const have = modulesFor(me.role); if (![].concat(mods).some(m => have.includes(m))) bad(403, 'Your role is not allowed to open this section'); };
 const hashPw = pw => { const salt = crypto.randomBytes(16).toString('hex'); return salt + ':' + crypto.scryptSync(pw, salt, 32).toString('hex'); };
 const checkPw = (pw, stored) => { const [salt, h] = String(stored).split(':'); return crypto.timingSafeEqual(crypto.scryptSync(pw, salt, 32), Buffer.from(h, 'hex')); };
 const sha = s => crypto.createHash('sha256').update(String(s)).digest();
@@ -181,7 +193,7 @@ const bad = (code, msg) => { throw new HttpError(code, msg); };
 
 // ---------- POS logic ----------
 const branchScope = (me, requested) => {
-  const id = me.role === 'cashier' ? me.branchId : String(requested || '');
+  const id = isBranchUser(me) ? me.branchId : String(requested || '');
   if (!get('branches', id)) bad(400, 'Pick a branch');
   return id;
 };
@@ -256,25 +268,25 @@ const tierOf = v => TIERS.find(([min]) => v >= min)[1];
 const nextTier = v => { const n = [...TIERS].reverse().find(([min]) => min > v); return n ? { name: n[1], visitsNeeded: n[0] - v } : null; };
 const getSetting = k => one('select v from settings where k=?', k)?.v;
 const setSetting = (k, v) => run('insert into settings(k,v) values(?,?) on conflict(k) do update set v=excluded.v', k, v);
-const DEFAULT_TERMS = `TERMS & CONDITIONS AT PAHINTULOT — BROTHERHOOD BARBER
+const DEFAULT_TERMS = `TERMS & CONDITIONS AND CONSENT: BROTHERHOOD BARBER
 
-1. Anong impormasyon ang kinokolekta namin
-Ang iyong buong pangalan, mobile number, email address, preferred haircut, at ang kasaysayan ng iyong mga bisita at binili sa aming mga branch.
+1. What information we collect
+Your full name, mobile number, email address, preferred haircut, and the history of your visits and purchases at our branches.
 
-2. Bakit namin ito kinokolekta
-Para makilala ka ng aming mga barber at maihanda ang iyong preferred haircut, maitala ang iyong mga visit at loyalty points, at maasikaso ang iyong mga appointment.
+2. Why we collect it
+So our barbers can recognise you and prepare your preferred haircut, so we can record your visits and loyalty points, and so we can take care of your appointments.
 
-3. Pahintulot sa email at promos
-Sa pag-tick ng kahon, pumapayag ka na padalhan ka ng Brotherhood Barber ng email, promo, at balita. Hindi ito kailangan para makapagpagupit. Kung hindi ka magbibigay ng email, hindi ka makakatanggap ng email.
+3. Consent to emails and promos
+By ticking the box, you agree that Brotherhood Barber may send you emails, promos and news. This is not required to get a haircut. If you do not give an email address, you will not receive emails.
 
-4. Loyalty Program
-1 natapos at bayad na visit = 1 point. Member (0–4 visits), Bronze (5–15), Silver (16–25), Gold (26–50), VIP (51 pataas). Maaaring baguhin ng Brotherhood ang mga benepisyo ng bawat tier anumang oras.
+4. Loyalty program
+1 completed and paid visit = 1 point. Member (0-4 visits), Bronze (5-15), Silver (16-25), Gold (26-50), VIP (51 and up). Brotherhood may change the benefits of each tier at any time.
 
-5. Pagtigil sa mga email
-Maaari kang mag-unsubscribe anumang oras gamit ang link sa ibaba ng bawat email, o sa pagsabi sa aming cashier.
+5. Stopping emails
+You can unsubscribe at any time using the link at the bottom of every email, or by telling our cashier.
 
-6. Proteksyon ng iyong data
-Hindi namin ibinebenta o ibinabahagi ang iyong impormasyon sa ibang kumpanya. Sumusunod kami sa Data Privacy Act of 2012 (RA 10173). May karapatan kang humiling na tingnan, ituwid, o burahin ang iyong data sa pamamagitan ng aming cashier.`;
+6. Protecting your data
+We do not sell or share your information with other companies. We follow the Data Privacy Act of 2012 (RA 10173). You have the right to ask to see, correct or delete your data by asking our cashier.`;
 const getTerms = () => getSetting('terms') || DEFAULT_TERMS;
 const EMAIL = { key: process.env.RESEND_API_KEY || '', from: process.env.EMAIL_FROM || 'Brotherhood Barber <onboarding@resend.dev>', replyTo: process.env.EMAIL_REPLY_TO || '' };
 let lastOrigin = getSetting('origin') || '';
@@ -299,7 +311,7 @@ function findCustomer(phone, email) {
   return null;
 }
 // Directory rule: a person only enters the directory when they give a phone number or an email. Returns null otherwise.
-function upsertCustomer(info, source) {
+function upsertCustomer(info, source, branchId) {
   const name = String(info.name || '').trim().slice(0, 200), phone = String(info.phone || '').trim().slice(0, 40), email = normEmail(info.email).slice(0, 200);
   if (email && !validEmail(email)) bad(400, 'Invalid email address');
   const pk = normPhone(phone); if (phone && pk.length < 10) bad(400, 'Invalid phone number');
@@ -309,35 +321,36 @@ function upsertCustomer(info, source) {
   if (!c) {
     if (!name) bad(400, 'Full name required');
     const id = uid();
-    run('insert into customers(id,name,phone,email,notes,createdAt,preferredCut,consent,consentAt,welcomedAt,phoneKey,emailKey,source) values(?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      id, name, phone, email, '', nowISO(), cut || '', info.consent ? 1 : 0, info.consent ? nowISO() : null, null, pk || null, email || null, source);
+    run('insert into customers(id,name,phone,email,notes,createdAt,preferredCut,consent,consentAt,welcomedAt,phoneKey,emailKey,source,branchId) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      id, name, phone, email, '', nowISO(), cut || '', info.consent ? 1 : 0, info.consent ? nowISO() : null, null, pk || null, email || null, source, branchId || null);
     c = get('customers', id);
   } else {
     // returning customer: keep what we already know (e.g. the past email) unless something new was typed
     const nPhone = pk ? phone : c.phone, nEmail = email || c.email;
     run('update customers set name=?, phone=?, email=?, preferredCut=?, consent=?, consentAt=?, phoneKey=?, emailKey=? where id=?',
       c.name || name, nPhone, nEmail, cut || c.preferredCut || '', (info.consent || c.consent) ? 1 : 0, info.consent && !c.consent ? nowISO() : c.consentAt, normPhone(nPhone) || null, nEmail || null, c.id);
+    if (!c.branchId && branchId) run('update customers set branchId=? where id=?', branchId, c.id);
     c = get('customers', c.id);
   }
   maybeWelcome(c);
   return c;
 }
-function resolveCustomer(b, source) {
+function resolveCustomer(b, source, branchId) {
   const info = b.customer && typeof b.customer === 'object' ? { ...b.customer } : {};
   info.id = b.customerId || info.id || '';
   const existing = info.id ? get('customers', String(info.id)) : null;
-  if (existing) { const hasNew = info.phone || info.email || info.preferredCut !== undefined || info.consent; const c = hasNew ? (upsertCustomer({ ...info, id: existing.id, name: existing.name }, source) || existing) : existing; return { id: c.id, name: c.name }; }
+  if (existing) { const hasNew = info.phone || info.email || info.preferredCut !== undefined || info.consent; const c = hasNew ? (upsertCustomer({ ...info, id: existing.id, name: existing.name }, source, branchId) || existing) : existing; return { id: c.id, name: c.name }; }
   const name = String(info.name || b.customerName || '').trim();
-  const c = upsertCustomer({ ...info, id: '', name }, source);
+  const c = upsertCustomer({ ...info, id: '', name }, source, branchId);
   return c ? { id: c.id, name: c.name } : { id: '', name };
 }
 function editCustomer(cur, b) {
   const phone = 'phone' in b ? String(b.phone || '').trim().slice(0, 40) : cur.phone, email = 'email' in b ? normEmail(b.email).slice(0, 200) : cur.email;
   if (email && !validEmail(email)) bad(400, 'Invalid email address');
   if (phone && normPhone(phone).length < 10) bad(400, 'Invalid phone number');
-  if (!normPhone(phone) && !email) bad(400, 'Kailangan ng phone o email para manatili sa Customer Directory.');
+  if (!normPhone(phone) && !email) bad(400, 'A phone number or an email is required to stay in the Customer Directory.');
   const name = 'name' in b ? String(b.name || '').trim().slice(0, 200) : cur.name; if (!name) bad(400, 'Name required');
-  const clash = findCustomer(phone, email); if (clash && clash.id !== cur.id) bad(409, `Ginagamit na ng ibang customer (${clash.name}) ang phone o email na ito`);
+  const clash = findCustomer(phone, email); if (clash && clash.id !== cur.id) bad(409, `Another customer (${clash.name}) already uses this phone number or email`);
   const consent = 'consent' in b ? (+b.consent ? 1 : 0) : cur.consent;
   run('update customers set name=?, phone=?, email=?, preferredCut=?, notes=?, consent=?, consentAt=?, phoneKey=?, emailKey=? where id=?', name, phone, email,
     'preferredCut' in b ? String(b.preferredCut || '').slice(0, 200) : cur.preferredCut, 'notes' in b ? String(b.notes || '').slice(0, 500) : cur.notes,
@@ -346,25 +359,24 @@ function editCustomer(cur, b) {
 }
 const esc2 = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 function welcomeEmail(c) {
-  const first = esc2(String(c.name).trim().split(/\s+/)[0] || 'Ka-Brotherhood');
-  const rows = [['Member', '0–4 visits'], ['Bronze', '5–15 visits'], ['Silver', '16–25 visits'], ['Gold', '26–50 visits'], ['VIP', '51+ visits']]
+  const first = esc2(String(c.name).trim().split(/\s+/)[0] || 'there');
+  const rows = [['Member', '0-4 visits'], ['Bronze', '5-15 visits'], ['Silver', '16-25 visits'], ['Gold', '26-50 visits'], ['VIP', '51+ visits']]
     .map(([n, r]) => `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:700">${n}</td><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#555">${r}</td></tr>`).join('');
   const html = `<!doctype html><html><body style="margin:0;background:#f5f5f6;font-family:Arial,Helvetica,sans-serif;color:#111"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#fff;border-radius:16px;overflow:hidden">
 <tr><td style="background:#000;color:#fff;text-align:center;padding:28px 20px"><div style="font-size:26px;letter-spacing:3px;font-weight:700">BROTHERHOOD</div><div style="color:#bbb;margin-top:4px">BARBER</div></td></tr>
 <tr><td style="height:5px;background:repeating-linear-gradient(135deg,#d6283a 0 10px,#fff 10px 20px,#2563eb 20px 30px)"></td></tr>
 <tr><td style="padding:28px 26px"><h1 style="margin:0 0 10px;font-size:22px">Welcome, ${first}! 💈</h1>
-<p style="line-height:1.55;margin:0 0 14px">Salamat sa pagsama sa <b>Brotherhood Barber</b>. Isa ka na ngayong <b>Member</b> ng aming loyalty program.</p>
-<p style="line-height:1.55;margin:0 0 14px">Sa bawat natapos na gupit, <b>may 1 point ka</b>. Habang dumarami ang visits mo, tumataas ang iyong tier:</p>
+<p style="line-height:1.55;margin:0 0 14px">Thank you for joining <b>Brotherhood Barber</b>. You are now a <b>Member</b> of our loyalty program.</p>
+<p style="line-height:1.55;margin:0 0 14px">Every completed haircut earns you <b>1 point</b>. The more you visit, the higher your tier:</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eee;border-radius:10px;border-collapse:separate;margin:0 0 16px">${rows}</table>
-<p style="line-height:1.55;margin:0 0 14px">Ibigay lang ang iyong mobile number o email sa cashier tuwing bibisita, at awtomatiko nang madadagdag ang iyong points. Aalamin din ng barber ang paborito mong gupit.</p>
-<p style="line-height:1.55;margin:0;color:#555">Makakatanggap ka rin ng mga promo at balita mula sa amin. Hanggang sa susunod mong gupit!</p></td></tr>
-<tr><td style="padding:16px 26px 24px;color:#888;font-size:12px;border-top:1px solid #eee">Natanggap mo ang email na ito dahil pumayag ka sa Terms &amp; Conditions ng Brotherhood Barber.<br><a href="{{UNSUB}}" style="color:#888">Mag-unsubscribe</a></td></tr>
+<p style="line-height:1.55;margin:0 0 14px">Just give the cashier your mobile number or email on every visit and your points are added automatically. Your barber will also know your favourite cut.</p>
+<p style="line-height:1.55;margin:0;color:#555">You will also hear from us about promos and news. See you at your next haircut!</p></td></tr>
+<tr><td style="padding:16px 26px 24px;color:#888;font-size:12px;border-top:1px solid #eee">You are receiving this email because you agreed to the Terms &amp; Conditions of Brotherhood Barber.<br><a href="{{UNSUB}}" style="color:#888">Unsubscribe</a></td></tr>
 </table></td></tr></table></body></html>`;
-  const text = `Welcome, ${String(c.name).trim().split(/\s+/)[0]}!\n\nSalamat sa pagsama sa Brotherhood Barber. Isa ka na ngayong Member ng aming loyalty program.\nBawat natapos na gupit = 1 point.\nMember 0-4 visits | Bronze 5-15 | Silver 16-25 | Gold 26-50 | VIP 51+\n\nIbigay lang ang mobile number o email mo sa cashier tuwing bibisita para awtomatikong madagdag ang points.\n\nMag-unsubscribe: {{UNSUB}}`;
+  const text = `Welcome, ${String(c.name).trim().split(/\s+/)[0] || 'there'}!\n\nThank you for joining Brotherhood Barber. You are now a Member of our loyalty program.\nEvery completed haircut = 1 point.\nMember 0-4 visits | Bronze 5-15 | Silver 16-25 | Gold 26-50 | VIP 51+\n\nJust give the cashier your mobile number or email on every visit so your points are added automatically.\n\nUnsubscribe: {{UNSUB}}`;
   return { subject: 'Welcome to Brotherhood Barber 💈', html, text };
-}
-function maybeWelcome(c) {
+}function maybeWelcome(c) {
   if (!c.consent || !c.email || !validEmail(c.email) || c.welcomedAt) return;
   const m = welcomeEmail(c);
   run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt) values(?,?,?,?,?,?,?,'pending',0,'',?)", uid(), c.id, c.email, 'welcome', m.subject, m.html, m.text, nowISO());
@@ -386,7 +398,8 @@ async function processEmails() {
   try {
     for (const r of all("select * from email_log where status='pending' order by createdAt limit 20")) {
       const unsub = `${baseUrl()}/unsubscribe?c=${r.customerId}&t=${unsubSig(r.customerId)}`;
-      const res = await sendEmail({ to: r.toAddr, subject: r.subject, html: r.html.replaceAll('{{UNSUB}}', unsub), text: r.text.replaceAll('{{UNSUB}}', unsub) });
+      let m = r; if (r.kind === 'welcome') { const c = get('customers', r.customerId); if (c) m = welcomeEmail(c); }   // always sent in the current wording
+      const res = await sendEmail({ to: r.toAddr, subject: m.subject, html: m.html.replaceAll('{{UNSUB}}', unsub), text: m.text.replaceAll('{{UNSUB}}', unsub) });
       if (res.ok) run("update email_log set status='sent', sentAt=?, error='', attempts=attempts+1 where id=?", nowISO(), r.id);
       else run('update email_log set attempts=attempts+1, error=?, status=? where id=?', res.error, r.attempts + 1 >= 5 ? 'failed' : 'pending', r.id);
     }
@@ -400,7 +413,11 @@ for (const c of all('select id,phone,email from customers where phoneKey is null
 // ---------- online / phone bookings ----------
 const hmOf = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const bookHits = new Map();
-const bookingLimited = ip => { const now = Date.now(), a = (bookHits.get(ip) || []).filter(t => now - t < 3600e3); a.push(now); bookHits.set(ip, a); return a.length > (+process.env.BOOK_LIMIT || 10); };
+const reviewHits = new Map();
+const recent = (map, ip) => { const now = Date.now(); return (map.get(ip) || []).filter(t => now - t < 3600e3); };
+const hitRate = (map, ip) => { const a = recent(map, ip); a.push(Date.now()); map.set(ip, a); };
+const reviewBlocked = ip => recent(reviewHits, ip).length >= (+process.env.REVIEW_LIMIT || 3);   // only successful posts count, so typos never use up the limit
+const bookingBlocked = ip => recent(bookHits, ip).length >= (+process.env.BOOK_LIMIT || 10);
 function bookingMins(ids) {
   let m = 0;
   for (const id of ids) { const it = get('items', id); if (!it || !it.active || it.type !== 'service') bad(400, 'Unknown service'); m += it.mins || 30; }
@@ -438,7 +455,7 @@ function createBooking(b, source) {
     const free = all('select * from staff where branchId=? and active=1', branchId).filter(s => staffFree(s, date, start, mins)).sort((x, y) => load(x) - load(y));
     sid = free[0].id;
   }
-  const cust = upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos');
+  const cust = upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos', branchId);
   const id = uid();
   run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '');
@@ -633,9 +650,9 @@ function checkUser(b, cur) {
   if (pw && pw.length < 6) bad(409, 'Password must be at least 6 characters');
   if ('name' in b || !cur) { b.name = String(b.name || '').trim(); if (!b.name) bad(400, 'Name required'); }
   const role = 'role' in b ? b.role : cur?.role;
-  if (!['admin', 'cashier'].includes(role)) bad(400, 'Role must be admin or cashier');
+  if (!['admin', 'cashier', 'barber'].includes(role)) bad(400, 'Role must be admin, cashier or barber');
   const branchId = 'branchId' in b ? b.branchId : cur?.branchId;
-  if (role === 'cashier' && !get('branches', branchId)) bad(409, 'Cashiers need a branch');
+  if (role !== 'admin' && !get('branches', branchId)) bad(409, 'Cashiers and barbers need a branch');
   const username = 'username' in b ? String(b.username || '').trim().toLowerCase() : (cur?.username || '');
   if (!/^[a-z0-9._-]{3,30}$/.test(username) || username === 'owner') bad(409, 'Username: 3–30 letters/numbers (. _ - allowed), not "owner"');
   if (one('select id from users where username=? and id<>?', username, cur?.id || '')) bad(409, 'Username already taken');
@@ -644,7 +661,7 @@ function checkUser(b, cur) {
     if (!/^\d{6}$/.test(pin)) bad(409, 'PIN must be exactly 6 digits');
     if (one('select id from users where pinKey=? and id<>?', pinKeyOf(pin), cur?.id || '')) bad(409, 'That PIN is already used by someone else');
   }
-  if (role === 'cashier' && !pin && !cur?.pinKey) bad(409, 'Set a 6-digit PIN for this cashier');
+  if (role !== 'admin' && !pin && !cur?.pinKey) bad(409, 'Set a 6-digit PIN for this user');
   if (role === 'admin' && !pw && !cur?.passHash) bad(409, 'Set a password for this admin');
   b.username = username;
 }
@@ -666,7 +683,7 @@ async function handle(req, res) {
   if (p === '/unsubscribe' && method === 'GET') {
     const c = q.c ? get('customers', String(q.c)) : null, ok = !!c && String(q.t || '') === unsubSig(c.id);
     if (ok) { run('update customers set consent=0 where id=?', c.id); log({ name: 'Customer' }, 'unsubscribe', 'customers', c.id, c.name); }
-    const page = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Brotherhood Barber</title><body style="margin:0;font-family:Arial,Helvetica,sans-serif;background:#f5f5f6;display:grid;place-items:center;min-height:100vh"><div style="background:#fff;border-radius:16px;padding:32px;max-width:420px;text-align:center;box-shadow:0 8px 30px -14px rgba(0,0,0,.3)"><div style="font-size:24px;font-weight:700;letter-spacing:3px">BROTHERHOOD</div><p style="margin:18px 0 6px;font-size:18px"><b>${ok ? 'Na-unsubscribe ka na.' : 'Hindi valid ang link.'}</b></p><p style="color:#666;margin:0">${ok ? 'Hindi ka na makakatanggap ng email at promo mula sa amin. Mananatili pa rin ang iyong points at visits.' : 'Pakisabi sa aming cashier kung nais mong tumigil sa pagtanggap ng email.'}</p></div></body>`;
+    const page = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Brotherhood Barber</title><body style="margin:0;font-family:Arial,Helvetica,sans-serif;background:#f5f5f6;display:grid;place-items:center;min-height:100vh"><div style="background:#fff;border-radius:16px;padding:32px;max-width:420px;text-align:center;box-shadow:0 8px 30px -14px rgba(0,0,0,.3)"><div style="font-size:24px;font-weight:700;letter-spacing:3px">BROTHERHOOD</div><p style="margin:18px 0 6px;font-size:18px"><b>${ok ? 'You are unsubscribed.' : 'This link is not valid.'}</b></p><p style="color:#666;margin:0">${ok ? 'You will no longer receive emails and promos from us. Your points and visits are kept.' : 'Please tell our cashier if you want to stop receiving emails.'}</p></div></body>`;
     return send(res, ok ? 200 : 400, page, 'text/html; charset=utf-8');
   }
   if (!p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
@@ -675,7 +692,8 @@ async function handle(req, res) {
   // ----- public booking (customers, no login) -----
   if (p === '/api/public/info' && method === 'GET') {
     return send(res, 200, {
-      shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime from branches order by rowid'),
+      shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime,photo,mapUrl from branches order by rowid'),
+      ratings: Object.fromEntries(all('select branchId, count(*) n, avg(rating) a from reviews group by branchId').map(s => [s.branchId, { count: s.n, avg: Math.round(s.a * 10) / 10 }])),
       services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price"),
       categories: all("select id,name from categories where type='service'"),
       staff: all('select id,name,photo,branchId from staff where active=1 order by name')
@@ -686,9 +704,24 @@ async function handle(req, res) {
     const ids = String(q.items || '').split(',').filter(Boolean); if (!ids.length) return send(res, 200, { slots: [] });
     return send(res, 200, { slots: slotsFor(String(q.branch || ''), date, String(q.staff || 'any'), bookingMins(ids)) });
   }
+  if (p === '/api/public/reviews' && method === 'GET') {
+    const brId = q.branch && get('branches', String(q.branch)) ? String(q.branch) : null;
+    const rows = all(`select r.id, r.name, r.rating, r.text, r.createdAt, r.branchId, b.name branchName, s.name staffName from reviews r left join branches b on b.id=r.branchId left join staff s on s.id=r.staffId${brId ? ' where r.branchId=?' : ''} order by r.createdAt desc limit 60`, ...(brId ? [brId] : []));
+    const sm = one('select count(*) n, avg(rating) a from reviews' + (brId ? ' where branchId=?' : ''), ...(brId ? [brId] : []));
+    return send(res, 200, { reviews: rows, count: sm.n, avg: sm.n ? Math.round(sm.a * 10) / 10 : 0 });
+  }
+  if (p === '/api/public/reviews' && method === 'POST') {
+    if (reviewBlocked(ip)) bad(429, 'You can only post a few reviews per hour. Please try again later.');
+    const b = await readBody(req), name = String(b.name || '').trim().slice(0, 60), rating = Math.round(+b.rating), text = String(b.text || '').trim().slice(0, 600);
+    if (!name) bad(400, 'Please enter your name'); if (!(rating >= 1 && rating <= 5)) bad(400, 'Please choose a rating from 1 to 5 stars');
+    if (!get('branches', String(b.branchId || ''))) bad(400, 'Please choose the branch you visited');
+    const st = b.staffId ? get('staff', String(b.staffId)) : null, id = uid();
+    run('insert into reviews(id,branchId,staffId,name,rating,text,createdAt) values(?,?,?,?,?,?,?)', id, String(b.branchId), st && st.branchId === String(b.branchId) ? st.id : '', name, rating, text, nowISO());
+    hitRate(reviewHits, ip); log({ name: 'Online: ' + name }, 'review', 'reviews', id, `${rating} stars`); return send(res, 201, { ok: true });
+  }
   if (p === '/api/public/book' && method === 'POST') {
-    if (bookingLimited(ip)) bad(429, 'Too many bookings from this device. Please try again later.');
-    const bk = createBooking(await readBody(req), 'online');
+    if (bookingBlocked(ip)) bad(429, 'Too many bookings from this device. Please try again later.');
+    const bk = createBooking(await readBody(req), 'online'); hitRate(bookHits, ip);
     log({ name: 'Online: ' + bk.customerName }, 'booking', 'bookings', bk.id, `${bk.date} ${bk.time} ${bk.branchName}`);
     return send(res, 201, { ok: true, booking: { date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, staffPhoto: bk.staffPhoto, items: bk.items, total: bk.total, name: bk.customerName } });
   }
@@ -717,11 +750,27 @@ async function handle(req, res) {
   if (!me) return send(res, 401, { error: 'Login required' });
   const admin = isAdmin(me);
   const adminOnly = () => { if (!admin) bad(403, 'Not allowed for your role'); };
+  if (!admin) {   // role permissions: which POS sections this role may open (set by the owner in Settings → Access)
+    const mod = (() => {
+      if (/^\/api\/pos\/dashboard$/.test(p)) return 'dashboard';
+      if (/^\/api\/pos\/queue$/.test(p)) return ['queue', 'pos'];
+      if (/^\/api\/pos\/(shift|zreadings)$|^\/api\/shifts\//.test(p)) return 'reading';
+      if (/^\/api\/(pos\/)?attendance$/.test(p)) return 'attendance';
+      if (/^\/api\/expenses$/.test(p)) return 'expenses';
+      if (/^\/api\/bookings/.test(p)) return 'bookings';
+      if (p === '/api/orders' && method === 'POST') return 'pos';
+      if (/^\/api\/orders\/\w+\/(pay|void)$/.test(p)) return 'pos';
+      if (/^\/api\/orders\/\w+$/.test(p) && method === 'PUT') return ['pos', 'queue'];
+      if (p === '/api/cash') return ['expenses', 'reading'];
+      return null;
+    })();
+    if (mod) needAny(me, mod);
+  }
 
   // ----- admin data -----
   if (p === '/api/state' && method === 'GET') {
     if (admin) rememberOrigin(req);
-    if (!admin) return send(res, 200, { shop: SHOP, me });
+    if (!admin) return send(res, 200, { shop: SHOP, me, modules: modulesFor(me.role) });
     return send(res, 200, {
       shop: SHOP, me, branches: all('select * from branches order by rowid'), chairs: all('select * from chairs order by branchId, sort'), staff: all('select * from staff order by name'),
       categories: all('select * from categories order by name'), items: all('select * from items order by name'), discounts: all('select * from discounts order by name'),
@@ -741,17 +790,20 @@ async function handle(req, res) {
   if (p === '/api/customers' && method === 'GET') {
     const term = '%' + String(q.q || '').trim().toLowerCase() + '%', size = Math.min(100, +q.size || 20), off = Math.max(0, (+q.page || 1) - 1) * size;
     const T = { member: [0, 4], bronze: [5, 15], silver: [16, 25], gold: [26, 50], vip: [51, 1e9] }[String(q.tier || '').toLowerCase()];
+    const BR = q.branch && q.branch !== 'all' && get('branches', String(q.branch)) ? String(q.branch) : null;
     const base = `select c.*, (select count(*) from orders o where o.customerId=c.id and o.status='paid') visits, (select ifnull(sum(o.total),0) from orders o where o.customerId=c.id and o.status='paid') spent,
-      (select max(o.paidAt) from orders o where o.customerId=c.id and o.status='paid') lastVisit from customers c
+      (select max(o.paidAt) from orders o where o.customerId=c.id and o.status='paid') lastVisit,
+      ifnull((select o.branchId from orders o where o.customerId=c.id and o.status='paid' order by o.paidAt desc limit 1), c.branchId) homeBranch from customers c
       where lower(c.name||' '||ifnull(c.phone,'')||' '||ifnull(c.email,'')||' '||ifnull(c.preferredCut,'')) like ?`;
-    const where = T ? ' where visits between ? and ?' : '', args = T ? [term, T[0], T[1]] : [term];
-    const rows = all(`select * from (${base}) ${where} order by name limit ${size} offset ${off}`, ...args).map(c => ({ ...c, spent: r2(c.spent), tier: tierOf(c.visits) }));
+    const conds = [T ? 'visits between ? and ?' : '', BR ? 'homeBranch = ?' : ''].filter(Boolean), where = conds.length ? ' where ' + conds.join(' and ') : '';
+    const args = [term, ...(T ? [T[0], T[1]] : []), ...(BR ? [BR] : [])];
+    const rows = all(`select * from (${base}) ${where} order by (lastVisit is null), lastVisit desc, createdAt desc limit ${size} offset ${off}`, ...args)
+      .map(c => ({ ...c, spent: r2(c.spent), tier: tierOf(c.visits), branchName: get('branches', c.homeBranch || '')?.name || '' }));
     return send(res, 200, { total: one(`select count(*) n from (${base}) ${where}`, ...args).n, rows });
-  }
-  if (p === '/api/customers/lookup' && method === 'GET') { const c = findCustomer(q.phone, q.email); return send(res, 200, { customer: c ? custCard(c) : null }); }
+  }  if (p === '/api/customers/lookup' && method === 'GET') { const c = findCustomer(q.phone, q.email); return send(res, 200, { customer: c ? custCard(c) : null }); }
   if (p === '/api/customers' && method === 'POST') {
-    const b = await readBody(req), c = upsertCustomer(b, me.role === 'cashier' ? 'pos' : 'admin');
-    if (!c) bad(400, 'Kailangan ng phone o email para mapasama sa Customer Directory.');
+    const b = await readBody(req), c = upsertCustomer(b, isBranchUser(me) ? 'pos' : 'admin', isBranchUser(me) ? me.branchId : (get('branches', String(b.branchId || '')) ? b.branchId : null));
+    if (!c) bad(400, 'A phone number or an email is required to join the Customer Directory.');
     log(me, 'customer', 'customers', c.id, c.name); return send(res, 201, custCard(c));
   }
   const cum = p.match(/^\/api\/customers\/(\w+)$/);
@@ -765,9 +817,9 @@ async function handle(req, res) {
     let added = 0, skipped = 0; db.exec('begin');
     try {
       for (const r of rows) {
-        const name = String(r.name || '').trim().slice(0, 200), phone = String(r.phone || '').trim().slice(0, 40), email = normEmail(r.email).slice(0, 200), pk = normPhone(phone);
+        const name = String(r.name || '').trim().slice(0, 200), imBr = get('branches', String(b.branchId || '')) ? b.branchId : null, phone = String(r.phone || '').trim().slice(0, 40), email = normEmail(r.email).slice(0, 200), pk = normPhone(phone);
         if (!name || (!pk && !(email && validEmail(email))) || findCustomer(phone, email)) { skipped++; continue; }   // directory rule: needs phone or email
-        run('insert into customers(id,name,phone,email,notes,createdAt,preferredCut,consent,phoneKey,emailKey,source) values(?,?,?,?,?,?,?,0,?,?,?)', uid(), name, phone, validEmail(email) ? email : '', '', nowISO(), String(r.preferredCut || '').slice(0, 200), pk || null, validEmail(email) ? email : null, 'import'); added++;
+        run('insert into customers(id,name,phone,email,notes,createdAt,preferredCut,consent,phoneKey,emailKey,source,branchId) values(?,?,?,?,?,?,?,0,?,?,?,?)', uid(), name, phone, validEmail(email) ? email : '', '', nowISO(), String(r.preferredCut || '').slice(0, 200), pk || null, validEmail(email) ? email : null, 'import', imBr); added++;
       }
       db.exec('commit');
     } catch (e) { db.exec('rollback'); throw e; }
@@ -775,20 +827,65 @@ async function handle(req, res) {
     return send(res, 200, { added, skipped });
   }
 
+  // ----- reviews (admin can read and delete) -----
+  if (p === '/api/reviews' && method === 'GET') {
+    adminOnly(); return send(res, 200, all('select r.*, b.name branchName, s.name staffName from reviews r left join branches b on b.id=r.branchId left join staff s on s.id=r.staffId order by r.createdAt desc limit 500'));
+  }
+  const rvm = p.match(/^\/api\/reviews\/(\w+)$/);
+  if (rvm && method === 'DELETE') {
+    adminOnly(); const r = one('select * from reviews where id=?', rvm[1]); if (!r) bad(404, 'Not found');
+    run('delete from reviews where id=?', r.id); log(me, 'delete', 'reviews', r.id, `${r.name} ${r.rating} stars`); return send(res, 200, { ok: true });
+  }
+  // ----- branch settings: apply one commission rate to every barber of a branch -----
+  const apm = p.match(/^\/api\/branches\/(\w+)\/apply-commission$/);
+  if (apm && method === 'POST') {
+    adminOnly(); const br = get('branches', apm[1]); if (!br) bad(404, 'Not found');
+    const pct = +(await readBody(req)).pct; if (!(pct >= 0 && pct <= 100)) bad(400, 'Commission must be between 0 and 100');
+    run('update branches set defaultPct=? where id=?', pct, br.id); const r = run('update staff set pct=? where branchId=?', pct, br.id);
+    log(me, 'apply-commission', 'branches', br.id, `${pct}% to ${r.changes} barbers`); return send(res, 200, { ok: true, updated: Number(r.changes) });
+  }
+  // ----- reset a user's PIN / password (shown once) -----
+  const urm = p.match(/^\/api\/users\/(\w+)\/reset$/);
+  if (urm && method === 'POST') {
+    adminOnly(); const u = get('users', urm[1]); if (!u) bad(404, 'Not found');
+    if (u.role === 'admin' && me.role !== 'owner') bad(403, 'Only the owner can reset an admin');
+    if (u.role === 'admin') { const pw = crypto.randomBytes(6).toString('base64url'); run('update users set passHash=? where id=?', hashPw(pw), u.id); log(me, 'reset-password', 'users', u.id, u.name); return send(res, 200, { password: pw }); }
+    let pin; do { pin = String(100000 + crypto.randomInt(900000)); } while (one('select 1 x from users where pinKey=?', pinKeyOf(pin)));
+    run('update users set pinKey=? where id=?', pinKeyOf(pin), u.id); log(me, 'reset-pin', 'users', u.id, u.name); return send(res, 200, { pin });
+  }
   // ----- settings: terms, email (admin) -----
   if (p === '/api/settings' && method === 'GET') {
     adminOnly();
-    return send(res, 200, { terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+    return send(res, 200, { perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
       log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
   }
   if (p === '/api/settings' && method === 'PUT') {
     adminOnly(); const b = await readBody(req, 50_000);
     if ('terms' in b) setSetting('terms', String(b.terms || '').trim().slice(0, 8000));
+    if (b.perms && typeof b.perms === 'object') {
+      const cur = permsAll(), next = {}; for (const role of ['cashier', 'barber']) next[role] = Array.isArray(b.perms[role]) ? b.perms[role].filter(m => MODULES.includes(m)) : cur[role];
+      setSetting('perms', JSON.stringify(next)); log(me, 'settings', 'settings', '', 'access ' + JSON.stringify(next));
+    }
     log(me, 'settings', 'settings', '', 'terms'); return send(res, 200, { ok: true });
+  }
+  if (p === '/api/settings/reset' && method === 'POST') {
+    if (me.role !== 'owner') bad(403, 'Only the owner can reset data');
+    const b = await readBody(req); if (b.confirm !== 'RESET') bad(400, 'Type RESET to confirm');
+    if (!b.sales && !b.bookings && !b.reviews && !b.customers) bad(400, 'Choose what to reset');
+    const file = path.join(BK_DIR, 'pre-reset-' + nowISO().replace(/[:.]/g, '-') + '.db'); backup(file);   // safety copy first
+    const gone = {}; db.exec('begin');
+    try {
+      if (b.sales) for (const tb of ['orders', 'shifts', 'cash_moves', 'zreadings', 'attendance', 'payroll_days']) gone[tb] = Number(run(`delete from ${tb}`).changes);
+      if (b.bookings) gone.bookings = Number(run('delete from bookings').changes);
+      if (b.reviews) gone.reviews = Number(run('delete from reviews').changes);
+      if (b.customers) { gone.customers = Number(run('delete from customers').changes); gone.emails = Number(run('delete from email_log').changes); }
+      db.exec('commit');
+    } catch (e) { db.exec('rollback'); throw e; }
+    log(me, 'reset-data', 'settings', '', JSON.stringify(gone)); return send(res, 200, { ok: true, deleted: gone, backup: path.basename(file) });
   }
   if (p === '/api/settings/test-email' && method === 'POST') {
     adminOnly(); const to = normEmail((await readBody(req)).to); if (!validEmail(to)) bad(400, 'Invalid email address');
-    if (!EMAIL.key) bad(409, 'Hindi pa naka-set ang email service (RESEND_API_KEY sa Railway Variables).');
+    if (!EMAIL.key) bad(409, 'The email service is not connected yet (add RESEND_API_KEY in the Railway variables).');
     const w = welcomeEmail({ name: me.name }), unsub = baseUrl() + '/unsubscribe?test=1';
     const r = await sendEmail({ to, subject: 'TEST: ' + w.subject, html: w.html.replaceAll('{{UNSUB}}', unsub), text: w.text.replaceAll('{{UNSUB}}', unsub) });
     if (!r.ok) bad(502, r.error); log(me, 'test-email', 'settings', '', to); return send(res, 200, { ok: true });
@@ -804,18 +901,18 @@ async function handle(req, res) {
 
   // ----- bookings (cashier + admin) -----
   if (p === '/api/bookings' && method === 'GET') {
-    const bid = me.role === 'cashier' ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null);
+    const bid = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null);
     const ok = s => /^\d{4}-\d{2}-\d{2}$/.test(s || ''), from = ok(q.from) ? q.from : (ok(q.date) ? q.date : todayStr()), to = ok(q.to) ? q.to : (ok(q.date) ? q.date : from);
     return send(res, 200, all(`select * from bookings where date>=? and date<=?${bid ? ' and branchId=?' : ''} order by date, time`, ...(bid ? [from, to, bid] : [from, to])).map(bookingView));
   }
   if (p === '/api/bookings' && method === 'POST') {
-    const b = await readBody(req); b.branchId = me.role === 'cashier' ? me.branchId : b.branchId;
+    const b = await readBody(req); b.branchId = isBranchUser(me) ? me.branchId : b.branchId;
     const bk = createBooking(b, 'pos'); log(me, 'booking', 'bookings', bk.id, `${bk.customerName} ${bk.date} ${bk.time}`); return send(res, 201, bk);
   }
   const bkm = p.match(/^\/api\/bookings\/(\w+)(?:\/(arrive))?$/);
   if (bkm) {
     const cur = one('select * from bookings where id=?', bkm[1]); if (!cur) bad(404, 'Not found');
-    if (me.role === 'cashier' && cur.branchId !== me.branchId) bad(403, 'Not your branch');
+    if (isBranchUser(me) && cur.branchId !== me.branchId) bad(403, 'Not your branch');
     if (method === 'PUT' && !bkm[2]) {
       const b = await readBody(req); if (!['cancelled', 'noshow'].includes(b.status)) bad(400, 'Bad status');
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
@@ -824,7 +921,7 @@ async function handle(req, res) {
     if (method === 'POST' && bkm[2] === 'arrive') {
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
       const items = priceItems(jp(cur.itemIds).map(i => ({ itemId: i, qty: 1 })));
-      const cust = (cur.customerId && get('customers', cur.customerId)) || findCustomer(cur.phone, '') || upsertCustomer({ name: cur.customerName, phone: cur.phone }, 'online');
+      const cust = (cur.customerId && get('customers', cur.customerId)) || findCustomer(cur.phone, '') || upsertCustomer({ name: cur.customerName, phone: cur.phone }, 'online', cur.branchId);
       const o = createTicket(me, cur.branchId, cust.id, cust.name, items, cur.staffId);
       run("update bookings set status='arrived', orderId=? where id=?", o.id, cur.id); log(me, 'booking-arrived', 'bookings', cur.id, `#${o.no} ${cur.customerName}`);
       return send(res, 200, { order: o, seated: o.status === 'in_chair' });
@@ -852,7 +949,7 @@ async function handle(req, res) {
     return send(res, 200, { ok: true, days: n });
   }
   if (p === '/api/live' && method === 'GET') {
-    const br = me.role === 'cashier' ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), t = todayStr();
+    const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), t = todayStr();
     const duty = all(`select a.*, s.name from attendance a join staff s on s.id=a.staffId where a.date=? and a.timeOut is null and ifnull(a.status,'present')='present'${br ? ' and a.branchId=?' : ''}`, ...(br ? [t, br] : [t]));
     const onBreak = duty.filter(d => d.breakStartedAt).length;
     const queue = all(`select o.*, b.name branchName, s.name barberName from orders o left join branches b on b.id=o.branchId left join staff s on s.id=o.barberId
@@ -912,11 +1009,12 @@ async function handle(req, res) {
   }
   if (p === '/api/orders' && method === 'POST') {
     const b = await readBody(req), branchId = branchScope(me, b.branchId), t = todayStr();
-    const cust = resolveCustomer(b, 'pos'), name = cust.name.slice(0, 200); if (!name) bad(400, 'Customer name required');
+    const cust = resolveCustomer(b, 'pos', branchId), name = cust.name.slice(0, 200); if (!name) bad(400, 'Customer name required');
     const items = priceItems(b.items), tt = totals(items, null);
     const no = (one('select max(no) m from orders where branchId=? and date=?', branchId, t).m || 0) + 1, ord = (one('select max(ord) m from orders').m || 0) + 1, id = uid();
-    run(`insert into orders(id,ord,no,branchId,date,customerId,customerName,barberId,chairId,status,items,subtotal,discountName,discountAmt,total,tenders,cashierId,createdAt)
-      values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, cust.id, name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO());
+    const dsc = b.discountId && get('discounts', String(b.discountId))?.active ? String(b.discountId) : '';
+    run(`insert into orders(id,ord,no,branchId,date,customerId,customerName,barberId,chairId,status,items,subtotal,discountName,discountAmt,total,tenders,cashierId,createdAt,discountId)
+      values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, cust.id, name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO(), dsc);
     const o = { id, ord, no, branchId };
     if (b.barberId) { const a = checkAssign(o, b); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); }
     log(me, 'ticket', 'orders', id, `#${no} ${name}`);
@@ -925,15 +1023,17 @@ async function handle(req, res) {
   const om = p.match(/^\/api\/orders\/(\w+)(?:\/(pay|void))?$/);
   if (om) {
     const cur = get('orders', om[1]); if (!cur) bad(404, 'Not found');
-    if (me.role === 'cashier' && cur.branchId !== me.branchId) bad(403, 'Not your branch');
+    if (isBranchUser(me) && cur.branchId !== me.branchId) bad(403, 'Not your branch');
     const o = parseOrder(cur), act = om[2];
     if (method === 'GET' && !act) return send(res, 200, withCust(o));
     if (method === 'PUT' && !act) {
       if (!['waiting', 'in_chair'].includes(o.status)) bad(409, 'Order is already closed');
       const b = await readBody(req); const upd = {};
+      if (!admin && Object.keys(b).some(k => !['barberId', 'chairId'].includes(k))) needAny(me, 'pos');
       if ('items' in b) { const items = priceItems(b.items), tt = totals(items, null); upd.items = JSON.stringify(items); upd.subtotal = tt.subtotal; upd.total = tt.total; }
+      if ('discountId' in b) upd.discountId = b.discountId && get('discounts', String(b.discountId))?.active ? String(b.discountId) : '';
       if ('customer' in b || 'customerName' in b || 'customerId' in b) {
-        const c = resolveCustomer({ ...b, customerName: b.customerName || o.customerName }, 'pos'); upd.customerId = c.id; upd.customerName = c.name.slice(0, 200) || o.customerName;
+        const c = resolveCustomer({ ...b, customerName: b.customerName || o.customerName }, 'pos', o.branchId); upd.customerId = c.id; upd.customerName = c.name.slice(0, 200) || o.customerName;
       }
       if ('barberId' in b) {
         if (!b.barberId) { upd.barberId = ''; upd.chairId = ''; upd.status = 'waiting'; upd.startedAt = null; }
@@ -947,8 +1047,8 @@ async function handle(req, res) {
       if (!o.items.length) bad(409, 'Add at least one service or product');
       if (!o.barberId && o.items.some(i => i.type === 'service')) bad(409, 'Assign a barber first');
       const shift = openShift(o.branchId); if (!shift) bad(409, 'Open a shift first (Cash management)');
-      const b = await readBody(req), disc = b.discountId ? get('discounts', b.discountId) : null;
-      if (b.discountId && (!disc || !disc.active)) bad(400, 'Unknown discount');
+      const b = await readBody(req), did = 'discountId' in b ? b.discountId : cur.discountId, disc = did ? get('discounts', String(did)) : null;
+      if (did && (!disc || !disc.active)) bad(400, 'Unknown discount');
       const tt = totals(o.items, disc);
       const tenders = (Array.isArray(b.tenders) ? b.tenders : []).map(t => ({ method: String(t.method || '').slice(0, 30), amount: r2(t.amount) })).filter(t => t.method && t.amount > 0);
       const paid = sum(tenders, t => t.amount), change = r2(paid - tt.total);
@@ -971,7 +1071,7 @@ async function handle(req, res) {
   }
   if (p === '/api/attendance' && method === 'POST') {
     const b = await readBody(req), s = get('staff', b.staffId); if (!s || !s.active) bad(404, 'Unknown barber');
-    if (me.role === 'cashier' && s.branchId !== me.branchId) bad(403, 'Not your branch');
+    if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
     const t = todayStr(), open = onDuty(s.id, t), br = get('branches', s.branchId);
     if (b.action === 'in') {
       if (open) bad(409, `${s.name} is already clocked in`);
@@ -1007,7 +1107,7 @@ async function handle(req, res) {
   const sm = p.match(/^\/api\/shifts\/(\w+)\/close$/);
   if (sm && method === 'POST') {
     const s = get('shifts', sm[1]); if (!s || s.status !== 'open') bad(404, 'No such open shift');
-    if (me.role === 'cashier' && s.branchId !== me.branchId) bad(403, 'Not your branch');
+    if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
     if (one("select 1 x from orders where branchId=? and status='in_chair'", s.branchId)) bad(409, 'Finish all customers in the chair before closing');
     const b = await readBody(req), z = zData(s); let counted;
     if (b.denoms && typeof b.denoms === 'object') {   // cash denomination counter: { "1000": 2, "50": 3, ... }
@@ -1025,7 +1125,8 @@ async function handle(req, res) {
   }
   if (p === '/api/cash' && method === 'POST') {
     const b = await readBody(req), s = get('shifts', b.shiftId); if (!s || s.status !== 'open') bad(409, 'Shift is not open');
-    if (me.role === 'cashier' && s.branchId !== me.branchId) bad(403, 'Not your branch');
+    if (!admin) needAny(me, b.kind === 'expense' ? 'expenses' : 'reading');
+    if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
     if (!['in', 'out', 'expense', 'advance'].includes(b.kind)) bad(400, 'Bad type');
     const amount = r2(b.amount); if (!(amount > 0)) bad(400, 'Amount must be more than 0');
     if (b.kind === 'advance' && !get('staff', b.staffId)) bad(400, 'Pick the barber');
@@ -1038,12 +1139,13 @@ async function handle(req, res) {
   const m = p.match(/^\/api\/(\w+)(?:\/(\w+))?$/);
   if (!m || !CRUD.has(m[1])) bad(404, 'Not found');
   const [, kind, id] = m;
-  if (!(kind === 'customers' && me.role === 'cashier' && (method === 'POST' || method === 'PUT'))) adminOnly();
+  if (!(kind === 'customers' && isBranchUser(me) && (method === 'POST' || method === 'PUT'))) adminOnly();
   if (method === 'POST' && !id) {
     const b = await readBody(req);
     if (kind !== 'users') { b.name = String(b.name || '').trim(); if (!b.name) bad(400, 'Name required'); }
     if (kind === 'customers') b.createdAt = nowISO();
     if ((kind === 'chairs' || kind === 'staff') && !get('branches', b.branchId)) bad(400, 'Pick a branch');
+    if (kind === 'staff' && (b.pct === undefined || b.pct === '')) b.pct = get('branches', b.branchId)?.defaultPct ?? 40;
     if (kind === 'items' && !(+b.price >= 0)) bad(400, 'Check the price');
     if (kind === 'staff' || kind === 'chairs' || kind === 'items' || kind === 'discounts') b.active ??= 1;
     if (kind === 'items') { b.bookable ??= b.type === 'service' ? 1 : 0; b.apptOnly ??= 0; }
@@ -1064,7 +1166,7 @@ async function handle(req, res) {
     const used = (REFS[kind] || []).some(([t, c]) => one(`select 1 x from ${t} where ${c}=?`, id));
     if (used) {
       if (SOFT.has(kind)) { run(`update ${kind} set active=0 where id=?`, id); log(me, 'deactivate', kind, id, ''); return send(res, 200, { ok: true, deactivated: true }); }
-      bad(409, 'Ginagamit pa ito, kaya hindi mabubura');
+      bad(409, 'This is still in use, so it cannot be deleted');
     }
     run(`delete from ${kind} where id=?`, id); log(me, 'delete', kind, id, ''); return send(res, 200, { ok: true });
   }

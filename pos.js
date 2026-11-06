@@ -33,7 +33,12 @@ let token = ''; try { token = localStorage.getItem('bp.pos') || ''; } catch (e) 
 const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: [], boot: null, dash: null, queue: [], att: [], exp: null, shift: null, z: [], zs: [], view: 'dashboard', pin: '', err: '',
   cart: { items: [], barberId: '', mode: 'later', editing: null }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
-const br = () => P.me && P.me.role !== 'cashier' ? `branch=${P.branch}` : '';
+// which sections this login may open (the owner sets this in Settings → Access)
+const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading' };
+const isAdminRole = () => P.me && ['owner', 'admin'].includes(P.me.role);
+const canOpen = v => (P.mods || []).includes(VMAP[v]);
+const firstView = () => Object.keys(VMAP).find(canOpen) || '';
+const br = () => isAdminRole() ? `branch=${P.branch}` : '';
 const withBr = u => { const b = br(); return b ? u + (u.includes('?') ? '&' : '?') + b : u; };
 
 async function api(method, url, body) {
@@ -48,9 +53,10 @@ const guard = async fn => { try { return await fn(); } catch (e) { toast(e.messa
 // ---------- data ----------
 async function refresh() {
   if (!P.me) return;
+  if (!canOpen(P.view)) P.view = firstView() || P.view;
   try {
     P.boot = await api('GET', withBr('/api/pos/bootstrap')); P.shift = P.boot.shift;
-    P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings();
+    if (canOpen('appts')) { P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings(); } else P.bk = [];
     if (P.view === 'dashboard') P.dash = await api('GET', withBr('/api/pos/dashboard'));
     if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
@@ -63,14 +69,14 @@ function notifyBookings() {
   const ids = new Set(P.bk.map(b => b.id));
   if (P._seen) {
     const fresh = P.bk.filter(b => !P._seen.has(b.id) && b.source === 'online' && b.status === 'booked');
-    if (fresh.length) { toast(`🔔 Bagong booking: ${fresh[0].customerName} · ${t12(fresh[0].time)}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`); beep(); }
+    if (fresh.length) { toast(`🔔 New booking: ${fresh[0].customerName} · ${t12(fresh[0].time)}${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`); beep(); }
   }
   P._seen = ids;
 }
 async function afterLogin(j) {
   token = j.token; try { localStorage.setItem('bp.pos', token); } catch (e) { }
-  const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || [];
-  if (P.me.role !== 'cashier') { P.branch = P.branches[0]?.id || ''; }
+  const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || []; P.mods = st.modules || Object.values(VMAP);
+  if (isAdminRole()) { P.branch = P.branches[0]?.id || ''; }
   await refresh();
 }
 
@@ -79,18 +85,19 @@ const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 
 function render() {
   if (!P.me) {
     app.innerHTML = `<main class="login"><img class="logo" src="/icon-192.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
-      <div class="dots">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i < P.pin.length ? 'on' : ''}"></i>`).join('')}</div><p style="color:var(--bad);min-height:22px;font-size:13px">${esc(P.err) || 'Ilagay ang iyong 6-digit PIN'}</p>
+      <div class="dots">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i < P.pin.length ? 'on' : ''}"></i>`).join('')}</div><p style="color:var(--bad);min-height:22px;font-size:13px">${esc(P.err) || 'Enter your 6-digit PIN'}</p>
       <div class="pin">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-a="pin" data-n="${n}">${n}</button>`).join('')}<button data-a="pinclr" class="ghost">CLR</button><button data-a="pin" data-n="0">0</button><button data-a="pinbk" class="ghost">⌫</button></div></main>`;    return;
   }
   const b = P.boot;
-  const nav = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue']];
+  if (!canOpen(P.view)) P.view = firstView();
+  if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
+  const nav = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue']].filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div><span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
-    <main class="${enter}">${P.me.role !== 'cashier' ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
+    <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
     ${P.view === 'pos' && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
     <nav class="bottom"><div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="${k === 'more' ? 'more' : 'go'}" data-v="${k}">${ic(icn)}${l}</button>`).join('')}</div></nav>`;
 }
-const cartTotal = () => P.cart.items.reduce((s, i) => s + i.price * i.qty, 0);
 const staffById = id => P.boot?.staff.find(s => s.id === id);
 const cuttingIds = () => new Set((P.boot?.queue || []).filter(o => o.status === 'in_chair').map(o => o.barberId));
 const stateLabel = { present: 'Present', late: 'Late', break: 'On break', off: 'Off duty', out: 'Timed out', none: 'Not timed in' };
@@ -103,10 +110,11 @@ const VIEWS = {
     <div class="kpis"><div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in queue</small><div class="num">${d.waiting}</div><small>${d.cutting} in chair</small></div>
       <div class="card kpi g"><div class="ic">${ic('scissors')}</div><small>Barbers on duty</small><div class="num">${d.onDuty}<span class="mute" style="font-size:18px"> / ${d.totalBarbers}</span></div><small>available for walk-ins</small></div></div>
     ${bookingsCard()}
-    <div class="sect"><h3>Live walk-in floor</h3><span class="mute">${d.queue.length} active</span></div>${d.queue.map(o => ticketHtml(o)).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">Walang customer sa floor ngayon.</p></div>'}`;
+    <div class="sect"><h3>Live walk-in floor</h3><span class="mute">${d.queue.length} active</span></div>${d.queue.map(o => ticketHtml(o)).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No customers on the floor right now.</p></div>'}`;
   },  pos() {
     const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat);
-    return `${s ? '' : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Buksan muna ang shift para makapag-checkout.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}    ${P.cart.editing ? `<div class="card">Editing ticket — <button class="sm ghost" data-a="canceledit">cancel</button></div>` : `<div class="seg"><button class="${P.cart.mode === 'now' ? 'on' : ''}" data-a="mode" data-m="now">Pay as you order</button><button class="${P.cart.mode === 'later' ? 'on' : ''}" data-a="mode" data-m="later">Pay later</button></div>`}
+    return `${s ? '' : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Open a shift first so you can take payments.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}
+    ${P.cart.editing ? `<div class="card">Editing ticket · <button class="sm ghost" data-a="canceledit">cancel</button></div>` : ''}
     <div class="chips"><button class="chip ${P.cat === 'all' ? 'on' : ''}" data-a="cat" data-c="all">All</button>${cats.map(c => `<button class="chip ${P.cat === c.id ? 'on' : ''}" data-a="cat" data-c="${c.id}">${esc(c.name)}</button>`).join('')}</div>
     <div class="grid">${items.map(i => `<button class="item ${i.type} ${i.photo ? 'hasphoto' : ''}" data-a="add" data-id="${i.id}">${i.photo ? `<img class="pic" src="${esc(i.photo)}" alt="" loading="lazy">` : `<span class="mono">${ic(i.type === 'service' ? 'scissors' : 'bottle')}</span>`}<span class="body"><span class="nm">${esc(i.name)}</span><small>${i.type === 'service' ? i.mins + ' min' : 'Product'}${i.apptOnly ? ' · Appt only' : ''}</small><b>${peso(i.price)}</b></span><span class="plus">${ic('plus', 'sm')}</span></button>`).join('')}</div>`;
   },
@@ -120,7 +128,7 @@ const VIEWS = {
       <div class="row between" style="flex-wrap:nowrap"><b>${esc(b.customerName)}</b><span class="tag ${b.status === 'booked' ? 'waiting' : b.status === 'arrived' ? 'paid' : 'void'}">${b.status === 'noshow' ? 'No-show' : b.status[0].toUpperCase() + b.status.slice(1)}</span></div>
       <small>${b.items.map(i => esc(i.name)).join(', ')} · ${peso(b.total)}</small>
       <div class="who">${av(b.staffName, b.staffPhoto, 'xs')}<small>${esc(b.staffName || 'Any barber')} · ${b.source === 'online' ? 'Online' : 'Phone/POS'}</small></div>
-      <div class="acts"><a class="sm ghost callbtn" href="tel:${esc(b.phone)}">${ic('phone', 'sm')} ${esc(b.phone)}</a>${b.status === 'booked' ? `<button class="sm ok" data-a="arrive" data-id="${b.id}">Arrived</button><button class="sm ghost" data-a="bkno" data-id="${b.id}">No-show</button><button class="sm bad" data-a="bkcancel" data-id="${b.id}">Cancel</button>` : ''}</div></div></div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">Walang booking sa araw na ito.</p></div>'}`;
+      <div class="acts"><a class="sm ghost callbtn" href="tel:${esc(b.phone)}">${ic('phone', 'sm')} ${esc(b.phone)}</a>${b.status === 'booked' ? `<button class="sm ok" data-a="arrive" data-id="${b.id}">Arrived</button><button class="sm ghost" data-a="bkno" data-id="${b.id}">No-show</button><button class="sm bad" data-a="bkcancel" data-id="${b.id}">Cancel</button>` : ''}</div></div></div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No bookings on this day.</p></div>'}`;
   },  queue() {
     const f = P.qf, list = P.queue.filter(o => (f.status === 'waiting' ? o.status === 'waiting' : f.status === 'chair' ? o.status === 'in_chair' : true) && (!f.barber || o.barberId === f.barber));
     const waiting = P.queue.filter(o => o.status === 'waiting'), chair = P.queue.filter(o => o.status === 'in_chair');
@@ -155,9 +163,9 @@ const VIEWS = {
     if (P.tab === 'z') return tabs + (P.zs.map((z, idx) => `<div class="card" data-a="viewz" data-i="${idx}" style="cursor:pointer"><div class="row between"><b>Z-${z.no}</b><span class="mute">${z.businessDate}</span></div><small class="mute">Shift #${z.data.shiftNo || ''} · ${hm(z.generatedAt)}</small><hr>
       <div class="row between"><span>Net sales</span><b>${peso(z.data.net)}</b></div><div class="row between"><span>Expected cash</span><span>${peso(z.data.expected)}</span></div><div class="row between"><span>Counted</span><span>${peso(z.data.counted)}</span></div>
       <div class="row between"><span>Variance</span><b style="color:${z.data.variance < 0 ? 'var(--bad)' : z.data.variance > 0 ? 'var(--info)' : 'var(--ok)'}">${peso(z.data.variance)}</b></div></div>`).join('') || '<p class="mute">No Z-readings yet.</p>');
-    const c = P.cur; if (!c?.shift) return tabs + `<div class="card"><p>Walang bukas na shift.</p><button data-a="openshift">Open shift</button></div>`;
+    const c = P.cur; if (!c?.shift) return tabs + `<div class="card"><p>There is no open shift.</p><button data-a="openshift">Open shift</button></div>`;
     const z = c.z, counted = DENOMS.reduce((t, d) => t + d * (P.denoms[d] || 0), 0), nonCash = Object.entries(z.tender).filter(([k]) => k !== 'Cash'), variance = counted - z.expected;
-    return `${tabs}<div class="card"><b>Cash denomination counter</b><p class="mute" style="margin:2px 0 6px">Bilangin ang bills at coins sa drawer</p>
+    return `${tabs}<div class="card"><b>Cash denomination counter</b><p class="mute" style="margin:2px 0 6px">Count the bills and coins in the drawer</p>
       ${DENOMS.map(d => `<div class="row between" style="padding:6px 0"><b style="width:70px">₱${d}</b><div class="qty"><button class="ghost sm" data-a="den" data-d="${d}" data-n="-1">−</button><input type="number" min="0" inputmode="numeric" data-den="${d}" value="${P.denoms[d] || 0}" style="width:70px;text-align:center"><button class="ghost sm" data-a="den" data-d="${d}" data-n="1">＋</button></div><span style="width:90px;text-align:right">${peso(d * (P.denoms[d] || 0))}</span></div>`).join('')}</div>
     <div class="card"><b>Non-cash (auto)</b>${nonCash.map(([k, v]) => `<div class="row between"><span>${esc(k)}</span><span>${peso(v)}</span></div>`).join('') || '<p class="mute">No non-cash transactions for this shift.</p>'}</div>
     <div class="card"><b>Shift drawer reconciliation</b><hr>
@@ -178,7 +186,7 @@ function ticketHtml(o, actions) {
 }
 function bookingsCard() {
   const t = ymd(0), list = (P.bk || []).filter(b => b.date === t && b.status === 'booked').sort((a, b) => a.time.localeCompare(b.time)), next = list[0];
-  return `<div class="card kpi" data-a="go" data-v="appts" style="cursor:pointer;display:flex;gap:14px;align-items:center"><div class="ic" style="margin:0">${ic('calendar')}</div><div style="flex:1"><small>Bookings today</small><div class="num" style="font-size:24px">${list.length} upcoming</div>${next ? `<small>Next: ${esc(next.customerName)} · ${t12(next.time)}</small>` : '<small>Walang nakabinbin na booking</small>'}</div></div>`;
+  return `<div class="card kpi" data-a="go" data-v="appts" style="cursor:pointer;display:flex;gap:14px;align-items:center"><div class="ic" style="margin:0">${ic('calendar')}</div><div style="flex:1"><small>Bookings today</small><div class="num" style="font-size:24px">${list.length} upcoming</div>${next ? `<small>Next: ${esc(next.customerName)} · ${t12(next.time)}</small>` : '<small>No pending bookings</small>'}</div></div>`;
 }
 function apptSheet() {
   const n = P.na, svcs = P.boot.items.filter(i => i.type === 'service');
@@ -187,7 +195,7 @@ function apptSheet() {
     <label>Services</label><div class="chips" style="flex-wrap:wrap">${svcs.map(i => `<button class="chip ${n.items.includes(i.id) ? 'on' : ''}" data-a="natoggle" data-id="${i.id}">${esc(i.name)} · ${peso(i.price)}</button>`).join('')}</div>
     <label>Barber</label><select data-na="staff"><option value="any">Any available</option>${P.boot.staff.map(s => `<option value="${s.id}" ${n.staff === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
     <label>Date</label><input data-na="date" type="date" min="${ymd(0)}" value="${n.date}">
-    <label>Time</label>${!n.items.length ? '<p class="mute">Pumili muna ng serbisyo.</p>' : n.slots === null ? '<p class="mute">Hinahanap ang bakanteng oras…</p>' : n.slots.length ? `<div class="chips" style="flex-wrap:wrap">${n.slots.map(t => `<button class="chip ${n.time === t ? 'on' : ''}" data-a="natime" data-t="${t}">${t12(t)}</button>`).join('')}</div>` : '<p class="mute">Walang bakanteng oras.</p>'}
+    <label>Time</label>${!n.items.length ? '<p class="mute">Choose a service first.</p>' : n.slots === null ? '<p class="mute">Looking for open times…</p>' : n.slots.length ? `<div class="chips" style="flex-wrap:wrap">${n.slots.map(t => `<button class="chip ${n.time === t ? 'on' : ''}" data-a="natime" data-t="${t}">${t12(t)}</button>`).join('')}</div>` : '<p class="mute">No open times.</p>'}
     <p id="err" style="color:var(--bad)">${esc(n.err)}</p><button class="block" id="nasave" data-a="nasave" ${n.time && n.name.trim() && n.phone.replace(/\D/g, '').length >= 10 ? '' : 'disabled'}>Save appointment</button>`);
 }
 async function naSlots() {
@@ -198,55 +206,76 @@ async function naSlots() {
 }
 
 // ---------- cart / ticket / payment ----------
+const cartHasService = () => P.cart.items.some(i => i.type === 'service');
+const cartTotal = () => P.cart.items.reduce((s, i) => s + i.price * i.qty, 0);
+function discountOf() { const d = P.boot.discounts.find(x => x.id === P.cart.discountId); if (!d) return 0; const sub = cartTotal(); return Math.min(sub, d.kind === 'percent' ? sub * d.value / 100 : d.value); }
+function pushItem(it) { const c = P.cart.items.find(x => x.itemId === it.id); if (c) c.qty++; else P.cart.items.push({ itemId: it.id, name: it.name, type: it.type, price: it.price, qty: 1 }); }
 function addItem(id) {
-  const pre = P.boot.items.find(i => i.id === id); if (pre?.apptOnly && !P.cart.items.some(x => x.itemId === id)) { toast(pre.name + ' ay appointment lang. Gamitin ang Bookings tab.', true); return; }
-  const it = P.boot.items.find(i => i.id === id), c = P.cart.items.find(x => x.itemId === id);
-  if (c) c.qty++; else P.cart.items.push({ itemId: id, name: it.name, type: it.type, price: it.price, qty: 1 });
-  render();
+  const it = P.boot.items.find(i => i.id === id);
+  if (it.apptOnly && !P.cart.items.some(x => x.itemId === id)) { toast(it.name + ' is by appointment only. Use the Bookings tab.', true); return; }
+  if (!cu().name.trim()) return customerSheet(it);   // first item: ask who the customer is (same as the other POS)
+  pushItem(it); render();
 }
-function freeBarbers(includeId) {
-  const cut = cuttingIds();
-  return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && (!cut.has(s.id) || s.id === includeId));
+function freeBarbers() { const cut = cuttingIds(); return P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && !cut.has(s.id)); }
+const chairName = id => P.boot?.chairs.find(c => c.id === id)?.name || '';
+function assignSheet(id) {
+  const as = P.as && P.as.id === id ? P.as : (P.as = { id, barberId: '', chairId: '' });
+  const free = freeBarbers(), used = new Set((P.boot.queue || []).filter(o => o.status === 'in_chair').map(o => o.chairId)), chairs = P.boot.chairs.filter(ch => !used.has(ch.id));
+  openSheet(`<div class="row between"><h2 style="margin:0">Assign Chair &amp; Barber</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
+    <label>Barber</label>${free.map(s => `<button class="opt ${as.barberId === s.id ? 'on' : ''}" data-a="asbarber" data-id="${s.id}">${av(s.name, s.photo)}<span><b>${esc(s.name)}</b><small>${esc(chairName(s.chairId) || 'No chair')}</small></span><span class="ck">${as.barberId === s.id ? ic('plus', 'sm') : ''}</span></button>`).join('') || '<p class="mute">No barber is available right now. Time in the barbers under Barber Attendance, or wait for someone to finish.</p>'}
+    <label>Chair</label><div class="chips" style="flex-wrap:wrap">${chairs.map(ch => `<button class="chip ${as.chairId === ch.id ? 'on' : ''}" data-a="aschair" data-id="${ch.id}">${esc(ch.name)}</button>`).join('') || '<span class="mute">No free chairs</span>'}</div>
+    <p id="err" style="color:var(--bad)"></p>
+    <div class="row" style="flex-wrap:nowrap"><button class="ghost block" data-a="closesheet">Wait in queue</button><button class="block" data-a="asgo" ${as.barberId && as.chairId ? '' : 'disabled'}>Assign &amp; Start</button></div>`);
 }
-function seatSheet(id) {
-  const free = freeBarbers(), bs = P.boot.staff.filter(s => ['present', 'late'].includes(s.state) && cuttingIds().has(s.id));
-  openSheet(`<div class="row between"><h2 style="margin:0">Available barbers</h2><button class="ghost sm" data-a="closesheet">Close</button></div><p class="mute">Pumili ng barber para sa customer.</p>
-    ${free.map(s => `<button class="block ghost" style="margin-bottom:8px;text-align:left" data-a="doseat" data-id="${id}" data-b="${s.id}"><span class="row" style="flex-wrap:nowrap;gap:12px">${av(s.name, s.photo)}<span><b>${esc(s.name)}</b><br><span class="mute">${esc(P.boot.chairs.find(c => c.id === s.chairId)?.name || '')}</span></span></span></button>`).join('') || '<p class="mute">Walang available na barber ngayon. Mag-time in sa Attendance, o hintayin matapos ang iba.</p>'}
-    ${bs.length ? `<p class="mute">Busy: ${bs.map(s => esc(s.name)).join(', ')}</p>` : ''}<button class="block ghost" data-a="closesheet">Wait in queue (assign later)</button>`);
+function customerSheet(pending) {
+  P.pendingItem = pending || null;
+  openSheet(`<div class="row between"><h2 style="margin:0">${pending ? 'Add to Cart: ' + esc(pending.name) : 'Customer details'}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
+    ${pending ? `<div class="cust-card" style="margin:10px 0 0"><div class="row between"><b>${esc(pending.name)}</b><b>${peso(pending.price)}</b></div></div>` : ''}
+    ${custBlock()}<p id="err" style="color:var(--bad);margin:8px 0 0"></p>
+    <div class="row" style="flex-wrap:nowrap;margin-top:10px"><button class="ghost block" data-a="closesheet">Cancel</button><button class="block" data-a="custdone">${pending ? 'Add to Cart' : 'Done'}</button></div>`);
+}
+function discountSheet() {
+  openSheet(`<div class="row between"><h2 style="margin:0">Discount</h2><button class="ghost sm" data-a="cartback">Back</button></div><p class="mute">Choose a discount voucher for this order.</p>
+    <button class="opt ${P.cart.discountId ? '' : 'on'}" data-a="pickdisc" data-id=""><span><b>No discount</b></span></button>
+    ${P.boot.discounts.map(d => `<button class="opt ${P.cart.discountId === d.id ? 'on' : ''}" data-a="pickdisc" data-id="${d.id}"><span><b>${esc(d.name)}</b><small>${d.kind === 'percent' ? d.value + '% off' : peso(d.value) + ' off'}</small></span></button>`).join('')}`);
 }
 function cartSheet() {
-  const c = P.cart, hasSvc = c.items.some(i => i.type === 'service'), need = c.mode === 'now' && !c.editing;
-  openSheet(`<div class="row between"><h2 style="margin:0">${c.editing ? 'Edit ticket' : c.mode === 'now' ? 'Checkout' : 'New walk-in ticket'}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
-    ${custBlock()}
-    <hr>${c.items.map((i, n) => `<div class="row between" style="padding:6px 0"><span>${esc(i.name)}<br><small class="mute">${peso(i.price)}</small></span><div class="qty"><button class="ghost sm" data-a="q" data-n="${n}" data-d="-1">−</button><b>${i.qty}</b><button class="ghost sm" data-a="q" data-n="${n}" data-d="1">＋</button></div></div>`).join('') || '<p class="mute">Cart is empty.</p>'}
-    <div class="row between"><b>Total</b><b>${peso(cartTotal())}</b></div>
-    ${hasSvc && (need || c.editing) ? `<label>Barber ${need ? '(required)' : '(optional — puwedeng i-assign mamaya)'}</label><select id="cartbarber"><option value="">— ${need ? 'choose barber' : 'assign later'} —</option>${freeBarbers(c.editBarber).map(s => `<option value="${s.id}" ${c.barberId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>${freeBarbers(c.editBarber).length ? '' : '<p class="mute">Walang available na barber (time in muna sa Attendance).</p>'}` : ''}
-    <p id="err" style="color:var(--bad)"></p>
-    <button class="block" data-a="${c.editing ? 'saveticket' : c.mode === 'now' ? 'gopay' : 'mkticket'}" ${c.items.length ? '' : 'disabled'}>${c.editing ? 'Save ticket' : c.mode === 'now' ? 'Proceed to payment' : 'Create ticket'}</button>`);
+  const c = P.cart, u = cu(), card = u.card, sub = cartTotal(), disc = discountOf(), svc = cartHasService(), dn = P.boot.discounts.find(d => d.id === c.discountId);
+  const sv = c.items.filter(i => i.type === 'service').map(i => i.name).join(', ');
+  openSheet(`<div class="row between"><h2 style="margin:0">${c.editing ? 'Edit ticket' : 'Cart'}</h2><button class="ghost sm" data-a="closesheet">Close</button></div>
+    <div class="custchip"><span class="av">${esc(initials(u.name || '?'))}</span><div style="flex:1;min-width:0"><b>${esc(u.name || 'No customer yet')}</b><br><small class="mute">${card ? `${esc(card.tier)} · ${card.visits} visits` : (u.phone || u.email ? 'New customer · joins the directory' : 'Walk-in · not in the directory')}</small></div><button class="ghost sm" data-a="changecust">Change</button></div>
+    ${c.items.map((i, n) => `<div class="cartrow"><div style="flex:1;min-width:0"><b>${esc(i.name)}</b><br><small class="mute">${peso(i.price)} each</small></div><div class="qty"><button class="ghost sm" data-a="q" data-n="${n}" data-d="-1">−</button><b>${i.qty}</b><button class="ghost sm" data-a="q" data-n="${n}" data-d="1">＋</button></div><b style="min-width:76px;text-align:right">${peso(i.price * i.qty)}</b><button class="ghost sm" data-a="rm" data-n="${n}" aria-label="Remove">✕</button></div>`).join('') || '<p class="mute">Your cart is empty.</p>'}
+    <div class="totals"><div class="row between"><span class="mute">Subtotal</span><span>${peso(sub)}</span></div>${disc ? `<div class="row between"><span class="mute">Discount${dn ? ' (' + esc(dn.name) + ')' : ''}</span><span>−${peso(disc)}</span></div>` : ''}<div class="row between" style="margin-top:6px"><b>Total Amount</b><b style="font-size:22px;font-family:Oswald">${peso(sub - disc)}</b></div></div>
+    ${svc && !c.editing ? `<div class="notice"><b>Chair assignment required before payment</b><br><small>Service items (${esc(sv)}) must be charged later on a chair and barber. Settle the payment afterwards from the Walk-in Queue.</small></div>` : ''}
+    <div class="row" style="flex-wrap:nowrap"><button class="ghost block" data-a="discount">${ic('tag', 'sm')} Discount${dn ? ': ' + esc(dn.name) : ''}</button><button class="ghost block" data-a="clearcart">Clear</button></div>
+    <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
+    <button class="block" data-a="${c.editing ? 'saveticket' : svc ? 'chargelater' : 'paynow'}" ${c.items.length ? '' : 'disabled'}>${c.editing ? 'Save ticket' : svc ? 'Charge Later — Assign Chair &amp; Barber' : 'Pay Now'}</button>`);
 }
-// ----- customer fill-up: full name, phone, email, preferred haircut, T&C consent -----
+
+// ----- customer details: full name, phone, email, preferred haircut, T&C consent -----
 const cu = () => P.cart.cu ||= { id: '', name: '', phone: '', email: '', cut: '', consent: false, card: null };
 const nextTierC = v => { const n = [[5, 'Bronze'], [16, 'Silver'], [26, 'Gold'], [51, 'VIP']].find(([m]) => m > v); return n ? { name: n[1], visitsNeeded: n[0] - v } : null; };
 const tierCls = t => `tier ${t}`;
 const fmtDate = iso => iso ? new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 function custCardHtml() {
   const u = cu(), c = u.card;
-  if (!c) return (u.phone.replace(/\D/g, '').length >= 10 || /@/.test(u.email)) ? `<div class="cust-card"><b>Bagong customer</b><br><small class="mute">Mapapasok sa Customer Directory at magsisimula sa 0 visits (Member).</small></div>` : '';
+  if (!c) return (u.phone.replace(/\D/g, '').length >= 10 || /@/.test(u.email)) ? `<div class="cust-card"><b>New customer</b><br><small class="mute">Will be added to the Customer Directory and start at 0 visits (Member).</small></div>` : '';
   return `<div class="cust-card"><div class="row between" style="flex-wrap:nowrap"><b>Returning customer ✓</b><span class="${tierCls(c.tier)}">${c.tier}</span></div>
     <div class="cgrid"><div><b>${c.visits}</b><small>visits / points</small></div><div><b>${peso(c.spent)}</b><small>total spent</small></div><div><b>${fmtDate(c.lastVisit)}</b><small>last visit</small></div></div>
-    <small class="mute">${nextTierC(c.visits) ? `${nextTierC(c.visits).visitsNeeded} pang visit para maging <b>${nextTierC(c.visits).name}</b>` : 'Nasa pinakamataas na tier na!'} · Pagkatapos ng bayad: <b>${c.visits + 1}</b> points</small>
-    ${c.consent ? '<br><small style="color:var(--ok)">✔ Naka-subscribe sa email at promos</small>' : ''}</div>`;
+    <small class="mute">${nextTierC(c.visits) ? `${nextTierC(c.visits).visitsNeeded} more visit${nextTierC(c.visits).visitsNeeded === 1 ? '' : 's'} to reach <b>${nextTierC(c.visits).name}</b>` : 'Top tier reached!'} · After payment: <b>${c.visits + 1}</b> points</small>
+    ${c.consent ? '<br><small style="color:var(--ok)">✔ Subscribed to email and promos</small>' : ''}</div>`;
 }
+const hitHtml = h => `<div class="card" style="padding:10px;margin:6px 0" data-a="pickcust" data-id="${h.id}"><div class="row between" style="flex-wrap:nowrap"><b>${esc(h.name)}</b><span class="${tierCls(h.tier)}">${h.tier}</span></div><small class="mute">${esc(h.phone || h.email || '')} · ${h.visits} visits</small></div>`;
 function custBlock() {
   const u = cu();
-  return `<label>Full name</label><input id="cu-name" placeholder="Buong pangalan" value="${esc(u.name)}" autocomplete="off">
-    <div id="custhits">${P.custHits.map(h => `<div class="card" style="padding:10px;margin:6px 0" data-a="pickcust" data-id="${h.id}"><div class="row between" style="flex-wrap:nowrap"><b>${esc(h.name)}</b><span class="${tierCls(h.tier)}">${h.tier}</span></div><small class="mute">${esc(h.phone || h.email || '')} · ${h.visits} visits</small></div>`).join('')}</div>
-    <div class="row" style="flex-wrap:nowrap;gap:10px"><div style="flex:1;min-width:0"><label>Mobile number</label><input id="cu-phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(u.phone)}"></div>
-      <div style="flex:1;min-width:0"><label>Email</label><input id="cu-email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(u.email)}"></div></div>
-    <label>Preferred haircut</label><input id="cu-cut" placeholder="hal. Low fade, no. 2 sa gilid" value="${esc(u.cut)}">
+  return `<label>Full name</label><input id="cu-name" placeholder="Customer's full name (type to search existing)" value="${esc(u.name)}" autocomplete="off">
+    <div id="custhits">${P.custHits.map(hitHtml).join('')}</div>
+    <div class="row" style="flex-wrap:nowrap;gap:10px"><div style="flex:1;min-width:0"><label>Mobile number (optional)</label><input id="cu-phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(u.phone)}"></div>
+      <div style="flex:1;min-width:0"><label>Email (optional)</label><input id="cu-email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(u.email)}"></div></div>
+    <label>Preferred haircut</label><input id="cu-cut" placeholder="e.g. Low fade, no. 2 on the sides" value="${esc(u.cut)}">
     <div id="cu-card">${custCardHtml()}</div>
-    <label class="consent"><input type="checkbox" id="cu-consent" ${u.consent || u.card?.consent ? 'checked' : ''} ${u.card?.consent ? 'disabled' : ''}><span>Pumapayag akong makatanggap ng email at promos mula sa Brotherhood Barber, at sumasang-ayon ako sa <a href="#" data-a="terms">Terms &amp; Conditions</a>.</span></label>
-    <small class="mute" style="display:block;margin-top:6px">Walang phone o email? Ticket lang ito at hindi mapapasok sa Customer Directory.</small>`;
+    <label class="consent"><input type="checkbox" id="cu-consent" ${u.consent || u.card?.consent ? 'checked' : ''} ${u.card?.consent ? 'disabled' : ''}><span>I agree to receive emails and promos from Brotherhood Barber, and I agree to the <a href="#" data-a="terms">Terms &amp; Conditions</a>.</span></label>
+    <small class="mute" style="display:block;margin-top:6px">With a mobile number or email, the customer joins the Customer Directory and earns loyalty points. Without either, this is a ticket only.</small>`;
 }
 function applyCard(card) {   // fill the form from a known customer; never overwrites what was already typed
   const u = cu(); u.card = card; u.id = card.id;
@@ -265,17 +294,17 @@ async function lookupCustomer() {
   u.card = null; u.id = ''; const box = document.getElementById('cu-card'); if (box) box.innerHTML = custCardHtml();
 }
 function customerPayload() {
-  const u = cu(); if (!u.name.trim()) throw new Error('Ilagay ang buong pangalan ng customer');
-  if (u.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(u.email.trim())) throw new Error('Mali ang format ng email');
-  if (u.phone.trim() && u.phone.replace(/\D/g, '').length < 10) throw new Error('Mali ang mobile number');
+  const u = cu(); if (!u.name.trim()) throw new Error("Enter the customer's full name");
+  if (u.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(u.email.trim())) throw new Error('That email address looks wrong');
+  if (u.phone.trim() && u.phone.replace(/\D/g, '').length < 10) throw new Error('That mobile number looks wrong');
   return { id: u.id, name: u.name.trim(), phone: u.phone.trim(), email: u.email.trim(), preferredCut: u.cut.trim(), consent: u.consent };
 }
 async function termsSheet(back) {
-  if (!P.terms) { try { P.terms = (await api('GET', '/api/public/terms')).terms; } catch (e) { P.terms = 'Hindi ma-load ang Terms.'; } }
-  openSheet(`<div class="row between"><h2 style="margin:0">Terms &amp; Conditions</h2><button class="ghost sm" data-a="${back}">Back</button></div><div class="terms">${esc(P.terms)}</div><br><button class="block" data-a="${back}">Naiintindihan ko</button>`);
+  if (!P.terms) { try { P.terms = (await api('GET', '/api/public/terms')).terms; } catch (e) { P.terms = 'Could not load the Terms.'; } }
+  openSheet(`<div class="row between"><h2 style="margin:0">Terms &amp; Conditions</h2><button class="ghost sm" data-a="${back}">Back</button></div><div class="terms">${esc(P.terms)}</div><br><button class="block" data-a="${back}">I understand</button>`);
 }
 function paySheet(order) {
-  const p = P.pay = { order, disc: '', method: 'Cash', tendered: '' };
+  const p = P.pay = { order, disc: order.discountId || '', method: 'Cash', tendered: '' };
   renderPay(p);
 }
 function payTotals(p) {
@@ -324,7 +353,7 @@ function saleHtml(o) {
   return head({ branchName: b.name, address: b.address, phone: b.phone }) + `<hr><div class="c"><b>SALES INVOICE</b></div><hr>` + R('SI No.', 'SI-' + String(o.si).padStart(6, '0')) + R('Ticket', '#' + String(o.no).padStart(3, '0'))
     + R('Date', dt(o.paidAt)) + R('Customer', o.customerName) + R('Cashier', P.me?.name || '') + '<hr>'
     + o.items.map(i => R(i.name + ' x' + i.qty, peso(i.price * i.qty))).join('') + '<hr>' + R('Subtotal', peso(o.subtotal)) + (o.discountAmt ? R(o.discountName || 'Discount', '-' + peso(o.discountAmt)) : '')
-    + R('TOTAL', peso(o.total), true) + o.tenders.map(t => R(t.method, peso(t.amount))).join('') + (o.change ? R('Change', peso(o.change)) : '') + `<hr><div class="c">Thank you! Balik ka ulit.</div>`;
+    + R('TOTAL', peso(o.total), true) + o.tenders.map(t => R(t.method, peso(t.amount))).join('') + (o.change ? R('Change', peso(o.change)) : '') + `<hr><div class="c">Thank you! See you again.</div>`;
 }
 function printHtml(html) { document.getElementById('print').innerHTML = `<div class="paper">${html}</div>`; setTimeout(() => window.print(), 50); }
 function showReading(z) {
@@ -342,7 +371,7 @@ document.addEventListener('click', async e => {
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/icon-192.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
-      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
@@ -351,11 +380,11 @@ document.addEventListener('click', async e => {
   if (a === 'arrive') {
     const r = await guard(() => api('POST', `/api/bookings/${d.id}/arrive`)); if (!r) return;
     P.view = 'queue'; await refresh(); render();
-    if (r.seated) toast('Naka-upo na kay ' + (P.boot.staff.find(s => s.id === r.order.barberId)?.name || 'barber')); else seatSheet(r.order.id);
+    if (r.seated) toast('Seated with ' + (P.boot.staff.find(s => s.id === r.order.barberId)?.name || 'the barber')); else assignSheet(r.order.id);
     return;
   }
   if (a === 'bkcancel' || a === 'bkno') {
-    if (!confirm(a === 'bkno' ? 'I-mark na no-show?' : 'I-cancel ang booking?')) return;
+    if (!confirm(a === 'bkno' ? 'Mark as no-show?' : 'Cancel this booking?')) return;
     await guard(() => api('PUT', `/api/bookings/${d.id}`, { status: a === 'bkno' ? 'noshow' : 'cancelled' })); return refresh();
   }
   if (a === 'newappt') { P.na = { name: '', phone: '', date: P.apptDate < ymd(0) ? ymd(0) : P.apptDate, items: [], staff: 'any', time: '', slots: null, err: '' }; return apptSheet(); }
@@ -370,43 +399,56 @@ document.addEventListener('click', async e => {
     return;
   }
   if (a === 'cat') { P.cat = d.c; return render(); }
-  if (a === 'mode') { P.cart.mode = d.m; return render(); }
   if (a === 'add') return addItem(d.id);
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
+  if (a === 'rm') { P.cart.items.splice(+d.n, 1); cartSheet(); return render(); }
+  if (a === 'changecust') { P.fromCart = true; P.custHits = []; return customerSheet(null); }
+  if (a === 'custdone') {
+    const err = document.getElementById('err');
+    try { customerPayload(); } catch (x) { if (err) err.textContent = x.message; return; }
+    if (P.pendingItem) { pushItem(P.pendingItem); P.pendingItem = null; }
+    const back = P.fromCart; P.fromCart = false; closeSheet(); render(); if (back) cartSheet(); return;
+  }
+  if (a === 'discount') return discountSheet();
+  if (a === 'pickdisc') { P.cart.discountId = d.id; return cartSheet(); }
+  if (a === 'cartback') return cartSheet();
+  if (a === 'clearcart') { if (!confirm('Clear the cart and the customer?')) return; P.cart = { items: [], editing: null }; closeSheet(); return render(); }
   if (a === 'q') { const it = P.cart.items[+d.n]; it.qty += +d.d; if (it.qty <= 0) P.cart.items.splice(+d.n, 1); cartSheet(); return render(); }
-  if (a === 'pickcust') { const h = P.custHits.find(x => x.id === d.id); P.custHits = []; if (h) { const u = cu(); u.name = h.name; u.phone = ''; u.email = ''; u.cut = ''; applyCard({ id: h.id, name: h.name, phone: h.phone, email: h.email, preferredCut: h.preferredCut, consent: h.consent, visits: h.visits, spent: h.spent, lastVisit: h.lastVisit, tier: h.tier, next: null }); } return cartSheet(); }
+  if (a === 'pickcust') { const h = P.custHits.find(x => x.id === d.id); P.custHits = []; if (h) { const u = cu(); u.name = h.name; u.phone = ''; u.email = ''; u.cut = ''; applyCard({ id: h.id, name: h.name, phone: h.phone, email: h.email, preferredCut: h.preferredCut, consent: h.consent, visits: h.visits, spent: h.spent, lastVisit: h.lastVisit, tier: h.tier, next: null }); } return customerSheet(P.pendingItem); }
   if (a === 'terms') { e.preventDefault(); return termsSheet('termsback'); }
-  if (a === 'termsback') return cartSheet();
-  if (a === 'canceledit') { P.cart = { items: [], barberId: '', mode: 'later', editing: null }; return render(); }
-  if (a === 'newticket') { P.cart = { items: [], barberId: '', mode: 'later', editing: null }; P.view = 'pos'; await refresh(); return render(); }
+  if (a === 'termsback') return customerSheet(P.pendingItem);
+  if (a === 'canceledit') { P.cart = { items: [], editing: null }; return render(); }
+  if (a === 'newticket') { P.cart = { items: [], editing: null }; P.view = 'pos'; await refresh(); return render(); }
   if (a === 'openshift') return openSheet(`<h2 style="margin-top:0">Open shift</h2><label>Opening float (₱)</label><input id="float" type="number" inputmode="decimal" value="0"><p id="err" style="color:var(--bad)"></p><div class="row"><button data-a="doopen">Open shift</button><button class="ghost" data-a="closesheet">Cancel</button></div>`);
   if (a === 'doopen') { const r = await guard(() => api('POST', '/api/shifts/open', { branchId: P.branch, terminal: 'Terminal 1', openingFloat: +document.getElementById('float').value || 0 })); if (r) { closeSheet(); toast('Shift opened'); await refresh(); } return; }
-  if (a === 'mkticket' || a === 'saveticket' || a === 'gopay') {
-    const c = P.cart, err = document.getElementById('err'); let created = null;
+  if (a === 'chargelater' || a === 'paynow' || a === 'saveticket') {
+    const c = P.cart, err = document.getElementById('err');
     try {
-      const barberId = document.getElementById('cartbarber')?.value || '';
-      const customer = customerPayload(), hasSvc = c.items.some(i => i.type === 'service');
-      if (a === 'gopay' && hasSvc && !barberId) throw new Error('Pumili ng barber');
-      const items = c.items.map(i => ({ itemId: i.itemId, qty: i.qty }));
+      const customer = customerPayload(), items = c.items.map(i => ({ itemId: i.itemId, qty: i.qty })), fresh = { items: [], editing: null };
       if (a === 'saveticket') {
-        const body = { items, customer }; if (barberId && barberId !== c.editBarber) body.barberId = barberId;
-        await api('PUT', '/api/orders/' + c.editing, body); toast('Ticket saved');
-      } else {
-        const o = await api('POST', '/api/orders', { customer, items, barberId });
-        if (a === 'gopay') { P.cart = { items: [], barberId: '', mode: 'later', editing: null }; await refresh(); return paySheet(o); }
-        toast('Ticket #' + o.no + ' created'); created = o;
+        await api('PUT', '/api/orders/' + c.editing, { items, customer, discountId: c.discountId || '' }); toast('Ticket saved');
+        P.cart = fresh; closeSheet(); P.view = 'queue'; await refresh(); return render();
       }
-      P.cart = { items: [], barberId: '', mode: 'later', editing: null }; closeSheet(); P.view = 'queue'; await refresh(); render();
-      if (created && !created.barberId && created.items.some(i => i.type === 'service')) seatSheet(created.id);
-    } catch (x) { if (err) err.textContent = x.message; }
+      const o = await api('POST', '/api/orders', { customer, items, discountId: c.discountId || '' });
+      P.cart = fresh; await refresh();
+      if (a === 'paynow') return paySheet(o);
+      toast('Ticket #' + o.no + ' created'); closeSheet(); P.view = 'queue'; await refresh(); render(); return assignSheet(o.id);
+    } catch (x) { if (err) err.textContent = x.message; else toast(x.message, true); }
     return;
   }
-  if (a === 'seat') return seatSheet(d.id);
-  if (a === 'doseat') { const r = await guard(() => api('PUT', '/api/orders/' + d.id, { barberId: d.b })); closeSheet(); if (r) toast('Customer seated'); return refresh(); }
-  if (a === 'checkout') { const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (o) paySheet(o); return; }
+  if (a === 'seat') { await refresh(); return assignSheet(d.id); }
+  if (a === 'asbarber') {
+    const s = P.boot.staff.find(x => x.id === d.id), used = new Set((P.boot.queue || []).filter(o => o.status === 'in_chair').map(o => o.chairId));
+    P.as.barberId = d.id; if (s?.chairId && !used.has(s.chairId)) P.as.chairId = s.chairId; return assignSheet(P.as.id);
+  }
+  if (a === 'aschair') { P.as.chairId = d.id; return assignSheet(P.as.id); }
+  if (a === 'asgo') {
+    const as = P.as, r = await guard(() => api('PUT', '/api/orders/' + as.id, { barberId: as.barberId, chairId: as.chairId }));
+    if (r) { closeSheet(); toast('Customer seated'); P.view = 'queue'; await refresh(); render(); } return;
+  }  if (a === 'checkout') { const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (o) paySheet(o); return; }
   if (a === 'editticket') {
     const o = await guard(() => api('GET', '/api/orders/' + d.id)); if (!o) return;
-    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, barberId: o.barberId, editBarber: o.barberId, mode: 'later', editing: o.id };
+    P.cart = { items: o.items.map(i => ({ ...i })), cu: { id: o.customerId || '', name: o.customerName, phone: o.cust?.phone || '', email: o.cust?.email || '', cut: o.cust?.preferredCut || '', consent: false, card: o.cust || null }, discountId: o.discountId || '', editing: o.id };
     P.view = 'pos'; await refresh(); render(); return cartSheet();
   }
   if (a === 'void') { const reason = prompt('Reason for void?'); if (reason === null) return; const r = await guard(() => api('POST', `/api/orders/${d.id}/void`, { reason })); if (r) toast('Ticket voided'); return refresh(); }
@@ -437,7 +479,7 @@ document.addEventListener('click', async e => {
   if (a === 'docash') { const r = await (async () => { try { return await api('POST', '/api/cash', { shiftId: P.cur.shift.id, kind: d.k, amount: +document.getElementById('camt').value, note: document.getElementById('cnote').value }); } catch (x) { document.getElementById('err').textContent = x.message; return null; } })(); if (r) { closeSheet(); toast('Saved'); await refresh(); } return; }
   if (a === 'closeshift') {
     const counted = DENOMS.reduce((t, x) => t + x * (P.denoms[x] || 0), 0);
-    if (!confirm(`Isara ang Shift #${P.cur.shift.no}? Declared cash: ${peso(counted)}`)) return;
+    if (!confirm(`Close Shift #${P.cur.shift.no}? Declared cash: ${peso(counted)}`)) return;
     const z = await guard(() => api('POST', `/api/shifts/${P.cur.shift.id}/close`, { denoms: P.denoms, remarks: document.getElementById('remarks')?.value || '' }));
     if (z) { P.denoms = {}; P.remarks = ''; P.tab = 'z'; showReading({ businessDate: P.cur.shift.businessDate, ...z }); await refresh(); }
     return;
@@ -476,7 +518,7 @@ document.addEventListener('input', e => {
 sheet.addEventListener('close', () => render());
 
 (async () => {
-  if (token) { try { const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || []; if (P.me.role !== 'cashier') P.branch = P.branches[0]?.id || ''; await refresh(); } catch (e) { token = ''; P.me = null; } }
+  if (token) { try { const st = await api('GET', '/api/state'); P.me = st.me; P.shop = st.shop; P.branches = st.branches || []; P.mods = st.modules || Object.values(VMAP); if (isAdminRole()) P.branch = P.branches[0]?.id || ''; await refresh(); } catch (e) { token = ''; P.me = null; } }
   render();
   setInterval(() => { if (P.me && !sheet.open && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) refresh(); }, 10000);
 })();

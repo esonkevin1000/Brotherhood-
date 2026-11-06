@@ -11,5 +11,5 @@ self.addEventListener('fetch', e => {
   e.respondWith(fetch(e.request).then(r => {
     if (r.ok && SHELL.includes(u.pathname)) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
     return r;
-  }).catch(() => caches.match(e.request).then(m => m || new Response('Offline: walang internet. Subukan ulit.', { status: 503 }))));
+  }).catch(() => caches.match(e.request).then(m => m || new Response('Offline: no internet connection. Please try again.', { status: 503 }))));
 });

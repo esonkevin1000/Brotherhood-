@@ -1,25 +1,31 @@
-// Brotherhood — public booking page. Customers pick branch, services, barber, time; the booking lands in the POS.
+// Brotherhood: public booking site. Customers pick a branch, services, barber and time. The booking lands in that branch's POS.
 const app = document.getElementById('app');
 const peso = n => '₱' + Number(n || 0).toLocaleString('en-PH');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const initials = s => String(s || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 const pad = n => String(n).padStart(2, '0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const t12 = t => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`; };
+const t12 = t => { const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`; };
 const ICON = {
   scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>',
   check: '<path d="M20 6 9 17l-5-5"/>', pin: '<path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
+const stars = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 
-let I = null;
-const S = { pickBranch: false, branch: '', items: [], staff: 'any', date: '', time: '', slots: null, name: '', phone: '', email: '', cut: '', consent: false, terms: null, showTerms: false, err: '', busy: false, done: null };
+let I = null, R = { reviews: [], count: 0, avg: 0, shown: 6 };
+const S = { branch: '', items: [], staff: 'any', date: '', time: '', slots: null, name: '', phone: '', email: '', cut: '', consent: false, terms: null, showTerms: false, err: '', busy: false, done: null,
+  rv: { branchId: '', staffId: '', rating: 0, name: '', text: '', busy: false, err: '', thanks: false } };
 const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(Date.now() + i * 864e5); return { v: ymd(d), l: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-PH', { weekday: 'short' }), s: d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) }; });
+const maxDate = ymd(new Date(Date.now() + 60 * 864e5));
 
 const svcs = () => I.services.filter(s => S.items.includes(s.id));
 const total = () => svcs().reduce((t, s) => t + s.price, 0), mins = () => Math.max(30, svcs().reduce((t, s) => t + (s.mins || 30), 0));
 const team = () => I.staff.filter(s => s.branchId === S.branch);
+const branch = id => I.branches.find(b => b.id === id);
 const ready = () => S.branch && S.items.length && S.date && S.time && S.name.trim() && S.phone.replace(/\D/g, '').length >= 10;
+const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url)}" alt="${esc(name)}" loading="lazy">` : `<span class="${cls}">${esc(initials(name))}</span>`;
+const hours = b => `${t12(b.openTime || '09:00')} – ${t12(b.closeTime || '21:00')}`;
 
 async function loadSlots() {
   S.time = ''; S.slots = null;
@@ -28,75 +34,141 @@ async function loadSlots() {
   try { S.slots = (await (await fetch(`/api/public/slots?branch=${S.branch}&date=${S.date}&staff=${S.staff}&items=${S.items.join(',')}`)).json()).slots; } catch (e) { S.slots = []; }
   render();
 }
-const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url)}" alt="${esc(name)}" loading="lazy">` : `<span class="${cls}">${esc(initials(name))}</span>`;
+async function loadReviews() {
+  try { R = { ...R, ...(await (await fetch('/api/public/reviews' + (S.branch ? '?branch=' + S.branch : ''))).json()) }; } catch (e) { }
+  render();
+}
+
+function branchCards() {
+  return `<div class="branches">${I.branches.map(b => {
+    const rt = I.ratings?.[b.id];
+    return `<div class="bcard ${S.branch === b.id ? 'on' : ''}" data-branch="${b.id}" role="button" tabindex="0"><div class="bimg" style="${b.photo ? `background-image:url('${esc(b.photo)}')` : ''}">${b.photo ? '' : ic('scissors')}<span class="pin">Selected</span></div>
+      <div class="bbody"><b>${esc(b.name)}</b>${rt ? `<span class="rate">★ ${rt.avg} <span class="mute" style="font-weight:500">(${rt.count} review${rt.count === 1 ? '' : 's'})</span></span>` : ''}
+      <small>${ic('pin')} ${esc(b.address || 'Brotherhood Barber')}</small><small>Open ${hours(b)}${b.phone ? ' · ' + esc(b.phone) : ''}</small>
+      <div class="bact"><span class="sel">${S.branch === b.id ? '✓ Selected' : 'Select'}</span>${b.mapUrl ? `<a href="${esc(b.mapUrl)}" target="_blank" rel="noopener">Get directions</a>` : ''}</div></div></div>`;
+  }).join('')}</div>`;
+}
+function summaryHtml(forBar) {
+  const b = S.branch ? branch(S.branch) : null, st = S.staff === 'any' ? 'Any available barber' : I.staff.find(x => x.id === S.staff)?.name;
+  const when = S.date && S.time ? `${days.find(d => d.v === S.date)?.l || S.date} · ${t12(S.time)}` : '';
+  if (forBar) return `<div class="sum"><span>${S.items.length ? `${S.items.length} service${S.items.length > 1 ? 's' : ''} · ${mins()} min` : 'Choose a service'}</span><b>${peso(total())}</b></div><div class="err">${esc(S.err)}</div><button class="go" data-go ${ready() && !S.busy ? '' : 'disabled'}>${S.busy ? 'Please wait…' : 'Confirm booking'}</button>`;
+  return `<div class="summary"><h3>Your booking</h3>${b?.photo ? `<div class="shot" style="background-image:url('${esc(b.photo)}')"></div>` : ''}
+    <div class="line"><span>Branch</span><b>${esc(b?.name || '—')}</b></div><div class="line"><span>Services</span><b>${svcs().map(s => esc(s.name)).join(', ') || '—'}</b></div>
+    <div class="line"><span>Barber</span><b>${S.branch ? esc(st) : '—'}</b></div><div class="line"><span>When</span><b>${esc(when) || '—'}</b></div><div class="line"><span>Duration</span><b>${S.items.length ? mins() + ' min' : '—'}</b></div>
+    <div class="total"><span class="mute">Total (pay at the shop)</span><b>${peso(total())}</b></div><div class="err">${esc(S.err)}</div>
+    <button class="go" data-go ${ready() && !S.busy ? '' : 'disabled'}>${S.busy ? 'Please wait…' : 'Confirm booking'}</button>
+    <p class="mute" style="font-size:12px;margin:10px 0 0;text-align:center">No payment online. You pay at the shop after your haircut.</p></div>`;
+}
+function reviewsHtml() {
+  const rv = S.rv, rt = R;
+  const bsel = `<select id="rv-branch"><option value="">Choose the branch you visited</option>${I.branches.map(b => `<option value="${b.id}" ${rv.branchId === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`;
+  const staff = I.staff.filter(s => !rv.branchId || s.branchId === rv.branchId);
+  return `<section class="reviews"><h2>What our customers say</h2>
+    <div class="rhead"><span class="rbig">${rt.count ? rt.avg.toFixed(1) : '—'}</span><div><div class="stars">${rt.count ? stars(rt.avg) : '☆☆☆☆☆'}</div><span class="mute">${rt.count} review${rt.count === 1 ? '' : 's'}${S.branch ? ' · ' + esc(branch(S.branch).name) : ' · all branches'}</span></div></div>
+    <div class="rgrid">${rt.reviews.slice(0, rt.shown ?? 6).map(r => `<div class="rcard"><div class="who"><b>${esc(r.name)}</b><span class="stars" style="font-size:14px">${stars(r.rating)}</span></div><small class="mute">${esc(r.branchName)}${r.staffName ? ' · Barber: ' + esc(r.staffName) : ''} · ${new Date(r.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</small>${r.text ? `<p>${esc(r.text)}</p>` : ''}</div>`).join('') || '<p class="mute">No reviews yet. Be the first!</p>'}</div>
+    ${rt.reviews.length > (rt.shown ?? 6) ? '<p style="text-align:center"><button class="btn2" data-act="morerev">Show more reviews</button></p>' : ''}
+    <div class="rform"><h3>Leave a review</h3><p class="mute" style="margin:0">Tell us about your visit. Your review appears on this page.</p>
+      ${rv.thanks ? '<div class="thanks">Thank you! Your review has been posted.</div>' : `<div class="row2"><div><label>Branch</label>${bsel}</div><div><label>Barber (optional)</label><select id="rv-staff"><option value="">Not sure / no preference</option>${staff.map(s => `<option value="${s.id}" ${rv.staffId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div></div>
+      <label>Your rating</label><div class="starpick">${[1, 2, 3, 4, 5].map(n => `<button type="button" class="${rv.rating >= n ? 'on' : ''}" data-star="${n}" aria-label="${n} star${n > 1 ? 's' : ''}">★</button>`).join('')}</div>
+      <label>Your name</label><input id="rv-name" value="${esc(rv.name)}" maxlength="60" autocomplete="name"><label>Comment (optional)</label><textarea id="rv-text" rows="3" maxlength="600" placeholder="How was your haircut?">${esc(rv.text)}</textarea>
+      <div class="err">${esc(rv.err)}</div><button class="btn2" data-act="sendrev" ${rv.busy ? 'disabled' : ''}>${rv.busy ? 'Posting…' : 'Post review'}</button>`}</div></section>`;
+}
 
 function render() {
   if (!I) { app.innerHTML = '<div class="top"><h1>Brotherhood</h1><p>Loading…</p></div>'; return; }
-  const head = `<div class="top"><img src="/icon-192.png" alt=""><h1>${esc(I.shop)}</h1><p>Book your cut. Walang pila, walang hintay.</p></div>`;
+  const all = I.ratings ? Object.values(I.ratings) : [], n = all.reduce((s, r) => s + r.count, 0), avg = n ? all.reduce((s, r) => s + r.avg * r.count, 0) / n : 0;
+  const head = `<div class="top"><img src="/icon-192.png" alt=""><h1>${esc(I.shop)}</h1><p>Book your cut online. No waiting, no queue.</p>${n ? `<div class="stars">★ ${avg.toFixed(1)} · ${n} review${n === 1 ? '' : 's'}</div>` : ''}</div>`;
+  if (S.showTerms) { app.innerHTML = head + `<div class="wrap"><div class="step"><h2>Terms &amp; Conditions</h2><div class="terms">${esc(S.terms)}</div><br><button class="go" data-act="closeterms">I understand</button></div></div>`; window.scrollTo(0, 0); return; }
   if (S.done) {
     const b = S.done, when = new Date(b.date + 'T00:00').toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' });
-    app.innerHTML = head + `<main><div class="step done"><div class="tick">${ic('check')}</div><h2>Booked!</h2><p class="mute">Salamat, ${esc(b.name)}. Hinihintay ka namin.</p>
-      <div class="recap"><div class="who">${pic(b.staffPhoto, b.staff, 'ph')}<div><b>${esc(b.staff)}</b><br><span class="mute" style="all:unset;color:var(--mute)">your barber</span></div></div>
+    app.innerHTML = head + `<div class="wrap"><div class="step done"><div class="tick">${ic('check')}</div><h2>You're booked!</h2><p class="mute">Thank you, ${esc(b.name)}. We'll be expecting you.</p>
+      <div class="recap"><div class="who">${pic(b.staffPhoto, b.staff, 'ph')}<div><b>${esc(b.staff)}</b><br><span class="mute">your barber</span></div></div>
       <div class="r"><span class="mute">When</span><b>${esc(when)}, ${t12(b.time)}</b></div><div class="r"><span class="mute">Where</span><b>${esc(b.branch)}</b></div>
-      ${b.items.map(i => `<div class="r"><span>${esc(i.name)}</span><span>${peso(i.price)}</span></div>`).join('')}<div class="r"><b>Total (bayad sa shop)</b><b>${peso(b.total)}</b></div></div>
-      <p class="mute" style="font-size:13px">Pumunta 5–10 minuto bago ang oras. Kung hindi ka makakarating, tawagan ang shop para mabigyan ng slot ang iba.</p>
-      <button class="go" id="again">Book another</button></div></main>`;
-    document.getElementById('again').onclick = () => { Object.assign(S, { items: [], staff: 'any', date: '', time: '', slots: null, err: '', done: null }); render(); };
-    return;
+      ${b.items.map(i => `<div class="r"><span>${esc(i.name)}</span><span>${peso(i.price)}</span></div>`).join('')}<div class="r"><b>Total (pay at the shop)</b><b>${peso(b.total)}</b></div></div>
+      <p class="mute" style="font-size:13px">Please arrive 5 to 10 minutes early. If you can't make it, call the shop so someone else can take your slot.</p>
+      <button class="go" data-act="again">Book another</button></div></div>`;
+    window.scrollTo(0, 0); return;
   }
-  if (S.showTerms) { app.innerHTML = head + `<main><div class="step"><h2>Terms &amp; Conditions</h2><div class="terms">${esc(S.terms)}</div><br><button class="go" id="closeterms">Naiintindihan ko</button></div></main>`; window.scrollTo(0, 0); return; }
-  const brs = I.branches, mates = team();
-  const sum = S.items.length ? `${S.items.length} service${S.items.length > 1 ? 's' : ''} · ${mins()} min` : 'Pumili ng serbisyo';
-  app.innerHTML = head + `<main>
-    ${brs.length > 1 && S.branch && !S.pickBranch ? `<section class="step"><h2><b>1</b>Branch</h2><button class="opt on" data-pickbranch="1"><span class="pic">${ic('pin')}</span><span><span class="nm">${esc(brs.find(b => b.id === S.branch).name)}</span><small>${esc(brs.find(b => b.id === S.branch).address || 'Brotherhood Barbershop')}</small></span><span class="pr" style="font:600 13px Inter;color:var(--mute)">Palitan</span></button></section>` : brs.length > 1 ? `<section class="step"><h2><b>1</b>Branch</h2>${brs.map(b => `<button class="opt ${S.branch === b.id ? 'on' : ''}" data-branch="${b.id}"><span class="pic">${ic('pin')}</span><span><span class="nm">${esc(b.name)}</span><small>${esc(b.address || 'Brotherhood Barbershop')}</small></span><span class="ck">${S.branch === b.id ? ic('check') : ''}</span></button>`).join('')}</section>` : ''}
-    <section class="step ${S.branch ? '' : 'off'}"><h2><b>${brs.length > 1 ? 2 : 1}</b>Services</h2>${I.services.map(s => `<button class="opt ${S.items.includes(s.id) ? 'on' : ''}" data-svc="${s.id}">${s.photo ? `<img class="pic" src="${esc(s.photo)}" alt="" loading="lazy">` : `<span class="pic">${ic('scissors')}</span>`}<span><span class="nm">${esc(s.name)}</span>${s.apptOnly ? '<span class="tag">By appointment</span>' : ''}<small>${s.mins} min</small></span><span class="pr">${peso(s.price)}</span><span class="ck">${S.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('') || '<p class="mute">Walang available na serbisyo.</p>'}</section>
-    <section class="step ${S.branch && S.items.length ? '' : 'off'}"><h2><b>${brs.length > 1 ? 3 : 2}</b>Piliin ang barber</h2><div class="team">
-      <button class="mate ${S.staff === 'any' ? 'on' : ''}" data-staff="any"><span class="av">${ic('scissors')}</span><b>Kahit sino</b><small>Pinakamabilis</small></button>
+  const mates = team(), brs = I.branches;
+  app.innerHTML = head + `<div class="wrap"><div class="layout"><div>
+    <section class="step"><h2><b>1</b>Choose your branch</h2>${branchCards()}</section>
+    <section class="step ${S.branch ? '' : 'off'}"><h2><b>2</b>Choose your services</h2><div class="services">${I.services.map(s => `<button class="opt ${S.items.includes(s.id) ? 'on' : ''}" data-svc="${s.id}">${s.photo ? `<img class="pic" src="${esc(s.photo)}" alt="" loading="lazy">` : `<span class="pic">${ic('scissors')}</span>`}<span><span class="nm">${esc(s.name)}</span>${s.apptOnly ? '<span class="tag">By appointment</span>' : ''}<small>${s.mins} min</small></span><span class="pr">${peso(s.price)}</span><span class="ck">${S.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('') || '<p class="mute">No services available.</p>'}</div></section>
+    <section class="step ${S.branch && S.items.length ? '' : 'off'}"><h2><b>3</b>Choose your barber</h2><div class="team">
+      <button class="mate ${S.staff === 'any' ? 'on' : ''}" data-staff="any"><span class="av">${ic('scissors')}</span><b>Any barber</b><small>Fastest</small></button>
       ${mates.map(m => `<button class="mate ${S.staff === m.id ? 'on' : ''}" data-staff="${m.id}">${pic(m.photo, m.name)}<b>${esc(m.name)}</b></button>`).join('')}</div></section>
-    <section class="step ${S.branch && S.items.length ? '' : 'off'}"><h2><b>${brs.length > 1 ? 4 : 3}</b>Petsa at oras</h2>
+    <section class="step ${S.branch && S.items.length ? '' : 'off'}"><h2><b>4</b>Pick a date and time</h2>
       <div class="chips">${days.map(d => `<button class="chip ${S.date === d.v ? 'on' : ''}" data-date="${d.v}">${d.l}<small>${d.s}</small></button>`).join('')}</div>
-      ${!S.date ? '<p class="mute" style="margin:6px 0 0">Pumili ng petsa.</p>' : S.slots === null ? '<p class="mute">Hinahanap ang mga bakanteng oras…</p>' : S.slots.length ? `<div class="slots">${S.slots.map(t => `<button class="chip ${S.time === t ? 'on' : ''}" data-time="${t}">${t12(t)}</button>`).join('')}</div>` : '<p class="mute">Walang bakanteng oras sa petsang ito. Subukan ang ibang araw o ibang barber.</p>'}</section>
-    <section class="step ${S.time ? '' : 'off'}"><h2><b>${brs.length > 1 ? 5 : 4}</b>Iyong detalye</h2>
-      <label>Buong pangalan (Full name)</label><input id="name" value="${esc(S.name)}" autocomplete="name">
-      <label>Mobile number</label><input id="phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(S.phone)}" autocomplete="tel">
-      <label>Email (optional)</label><input id="email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(S.email)}" autocomplete="email">
-      <label>Preferred haircut (optional)</label><input id="cut" placeholder="Hal. Low fade, no. 2 sa gilid" value="${esc(S.cut)}">
-      <label class="consent"><input type="checkbox" id="consent" ${S.consent ? 'checked' : ''}><span>Pumapayag akong makatanggap ng email at promos mula sa Brotherhood Barber, at sumasang-ayon ako sa <a href="#" id="terms">Terms &amp; Conditions</a>.</span></label>
-      <p class="mute" style="font-size:12px;margin:8px 0 0">Ang iyong phone o email ang gagamitin para makilala ka tuwing babalik ka at maitala ang iyong visits at points sa loyalty program.</p></section>
-  </main>
-  <div class="bar"><div><div class="sum"><span>${sum}</span><b>${peso(total())}</b></div><div class="err">${esc(S.err)}</div><button class="go" id="go" ${ready() && !S.busy ? '' : 'disabled'}>${S.busy ? 'Sandali…' : 'Confirm booking'}</button></div></div>`;
+      <label>Or pick another date</label><input type="date" id="pickdate" min="${days[0].v}" max="${maxDate}" value="${days.some(d => d.v === S.date) ? '' : esc(S.date)}" style="max-width:240px">
+      ${!S.date ? '<p class="mute" style="margin:10px 0 0">Choose a date to see the available times.</p>' : S.slots === null ? '<p class="mute">Looking for open times…</p>' : S.slots.length ? `<div class="slots">${S.slots.map(t => `<button class="chip ${S.time === t ? 'on' : ''}" data-time="${t}">${t12(t)}</button>`).join('')}</div>` : '<p class="mute" style="margin:10px 0 0">No open times on this date. Try another day or another barber.</p>'}</section>
+    <section class="step ${S.time ? '' : 'off'}"><h2><b>5</b>Your details</h2>
+      <div class="row2"><div><label>Full name</label><input id="name" value="${esc(S.name)}" autocomplete="name"></div><div><label>Mobile number</label><input id="phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(S.phone)}" autocomplete="tel"></div></div>
+      <div class="row2"><div><label>Email (optional)</label><input id="email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(S.email)}" autocomplete="email"></div><div><label>Preferred haircut (optional)</label><input id="cut" placeholder="e.g. Low fade, no. 2 on the sides" value="${esc(S.cut)}"></div></div>
+      <label class="consent"><input type="checkbox" id="consent" ${S.consent ? 'checked' : ''}><span>I agree to receive emails and promos from Brotherhood Barber, and I agree to the <a href="#" data-act="terms">Terms &amp; Conditions</a>.</span></label>
+      <p class="mute" style="font-size:12px;margin:8px 0 0">Your phone number or email is used to recognise you when you come back and to keep track of your visits and loyalty points.</p></section>
+  </div><aside class="side">${summaryHtml(false)}</aside></div>
+  ${reviewsHtml()}<footer>© ${new Date().getFullYear()} ${esc(I.shop)} Barber</footer></div>
+  <div class="bar"><div>${summaryHtml(true)}</div></div>`;
 }
 
 document.addEventListener('click', async e => {
-  const el = e.target.closest('[data-pickbranch],[data-branch],[data-svc],[data-staff],[data-date],[data-time],#go'); if (!el) return;
+  if (e.target.closest('.bcard a')) return;
+  const el = e.target.closest('[data-branch],[data-svc],[data-staff],[data-date],[data-time],[data-go],[data-star],[data-act]'); if (!el) return;
   const d = el.dataset;
-  if (d.pickbranch) { S.pickBranch = true; return render(); }
-  if (d.branch) { S.pickBranch = false; S.branch = d.branch; S.staff = 'any'; S.err = ''; return loadSlots(); }
+  if (el.tagName === 'A') e.preventDefault();
+  if (d.branch) { S.branch = d.branch; S.staff = 'any'; S.err = ''; S.rv.branchId ||= d.branch; loadReviews(); return loadSlots(); }
   if (d.svc) { S.items = S.items.includes(d.svc) ? S.items.filter(x => x !== d.svc) : [...S.items, d.svc]; S.err = ''; return loadSlots(); }
   if (d.staff) { S.staff = d.staff; return loadSlots(); }
   if (d.date) { S.date = d.date; return loadSlots(); }
   if (d.time) { S.time = d.time; S.err = ''; render(); document.getElementById('name')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
-  if (el.id === 'go') {
+  if (d.star) { S.rv.rating = +d.star; S.rv.err = ''; return render(); }
+  if (d.act === 'morerev') { R.shown = (R.shown ?? 6) + 6; return render(); }
+  if (d.act === 'terms') {
+    if (S.terms === null) { try { S.terms = (await (await fetch('/api/public/terms')).json()).terms; } catch (x) { S.terms = 'Could not load the Terms.'; } }
+    S.showTerms = true; return render();
+  }
+  if (d.act === 'closeterms') { S.showTerms = false; return render(); }
+  if (d.act === 'again') { Object.assign(S, { items: [], staff: 'any', date: '', time: '', slots: null, err: '', done: null }); return render(); }
+  if (d.act === 'sendrev') {
+    const rv = S.rv;
+    if (!rv.branchId) rv.err = 'Please choose the branch you visited.'; else if (!rv.rating) rv.err = 'Please tap the stars to rate your visit.'; else if (!rv.name.trim()) rv.err = 'Please enter your name.'; else rv.err = '';
+    if (rv.err) return render();
+    rv.busy = true; render();
+    try {
+      const r = await fetch('/api/public/reviews', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branchId: rv.branchId, staffId: rv.staffId, name: rv.name, rating: rv.rating, text: rv.text }) });
+      const j = await r.json(); rv.busy = false;
+      if (!r.ok) { rv.err = j.error || 'Something went wrong. Please try again.'; return render(); }
+      Object.assign(rv, { rating: 0, text: '', thanks: true, err: '' }); await loadReviews();
+      try { const info = await (await fetch('/api/public/info')).json(); I.ratings = info.ratings; } catch (x) { }
+      render();
+    } catch (x) { rv.busy = false; rv.err = 'No connection. Please try again.'; render(); }
+    return;
+  }
+  if (el.hasAttribute('data-go')) {
     S.busy = true; S.err = ''; render();
     try {
       const r = await fetch('/api/public/book', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branchId: S.branch, staffId: S.staff, date: S.date, time: S.time, itemIds: S.items, name: S.name, phone: S.phone, email: S.email, preferredCut: S.cut, consent: S.consent }) });
       const j = await r.json();
-      if (!r.ok) { S.err = j.error || 'May problema. Subukan ulit.'; S.busy = false; if (r.status === 409) { await loadSlots(); S.err = j.error; render(); } else render(); return; }
-      S.done = j.booking; S.busy = false; window.scrollTo(0, 0); render();
-    } catch (x) { S.err = 'Walang koneksyon. Subukan ulit.'; S.busy = false; render(); }
+      if (!r.ok) { S.err = j.error || 'Something went wrong. Please try again.'; S.busy = false; if (r.status === 409) { await loadSlots(); S.err = j.error; } return render(); }
+      S.done = j.booking; S.busy = false; render();
+    } catch (x) { S.err = 'No connection. Please try again.'; S.busy = false; render(); }
   }
 });
-document.addEventListener('change', e => { if (e.target.id === 'consent') S.consent = e.target.checked; });
-document.addEventListener('click', async e => {
-  const a = e.target.closest('#terms,#closeterms'); if (!a) return; e.preventDefault();
-  if (a.id === 'closeterms') { S.showTerms = false; return render(); }
-  if (S.terms === null) { try { S.terms = (await (await fetch('/api/public/terms')).json()).terms; } catch (x) { S.terms = 'Hindi ma-load ang Terms.'; } }
-  S.showTerms = true; render();
+document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('.bcard')) { e.preventDefault(); e.target.click(); } });
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.id === 'consent') S.consent = t.checked;
+  if (t.id === 'pickdate' && t.value) { S.date = t.value; loadSlots(); }
+  if (t.id === 'rv-branch') { S.rv.branchId = t.value; S.rv.staffId = ''; render(); }
+  if (t.id === 'rv-staff') S.rv.staffId = t.value;
 });
 document.addEventListener('input', e => {
-  const t = e.target; if (!['name', 'phone', 'email', 'cut'].includes(t.id)) return;
-  S[t.id] = t.value; const go = document.getElementById('go'); if (go) go.disabled = !ready() || S.busy;
+  const t = e.target, map = { name: 'name', phone: 'phone', email: 'email', cut: 'cut' };
+  if (map[t.id]) { S[map[t.id]] = t.value; document.querySelectorAll('[data-go]').forEach(b => b.disabled = !ready() || S.busy); }
+  if (t.id === 'rv-name') S.rv.name = t.value;
+  if (t.id === 'rv-text') S.rv.text = t.value;
 });
 
-fetch('/api/public/info').then(r => r.json()).then(j => { I = j; if (I.branches.length === 1) S.branch = I.branches[0].id; render(); }).catch(() => { app.innerHTML = '<div class="top"><h1>Brotherhood</h1><p>Hindi ma-load. Subukan ulit mamaya.</p></div>'; });
+Promise.all([fetch('/api/public/info').then(r => r.json()), fetch('/api/public/reviews').then(r => r.json()).catch(() => R)])
+  .then(([info, rev]) => { I = info; R = { ...R, ...rev }; if (I.branches.length === 1) { S.branch = I.branches[0].id; S.rv.branchId = S.branch; } render(); })
+  .catch(() => { app.innerHTML = '<div class="top"><h1>Brotherhood</h1><p>Could not load. Please try again in a moment.</p></div>'; });
 render();
