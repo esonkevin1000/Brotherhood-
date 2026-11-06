@@ -66,7 +66,7 @@ async function download(url, name) {
 const brName = id => S.branches.find(b => b.id === id)?.name || '';
 const chName = id => { const c = S.chairs.find(x => x.id === id); return c ? `${brName(c.branchId)} · ${c.name}` : ''; };
 const catName = id => S.categories.find(c => c.id === id)?.name || '';
-const fmtVal = (v, t) => t === 'idlink' ? (v ? (String(v) === 'MISSING' ? '<b style="color:var(--bad)">MISSING</b>' : '<a href="#" data-act="viewid" data-id="' + esc(String(v).split('~')[1]) + '">' + esc(String(v).split('~')[0]) + ' · View ID</a>') : '') : t === 'peso' ? peso(v) : t === 'num' ? Number(v).toLocaleString('en-PH') : esc(v);
+const fmtVal = (v, t) => t === 'days' ? '<a href="#" data-act="paydays" data-id="' + esc(String(v).split('~')[1]) + '">' + esc(String(v).split('~')[0]) + ' · View days</a>' : t === 'idlink' ? (v ? (String(v) === 'MISSING' ? '<b style="color:var(--bad)">MISSING</b>' : '<a href="#" data-act="viewid" data-id="' + esc(String(v).split('~')[1]) + '">' + esc(String(v).split('~')[0]) + ' · View ID</a>') : '') : t === 'peso' ? peso(v) : t === 'num' ? Number(v).toLocaleString('en-PH') : esc(v);
 
 // ---------- navigation ----------
 const ICONS = {
@@ -222,7 +222,7 @@ function payslipHtml(x) {
   return `<div style="text-align:center"><img src="/logo.png" width="76" style="border-radius:50%"><h2 style="margin:6px 0 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
     <p><b>${esc(x.staffName)}</b><br>${esc(x.branchName)}<br>Pay period: ${esc(x.period)} (${x.days.length} day${x.days.length > 1 ? 's' : ''})<br>Paid on ${esc(x.paidAt.slice(0, 10))}</p>
     <table style="width:100%;border-collapse:collapse">
-    ${hd('EARNINGS')}${x.dayItems.map(d => row('Haircut commission · ' + esc(d.date), peso(d.commission))).join('')}${x.topup ? row('Daily allowance top-up', peso(x.topup)) : ''}${x.lunch ? row('Free lunch allowance', peso(x.lunch)) : ''}${x.earningItems.map(e => row(esc(e.kind) + ': ' + esc(e.note), peso(e.amount))).join('')}${row('GROSS EARNINGS', peso(x.gross), 1)}
+    ${hd('EARNINGS')}${x.dayItems.map(d => row('Commission · ' + esc(d.date), peso(d.commission))).join('')}${x.topup ? row('Daily allowance top-up', peso(x.topup)) : ''}${x.lunch ? row('Free lunch allowance', peso(x.lunch)) : ''}${x.earningItems.map(e => row(esc(e.kind) + ': ' + esc(e.note), peso(e.amount))).join('')}${row('GROSS EARNINGS', peso(x.gross), 1)}
     ${hd('DEDUCTIONS')}${adv.map(a => row(esc(a.label), '−' + peso(a.amount), 0, '#b00')).join('')}${ded.map(a => row(esc(a.label), '−' + peso(a.amount), 0, '#b00')).join('')}${!adv.length && !ded.length ? row('None', peso(0)) : ''}${row('TOTAL DEDUCTIONS', '−' + peso(x.totalDeductions), 1)}
     <tr><td colspan="2"><hr></td></tr>${row('NET SALARY', peso(x.net), 1)}</table>
     <p style="font-size:11px;color:#666;margin-top:20px">Prepared by ${esc(x.paidBy || '')}. Deductions were authorized in writing by the employee.</p>`;
@@ -335,9 +335,9 @@ const M = {
     form: () => [['branchId', 'Branch', 'select', { opts: BR(), def: ui.branch !== 'all' ? ui.branch : S.branches[0]?.id }], ['name', 'Name', 'text'], ['sort', 'Order', 'number', { def: 1 }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   categories: { cols: [['name', 'Name'], ['type', 'Type']], rows: () => S.categories,
     form: () => [['name', 'Name', 'text'], ['type', 'Type', 'select', { opts: [['service', 'Service'], ['product', 'Product']] }]] },
-  items: { cols: [['photo', ''], ['name', 'Name'], ['categoryId', 'Category', catName], ['type', 'Type'], ['price', 'Price', peso], ['mins', 'Minutes'], ['bookable', 'Online', yn], ['apptOnly', 'Appt only', yn], ['needId', 'Needs ID', yn], ['active', 'Active', yn]], rows: () => S.items,
+  items: { cols: [['photo', ''], ['name', 'Name'], ['categoryId', 'Category', catName], ['type', 'Type'], ['price', 'Price', peso], ['mins', 'Minutes'], ['bookable', 'Online', yn], ['apptOnly', 'Appt only', yn], ['commission', 'Barber commission / pc', v => v ? peso(v) : ''], ['needId', 'Needs ID', yn], ['active', 'Active', yn]], rows: () => S.items,
     form: () => [['name', 'Name', 'text'], ['categoryId', 'Category', 'select', { opts: S.categories.map(c => [c.id, `${c.name} (${c.type})`]) }], ['type', 'Type', 'select', { opts: [['service', 'Service'], ['product', 'Product']] }],
-      ['price', 'Price (₱)', 'number'], ['mins', 'Minutes', 'number', { def: 30 }], ['photo', 'Photo', 'photo', { req: false }], ['bookable', 'Show on online booking', 'select', { opts: [[1, 'Yes'], [0, 'No']] }], ['apptOnly', 'Appointment only (not for walk-ins)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['needId', 'Requires a photo of the customer ID (Senior / PWD / Student)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
+      ['price', 'Price (₱)', 'number'], ['commission', 'Barber commission per piece sold (₱, products only)', 'number', { def: 100 }], ['mins', 'Minutes', 'number', { def: 30 }], ['photo', 'Photo', 'photo', { req: false }], ['bookable', 'Show on online booking', 'select', { opts: [[1, 'Yes'], [0, 'No']] }], ['apptOnly', 'Appointment only (not for walk-ins)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['needId', 'Requires a photo of the customer ID (Senior / PWD / Student)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   discounts: { cols: [['name', 'Name'], ['kind', 'Kind'], ['value', 'Value'], ['active', 'Active', yn]], rows: () => S.discounts,
     form: () => [['name', 'Name', 'text'], ['kind', 'Kind', 'select', { opts: [['amount', 'Amount off (₱)'], ['percent', 'Percent off (%)']] }], ['value', 'Value', 'number'], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   users: { cols: [['name', 'Name'], ['username', 'Username'], ['role', 'Role'], ['branchId', 'Branch', v => v ? brName(v) : 'All'], ['active', 'Active', yn]], rows: () => S.users,
@@ -679,7 +679,14 @@ document.addEventListener('click', async e => {
   if (act === 'page') { ui.cust.page += +d.n; await loadView(); return render(); }
   if (act === 'paid') {
     if (!confirm(`Mark ${ui.picked.size} barber(s) as paid (all unpaid days up to ${ui.to})?`)) return;
-    mut(() => api('POST', '/api/payroll/pay', { staffIds: [...ui.picked], to: ui.to })).then(() => ui.picked.clear());
+    mut(() => api('POST', '/api/payroll/pay', { staffIds: [...ui.picked], from: ui.rp === 'all' ? '2000-01-01' : ui.from, to: ui.to })).then(() => ui.picked.clear());
+  }
+  if (act === 'paydays') {
+    const tb = ui.rep && ui.rep.tables && ui.rep.tables[0], list = (tb && tb.detail && tb.detail[d.id]) || [], name = (S.staff.find(s => s.id === d.id) || {}).name || '', by = new Map(list.map(x => [x.date, x]));
+    const dates = []; if (ui.rp !== 'all') { for (let c = ui.from; c <= ui.to && dates.length < 62; c = addDays(c, 1)) dates.push(c); } else list.forEach(x => dates.push(x.date));
+    const hm = iso => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' }) : '';
+    let tot = 0; const rows = dates.map(dt => { const x = by.get(dt); if (!x) return `<tr><td>${dt}</td><td colspan="7" class="mute">No time-in</td></tr>`; const pay = x.commission + x.topup + x.lunch - x.advance; if (!x.paid) tot += pay; return `<tr><td>${dt}</td><td>${hm(x.timeIn)}${x.lateMins ? ` <span class="mute">(${x.lateMins} min late)</span>` : ''}</td><td>${peso(x.commission)}</td><td>${peso(x.topup)}${x.allowLost ? ' <span class="mute">no allowance</span>' : ''}</td><td>${peso(x.lunch)}${x.lunchLost ? ' <span class="mute">no lunch</span>' : ''}</td><td>${x.advance ? '−' + peso(x.advance) : ''}</td><td><b>${peso(pay)}</b></td><td>${x.paid ? '<span class="tag" style="color:var(--ok)">Paid</span>' : 'Unpaid'}</td></tr>`; }).join('');
+    return openModal(`<h2 style="margin-top:0">${esc(name)} · ${ui.rp === 'all' ? 'all unpaid days' : ui.from === ui.to ? ui.from : ui.from + ' → ' + ui.to}</h2><div class="overflow"><table><tr><th>Date</th><th>Time in</th><th>Commission</th><th>Top-up</th><th>Lunch</th><th>Advance</th><th>Day pay</th><th></th></tr>${rows}</table></div><p style="margin:10px 0"><b>Unpaid total (before bonuses and deductions): ${peso(tot)}</b></p><button class="btn ghost" data-act="close">Close</button>`);
   }
 });
 document.addEventListener('change', async e => {
@@ -736,7 +743,7 @@ document.addEventListener('submit', e => {
     return;
   }
   const o = {};
-  for (const [k, v] of fd.entries()) { if (k === 'password' && !v) continue; o[k] = ['price', 'mins', 'pct', 'allowance', 'active', 'value', 'sort', 'graceMins', 'defaultPct', 'bookable', 'apptOnly', 'consent'].includes(k) ? +v : v; }
+  for (const [k, v] of fd.entries()) { if (k === 'password' && !v) continue; o[k] = ['price', 'commission', 'mins', 'pct', 'allowance', 'active', 'value', 'sort', 'graceMins', 'defaultPct', 'bookable', 'apptOnly', 'consent'].includes(k) ? +v : v; }
   run(() => id ? api('PUT', `/api/${kind}/${id}`, o) : api('POST', `/api/${kind}`, o), err);
 });
 

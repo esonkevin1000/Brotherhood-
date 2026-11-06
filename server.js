@@ -49,7 +49,7 @@ function addCol(t, c, type) { if (!db.prepare(`pragma table_info(${t})`).all().s
 addCol('branches', 'openTime', 'text'); addCol('branches', 'graceMins', 'integer');
 addCol('users', 'pinKey', 'text'); addCol('attendance', 'status', 'text'); addCol('attendance', 'breakStartedAt', 'text'); addCol('attendance', 'breakMins', 'integer');
 addCol('shifts', 'no', 'integer'); addCol('cash_moves', 'by', 'text');
-addCol('staff', 'photo', 'text'); addCol('items', 'photo', 'text'); addCol('items', 'bookable', 'integer'); addCol('items', 'apptOnly', 'integer'); addCol('branches', 'closeTime', 'text');
+addCol('staff', 'photo', 'text'); addCol('items', 'photo', 'text'); addCol('items', 'bookable', 'integer'); addCol('items', 'apptOnly', 'integer'); addCol('items', 'commission', 'real'); addCol('branches', 'closeTime', 'text');
 db.exec(`
 create table if not exists images(id text primary key, mime text, data blob, createdAt text);
 create table if not exists bookings(id text primary key, branchId text, staffId text, customerName text, phone text, date text, time text, mins integer,
@@ -106,13 +106,13 @@ const COLS = {
   chairs: ['branchId', 'name', 'sort', 'active'],
   staff: ['name', 'branchId', 'chairId', 'pct', 'allowance', 'active', 'photo'],
   categories: ['name', 'type'],
-  items: ['name', 'categoryId', 'type', 'price', 'mins', 'active', 'photo', 'bookable', 'apptOnly', 'needId'],
+  items: ['name', 'categoryId', 'type', 'price', 'mins', 'active', 'photo', 'bookable', 'apptOnly', 'needId', 'commission'],
   discounts: ['name', 'kind', 'value', 'active'],
   customers: ['name', 'phone', 'email', 'notes', 'createdAt', 'preferredCut'],
   users: ['name', 'username', 'role', 'branchId', 'active', 'staffId'],
   equipment: ['branchId', 'name', 'category', 'serial', 'status', 'lastService', 'nextService', 'notes', 'active']
 };
-const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly', 'defaultPct', 'needId']);
+const NUM = new Set(['sort', 'active', 'pct', 'allowance', 'price', 'mins', 'value', 'graceMins', 'bookable', 'apptOnly', 'defaultPct', 'needId', 'commission']);
 const uid = () => crypto.randomBytes(5).toString('hex');
 const pad = n => String(n).padStart(2, '0');
 const dOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -169,6 +169,7 @@ if (!one('select count(*) n from categories').n) {
 if (!one('select count(*) n from discounts').n) insert('discounts', { name: 'Student', kind: 'amount', value: 50, active: 1 });
 run("update branches set closeTime='21:00' where closeTime is null or closeTime=''");
 run("update items set bookable=case when type='service' then 1 else 0 end where bookable is null");
+run("update items set commission=case when type='product' then 100 else 0 end where commission is null");   // fixed barber commission per piece sold (products); owner can change it per product
 run("update items set apptOnly=case when name='Vip Compadre' then 1 else 0 end where apptOnly is null");
 run("update items set needId=case when lower(name)='buddy' then 1 else 0 end where needId is null");   // Buddy = Senior / PWD / Student discount service: needs a photo of the ID
 
@@ -244,7 +245,7 @@ function priceItems(lines) {
   for (const l of Array.isArray(lines) ? lines : []) {
     const it = get('items', l.itemId); if (!it || !it.active) bad(400, 'Unknown or inactive item');
     const qty = Math.max(1, Math.min(99, Math.floor(+l.qty || 1)));
-    out.push({ itemId: it.id, name: it.name, type: it.type, price: it.price, qty, ...(it.needId ? { needId: 1 } : {}) });
+    out.push({ itemId: it.id, name: it.name, type: it.type, price: it.price, qty, ...(it.type === 'product' && it.commission > 0 ? { comm: it.commission } : {}), ...(it.needId ? { needId: 1 } : {}) });
   }
   return out;
 }
@@ -263,7 +264,9 @@ function totals(items, disc) {
   return { subtotal, discountAmt: amt, total: r2(subtotal - amt) };
 }
 const serviceNet = o => { const svc = sum(o.items.filter(i => i.type === 'service'), i => i.price * i.qty); return o.subtotal > 0 ? svc * o.total / o.subtotal : 0; };
-const commissionOf = (o, pct) => r2(serviceNet(o) * (pct || 0) / 100);
+// barber commission on a ticket = their % of the services + a fixed amount for every product they sold (saved on the ticket line; older tickets use the product's current amount)
+const productComm = o => sum(o.items.filter(i => i.type === 'product'), i => (i.comm !== undefined ? i.comm : (get('items', i.itemId)?.commission || 0)) * i.qty);
+const commissionOf = (o, pct) => r2(serviceNet(o) * (pct || 0) / 100 + productComm(o));
 
 function onDuty(staffId, date) { return one("select * from attendance where staffId=? and date=? and timeOut is null and ifnull(status,'present')='present'", staffId, date); }
 // roster state for one barber today: none | present | late | break | off | out
@@ -667,16 +670,20 @@ const REPORTS = {
     };
   },
   payroll(f) {
-    const days = dayRows('2000-01-01', f.to, f.br), unpaid = days.filter(d => !d.paidAt).sort((a, b) => a.date.localeCompare(b.date));
+    // only the days inside the chosen range (Today = today, This week = the whole week, All time = everything); unpaid days before the range are reported separately
+    const every = dayRows('2000-01-01', f.to, f.br), inRange = every.filter(d => d.date >= f.from), unpaid = inRange.filter(d => !d.paidAt).sort((a, b) => a.date.localeCompare(b.date));
+    const earlier = every.filter(d => d.date < f.from && !d.paidAt), detail = {};
+    for (const d of inRange) (detail[d.staffId] ||= []).push({ date: d.date, timeIn: d.timeIn, lateMins: d.lateRaw, commission: d.commission, topup: d.topup, lunch: d.lunch, advance: d.advance, paid: !!d.paidAt, allowLost: d.allowLost, lunchLost: d.lunchLost });
     const by = new Map(); for (const d of unpaid) { const r = by.get(d.staffId) || { d: [], name: d.name, branchId: d.branchId }; r.d.push(d); by.set(d.staffId, r); }
     const rows = [...by.entries()].map(([id, r]) => ({ id, ...r, comm: sum(r.d, x => x.commission), top: sum(r.d, x => x.topup + x.lunch), adv: sum(r.d, x => x.advance) })).map(r => { const bon = adjTotal(r.id, f.to); return { ...r, bon, ded: planDeductions(r.id, f.to, r2(r.comm + r.top + bon - r.adv)).total }; });
     const paidP = all('select * from payroll_days where date>=? and date<=?', f.from, f.to);
     return {
-      cards: [{ label: 'Payroll due', value: sum(rows, r => r.comm + r.top + r.bon - r.adv - r.ded), t: 'peso', sub: 'Unpaid days up to ' + f.to }, { label: 'Barbers', value: rows.length, t: 'num' },
+      cards: [{ label: 'Payroll due', value: sum(rows, r => r.comm + r.top + r.bon - r.adv - r.ded), t: 'peso', sub: f.from <= '2000-01-01' ? 'All unpaid days' : 'Unpaid days ' + f.from + (f.from === f.to ? '' : ' → ' + f.to) }, { label: 'Barbers', value: rows.length, t: 'num' },
+        ...(earlier.length ? [{ label: 'Unpaid before this range', value: sum(earlier, d => d.commission + d.topup + d.lunch - d.advance), t: 'peso', sub: 'Pick All time to see and pay these' }] : []),
         { label: 'Released during the day', value: sum(rows, r => r.adv), t: 'peso', sub: 'Already deducted' }, { label: 'Paid in period', value: sum(paidP, p => p.commission + p.topup + (p.lunch || 0) + (p.extra || 0) - p.advance - (p.deduction || 0)), t: 'peso' }],
       tables: [{
-        title: 'Payroll', selectable: true, ids: rows.map(r => r.id), cols: [['Barber'], ['Branch'], ['Days', 'num'], ['Dates'], ['Commission', 'peso'], ['Top-up & lunch', 'peso'], ['Bonuses & incentives', 'peso'], ['Advances', 'peso'], ['Release pay deductions', 'peso'], ['Net due', 'peso']],
-        rows: rows.map(r => [r.name, get('branches', r.branchId)?.name || '', r.d.length, r.d[0].date + (r.d.length > 1 ? ' → ' + r.d[r.d.length - 1].date : ''), r.comm, r.top, r.bon, r.adv, r.ded, r.comm + r.top + r.bon - r.adv - r.ded])
+        title: 'Payroll', selectable: true, detail, ids: rows.map(r => r.id), cols: [['Barber'], ['Branch'], ['Days', 'days'], ['Dates'], ['Commission', 'peso'], ['Top-up & lunch', 'peso'], ['Bonuses & incentives', 'peso'], ['Advances', 'peso'], ['Release pay deductions', 'peso'], ['Net due', 'peso']],
+        rows: rows.map(r => [r.name, get('branches', r.branchId)?.name || '', r.d.length + '~' + r.id, r.d[0].date + (r.d.length > 1 ? ' → ' + r.d[r.d.length - 1].date : ''), r.comm, r.top, r.bon, r.adv, r.ded, r.comm + r.top + r.bon - r.adv - r.ded])
       }]
     };
   },
@@ -756,7 +763,7 @@ const REPORTS = {
 };
 function csv(rep) {
   const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  return '﻿' + rep.tables.map(t => [t.title, t.cols.map(c => c[0]).join(','), ...t.rows.map(r => r.map((v, j) => q(t.cols[j] && t.cols[j][1] === 'idlink' ? String(v).split('~')[0] : v)).join(','))].join('\n')).join('\n\n');
+  return '﻿' + rep.tables.map(t => [t.title, t.cols.map(c => c[0]).join(','), ...t.rows.map(r => r.map((v, j) => q(t.cols[j] && (t.cols[j][1] === 'idlink' || t.cols[j][1] === 'days') ? String(v).split('~')[0] : v)).join(','))].join('\n')).join('\n\n');
 }
 
 // ---------- http ----------
@@ -1519,9 +1526,9 @@ async function handle(req, res) {
     return send(res, 200, rep);
   }
   if (p === '/api/payroll/pay' && method === 'POST') {
-    adminOnly(); const b = await readBody(req), to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : todayStr(); let n = 0;
+    adminOnly(); const b = await readBody(req), to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : todayStr(), from = /^\d{4}-\d{2}-\d{2}$/.test(b.from || '') ? b.from : '2000-01-01'; let n = 0;
     for (const sid of Array.isArray(b.staffIds) ? b.staffIds : []) {
-      const days = dayRows('2000-01-01', to, null).filter(x => x.staffId === sid && !x.paidAt).sort((x, y) => x.date.localeCompare(y.date)); if (!days.length) continue;
+      const days = dayRows('2000-01-01', to, null).filter(x => x.staffId === sid && !x.paidAt && x.date >= from).sort((x, y) => x.date.localeCompare(y.date)); if (!days.length) continue;
       const bonus = adjTotal(sid, to), plan = planDeductions(sid, to, r2(sum(days, x => x.commission + x.topup + x.lunch - x.advance) + bonus)), last = days[days.length - 1].date;
       db.exec('begin');
       try {
