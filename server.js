@@ -63,6 +63,13 @@ db.exec('create index if not exists cust_phone on customers(phoneKey); create in
 addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
 addCol('items', 'needId', 'integer'); addCol('orders', 'idPhoto', 'text'); addCol('orders', 'idType', 'text');
 db.exec(`
+create table if not exists files(id text primary key, kind text, branchId text, mime text, data blob, byId text, byName text, createdAt text);
+create table if not exists remittances(id text primary key, branchId text, date text, posSales real, cashSales real, gcashSales real, mayaSales real, otherSales real,
+  cashIn real, cashExpenses real, expected real, actual real, variance real, responsible text, proofId text, notes text, status text, flagReason text,
+  submittedById text, submittedBy text, createdAt text, reviewedBy text, reviewedAt text, reviewNote text, history text);
+create index if not exists remit_date on remittances(date, branchId);
+`);
+db.exec(`
 create table if not exists id_photos(id text primary key, orderId text, branchId text, idType text, mime text, data blob, byId text, createdAt text);
 create index if not exists idp_order on id_photos(orderId);
 `);
@@ -183,7 +190,7 @@ function whoami(req) {
 const isAdmin = me => me.role === 'owner' || me.role === 'admin';
 const isBranchUser = me => me.role === 'cashier' || me.role === 'barber';
 // Which parts of the POS each role may open (editable by the owner in Settings → Access)
-const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers'];
+const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance'];
 const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'queue'] };
 const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber }; } catch { return { ...DEFAULT_PERMS }; } };
 const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
@@ -834,6 +841,8 @@ async function handle(req, res) {
       if (/^\/api\/bookings/.test(p)) return 'bookings';
       if (p === '/api/orders' && method === 'POST') return 'pos';
       if (p === '/api/pos/idphoto') return 'pos';
+      if (/^\/api\/remittances/.test(p)) return 'remittance';
+      if (/^\/api\/files/.test(p)) return ['remittance', 'expenses', 'pos'];
       if (/^\/api\/orders\/\w+\/(pay|void)$/.test(p)) return 'pos';
       if (/^\/api\/orders\/\w+$/.test(p) && method === 'PUT') return ['pos', 'queue'];
       if (p === '/api/cash') return ['expenses', 'reading'];
@@ -988,6 +997,64 @@ async function handle(req, res) {
   if (idm && method === 'GET') {
     const ph = get('id_photos', idm[1]); if (!ph || (isBranchUser(me) && ph.branchId !== me.branchId)) bad(404, 'Not found');
     res.writeHead(200, { 'Content-Type': ph.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(ph.data);
+  }
+  // ----- private evidence photos (remittance proof, receipts, ...). Never served on a public route. -----
+  if (p === '/api/files' && method === 'POST') {
+    const b = await readBody(req, 1_800_000), branchId = branchScope(me, b.branchId);
+    const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.data || '')); if (!m) bad(400, 'The photo must be a JPEG, PNG or WebP image');
+    const buf = Buffer.from(m[2], 'base64'); if (buf.length > 1_000_000) bad(413, 'The photo is too large. Please try again.');
+    const id = uid() + uid(); run('insert into files(id,kind,branchId,mime,data,byId,byName,createdAt) values(?,?,?,?,?,?,?,?)', id, String(b.kind || 'other').slice(0, 20), branchId, m[1], buf, me.id, me.name, nowISO());
+    log(me, 'file-upload', 'files', id, String(b.kind || 'other')); return send(res, 201, { id });
+  }
+  const flm = p.match(/^\/api\/files\/(\w+)$/);
+  if (flm && method === 'GET') {
+    const f = get('files', flm[1]); if (!f || (isBranchUser(me) && f.branchId !== me.branchId)) bad(404, 'Not found');
+    res.writeHead(200, { 'Content-Type': f.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(f.data);
+  }
+  // ----- daily sales remittance (separate from expenses) -----
+  const remitCalc = (branchId, date) => {
+    const os = all("select * from orders where branchId=? and date=? and status='paid'", branchId, date).map(parseOrder), tender = {};
+    for (const o of os) for (const t of o.tenders) tender[t.method] = r2((tender[t.method] || 0) + t.amount);
+    const mv = all('select * from cash_moves where branchId=? and date=?', branchId, date);
+    const cashSales = tender.Cash || 0, gcash = tender.GCash || 0, maya = tender.Maya || 0, posSales = r2(sum(os, o => o.total));
+    const other = r2(Object.entries(tender).filter(([k]) => !['Cash', 'GCash', 'Maya'].includes(k)).reduce((s, [, v]) => s + v, 0));
+    const cashIn = r2(sum(mv.filter(m => m.kind === 'in'), m => m.amount)), cashExpenses = r2(sum(mv.filter(m => m.kind !== 'in'), m => m.amount));
+    return { branchId, date, posSales, cashSales: r2(cashSales), gcashSales: r2(gcash), mayaSales: r2(maya), otherSales: other, cashIn, cashExpenses, expected: r2(cashSales + cashIn - cashExpenses), orders: os.length };
+  };
+  const remitView = r => ({ ...r, history: jp(r.history), branchName: get('branches', r.branchId)?.name || '' });
+  if (p === '/api/remittances/preview' && method === 'GET') {
+    const branchId = branchScope(me, q.branch), date = /^\d{4}-\d{2}-\d{2}$/.test(q.date || '') ? q.date : todayStr();
+    return send(res, 200, { ...remitCalc(branchId, date), existing: all("select id,status from remittances where branchId=? and date=? and status<>'REJECTED'", branchId, date) });
+  }
+  if (p === '/api/remittances' && method === 'GET') {
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : '2000-01-01', to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : '2099-12-31';
+    const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = ['PENDING', 'VERIFIED', 'FLAGGED', 'REJECTED'].includes(q.status) ? q.status : null;
+    const rows = all(`select * from remittances where date>=? and date<=?${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''} order by date desc, createdAt desc limit 500`, from, to, ...(br ? [br] : []), ...(st ? [st] : [])).map(remitView);
+    return send(res, 200, { rows, totals: { count: rows.length, actual: r2(sum(rows, r => r.actual)), expected: r2(sum(rows, r => r.expected)), variance: r2(sum(rows, r => r.variance)) } });
+  }
+  if (p === '/api/remittances' && method === 'POST') {
+    const b = await readBody(req), branchId = branchScope(me, b.branchId), date = String(b.date || todayStr());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > todayStr() || date < dOf(new Date(Date.now() - 14 * 864e5))) bad(400, 'The business date must be today or within the last 14 days');
+    const actual = Number(b.actual); if (!Number.isFinite(actual) || actual < 0) bad(400, 'Enter the actual amount remitted (0 or more)');
+    const proof = get('files', String(b.proofId || '')); if (!proof || proof.branchId !== branchId) bad(400, 'Take a photo of the deposit slip or remittance proof first');
+    const responsible = String(b.responsible || me.name).trim().slice(0, 100); if (!responsible) bad(400, 'Enter the person responsible');
+    if (one("select 1 x from remittances where branchId=? and date=? and status<>'REJECTED'", branchId, date)) bad(409, 'A remittance for this branch and date was already submitted. Ask the owner to reject it first if it must be redone.');
+    const c = remitCalc(branchId, date), variance = r2(actual - c.expected), off = Math.abs(variance) >= 1;
+    const flag = off ? `Auto-flagged: remitted ${variance < 0 ? 'short by' : 'over by'} ₱${Math.abs(variance).toFixed(2)}` : '', id = uid();
+    const hist = [{ at: nowISO(), by: me.name, action: 'SUBMITTED', note: String(b.notes || '').slice(0, 300) }]; if (off) hist.push({ at: nowISO(), by: 'System', action: 'FLAGGED', note: flag });
+    run(`insert into remittances(id,branchId,date,posSales,cashSales,gcashSales,mayaSales,otherSales,cashIn,cashExpenses,expected,actual,variance,responsible,proofId,notes,status,flagReason,submittedById,submittedBy,createdAt,history)
+      values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, branchId, date, c.posSales, c.cashSales, c.gcashSales, c.mayaSales, c.otherSales, c.cashIn, c.cashExpenses, c.expected, r2(actual), variance, responsible, proof.id,
+      String(b.notes || '').slice(0, 500), off ? 'FLAGGED' : 'PENDING', flag, me.id, me.name, nowISO(), JSON.stringify(hist));
+    log(me, 'remittance', 'remittances', id, `${date} expected ${c.expected} actual ${r2(actual)}`); return send(res, 201, remitView(get('remittances', id)));
+  }
+  const rmv = p.match(/^\/api\/remittances\/(\w+)\/review$/);
+  if (rmv && method === 'PUT') {
+    adminOnly(); const r = get('remittances', rmv[1]); if (!r) bad(404, 'Not found');
+    const b = await readBody(req), act = { verify: 'VERIFIED', flag: 'FLAGGED', reject: 'REJECTED' }[b.action], note = String(b.note || '').trim().slice(0, 300);
+    if (!act) bad(400, 'Choose verify, flag or reject'); if (act !== 'VERIFIED' && !note) bad(400, 'A note is required to flag or reject a remittance');
+    const hist = jp(r.history); hist.push({ at: nowISO(), by: me.name, action: act, note });
+    run('update remittances set status=?, reviewedBy=?, reviewedAt=?, reviewNote=?, history=? where id=?', act, me.name, nowISO(), note, JSON.stringify(hist), r.id);
+    log(me, 'remittance-' + b.action, 'remittances', r.id, note); return send(res, 200, remitView(get('remittances', r.id)));
   }
   // ----- photos (admin) -----
   if (p === '/api/upload' && method === 'POST') {

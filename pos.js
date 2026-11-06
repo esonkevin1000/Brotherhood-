@@ -32,10 +32,10 @@ function toast(msg, err) { const t = document.createElement('div'); t.className 
 
 let token = ''; try { token = localStorage.getItem('bp.pos') || ''; } catch (e) { }
 const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: [], boot: null, dash: null, queue: [], att: [], exp: null, shift: null, z: [], zs: [], view: 'dashboard', pin: '', err: '',
-  cart: { items: [], barberId: '', mode: 'later', editing: null }, cust: { q: '', tier: '', rows: [], total: 0 }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
+  cart: { items: [], barberId: '', mode: 'later', editing: null }, cust: { q: '', tier: '', rows: [], total: 0 }, rm: { date: '', calc: null, list: [], proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 // which sections this login may open (the owner sets this in Settings → Access)
-const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers' };
+const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers', remit: 'remittance' };
 const freshCart = () => ({ items: [], editing: null, mode: (typeof P !== 'undefined' && P.cart && P.cart.mode) || 'later' });
 const isAdminRole = () => P.me && ['owner', 'admin'].includes(P.me.role);
 const canOpen = v => (P.mods || []).includes(VMAP[v]);
@@ -55,6 +55,11 @@ const guard = async fn => { try { return await fn(); } catch (e) { toast(e.messa
 // ---------- data ----------
 const TIER_STEPS = [[5, 'Bronze'], [16, 'Silver'], [26, 'Gold'], [51, 'VIP']];
 const nextTierOf = v => { const n = TIER_STEPS.find(([m]) => v < m); return n ? { name: n[1], need: n[0] - v } : null; };
+async function loadRemit() {
+  const m = P.rm; if (!m.date) m.date = ymd(0);
+  const br = P.boot?.branch?.id || P.branch || '', q = br ? '&branch=' + br : '';
+  [m.calc, m.list] = await Promise.all([api('GET', '/api/remittances/preview?date=' + m.date + q), api('GET', '/api/remittances?from=' + ymd(-30) + '&to=' + ymd(0) + q).then(r => r.rows)]);
+}
 async function loadCustomers() {
   const c = P.cust, br = P.boot?.branch?.id || P.branch || '';
   const r = await api('GET', '/api/customers?size=40&q=' + encodeURIComponent(c.q) + (c.tier ? '&tier=' + c.tier : '') + (br ? '&branch=' + br : ''));
@@ -69,6 +74,7 @@ async function refresh() {
     if (P.view === 'dashboard') P.dash = await api('GET', withBr('/api/pos/dashboard'));
     if (P.view === 'pos') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
     if (P.view === 'customers') await loadCustomers();
+    if (P.view === 'remit') await loadRemit();
     if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
     if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expenses?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
@@ -92,7 +98,7 @@ async function afterLogin(j) {
 }
 
 // ---------- shell ----------
-const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory' };
+const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance' };
 function render() {
   if (!P.me) {
     app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
@@ -102,7 +108,7 @@ function render() {
   const b = P.boot; app.classList.toggle('in', !!P.me);
   if (!canOpen(P.view)) P.view = firstView();
   if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
-  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading']];
+  const FULLNAV = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers'], ['expenses', 'wallet', 'Expenses'], ['attendance', 'clock', 'Attendance'], ['reading', 'doc', 'Sales Reading'], ['remit', 'wallet', 'Remittance']];
   const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div><span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
@@ -163,6 +169,29 @@ const VIEWS = {
       <div class="row" style="margin-top:8px;gap:18px"><div><div class="num" style="font-size:30px;line-height:1">${h.visits}</div><small class="mute">points</small></div><div style="flex:1;min-width:0"><small class="mute">${nt ? nt.need + ' more visit' + (nt.need === 1 ? '' : 's') + ' to reach ' + nt.name : 'Top tier reached'}</small>${nt ? `<div style="height:6px;border-radius:6px;background:var(--s3);margin-top:6px;overflow:hidden"><div style="height:100%;width:${Math.min(100, Math.round(h.visits / (h.visits + nt.need) * 100))}%;background:#000"></div></div>` : ''}</div></div>
       <small class="mute" style="display:block;margin-top:8px">${esc(h.phone || '')}${h.phone && h.email ? ' · ' : ''}${esc(h.email || '')}</small>
       <small class="mute">Last visit: ${h.lastVisit ? new Date(h.lastVisit).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : 'none yet'} · Spent ${peso(h.spent)}${h.preferredCut ? ' · ✂ ' + esc(h.preferredCut) : ''}</small></div>`; }).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No customers found for this branch.</p></div>'}`;
+  },
+  remit() {
+    const m = P.rm, c = m.calc; if (!c) return '<p class="mute">Loading…</p>';
+    const done = (c.existing || [])[0], st = s => ({ PENDING: 'waiting', VERIFIED: 'paid', FLAGGED: 'void', REJECTED: 'void' }[s] || '');
+    const act = Number(m.actual), vr = m.actual !== '' && Number.isFinite(act) ? Math.round((act - c.expected) * 100) / 100 : null;
+    const row = (l, v, b) => `<div class="row between" style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="mute">${l}</span><span>${b ? '<b>' + v + '</b>' : v}</span></div>`;
+    return `<div class="card"><label style="margin-top:0">Business date</label><input type="date" id="rmdate" data-a="rmdate" min="${ymd(-14)}" max="${ymd(0)}" value="${esc(m.date)}">
+      <div style="margin-top:10px">${row('POS sales (' + c.orders + ' tickets)', peso(c.posSales))}${row('Cash sales', peso(c.cashSales))}${row('GCash sales', peso(c.gcashSales))}${row('Maya sales', peso(c.mayaSales))}${row('Other payment methods', peso(c.otherSales))}${c.cashIn ? row('Cash added to drawer', peso(c.cashIn)) : ''}${row('Authorized cash expenses and payouts', '−' + peso(c.cashExpenses))}</div>
+      <div class="paybox"><small>Expected remittance</small><div class="num">${peso(c.expected)}</div><small>Cash sales − cash expenses</small></div></div>
+    ${done ? `<div class="notice"><b>Already submitted for this date</b><br><small>Status: ${done.status}. Ask the owner to reject it first if it must be redone.</small></div>` : `<div class="card"><h3 style="margin:0 0 6px;font-size:15px;text-transform:uppercase;letter-spacing:1px">Submit remittance</h3>
+      <label>Actual amount remitted (₱)</label><input id="rmactual" type="number" inputmode="decimal" value="${esc(m.actual)}" placeholder="0.00">
+      <div id="rmvar" class="changebox row between" style="${vr === null ? 'display:none' : ''}"><span>Difference</span><b style="color:${vr !== null && Math.abs(vr) >= 1 ? 'var(--bad)' : 'var(--ok)'}">${vr === null ? '' : (vr > 0 ? '+' : '') + peso(vr)}</b></div>
+      <label>Person responsible</label><input id="rmresp" value="${esc(m.resp || P.me.name)}" maxlength="100">
+      <label>Deposit slip / remittance proof (photo)</label><button type="button" class="ghost block" data-a="rmpick">📷 ${m.proofId ? 'Retake photo' : 'Take photo or choose from gallery'}</button><input type="file" id="rmfile" accept="image/*" capture="environment" hidden>
+      ${m.preview ? `<img class="idprev" src="${m.preview}" alt="Proof">` : ''}
+      <label>Notes (optional)</label><textarea id="rmnotes" rows="2" maxlength="500" placeholder="e.g. Deposited at BDO, reference no.">${esc(m.notes)}</textarea>
+      <p id="err" style="color:var(--bad);margin:8px 0 0"></p>
+      <button class="block" data-a="rmsubmit" ${m.proofId && m.actual !== '' && !m.busy ? '' : 'disabled'}>${m.busy ? 'Submitting…' : 'Submit remittance'}</button>
+      <p class="mute" style="font-size:12px;margin:8px 0 0">A difference of ₱1 or more is flagged automatically for the owner to review.</p></div>`}
+    <div class="sect"><h3>Recent submissions</h3><span class="mute">last 30 days</span></div>
+    ${m.list.map(r => `<div class="card" style="padding:14px"><div class="row between" style="flex-wrap:nowrap"><b>${esc(r.date)}</b><span class="tag ${st(r.status)}">${r.status}</span></div>
+      <small class="mute">Expected ${peso(r.expected)} · Remitted ${peso(r.actual)} · <b style="color:${Math.abs(r.variance) >= 1 ? 'var(--bad)' : 'var(--ok)'}">${r.variance > 0 ? '+' : ''}${peso(r.variance)}</b></small>
+      ${r.reviewNote ? `<br><small>Owner note: ${esc(r.reviewNote)}</small>` : ''}</div>`).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No submissions yet.</p></div>'}`;
   },
   expenses() {
     const e = P.exp; if (!e) return '<p class="mute">Loading…</p>';
@@ -452,7 +481,7 @@ document.addEventListener('click', async e => {
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
-      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
@@ -485,6 +514,15 @@ document.addEventListener('click', async e => {
   if (a === 'add') return addItem(d.id);
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
   if (a === 'rm') { P.cart.items.splice(+d.n, 1); syncId(); cartSheet(); return render(); }
+  if (a === 'rmpick') { document.getElementById('rmfile')?.click(); return; }
+  if (a === 'rmsubmit') {
+    const m = P.rm; m.busy = true; render();
+    try {
+      await api('POST', '/api/remittances', { branchId: P.boot.branch.id, date: m.date, actual: m.actual, responsible: m.resp || P.me.name, proofId: m.proofId, notes: m.notes });
+      Object.assign(m, { proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }); toast('Remittance submitted for review'); await refresh();
+    } catch (x) { m.busy = false; render(); const er = document.getElementById('err'); if (er) er.textContent = x.message; else toast(x.message, true); }
+    return;
+  }
   if (a === 'idpick') { document.getElementById('idfile')?.click(); return; }
   if (a === 'idtype') { P.idDraft.type = d.t; return idRender(); }
   if (a === 'idcancel') { P.idDraft = null; closeSheet(); return render(); }
@@ -602,6 +640,13 @@ document.addEventListener('change', async e => {
   if (a === 'exprange') { P.expRange = t.value; return refresh(); }
   if (a === 'paydisc') { P.pay.disc = t.value; return renderPay(P.pay); }
   if (a === 'custtier') { P.cust.tier = t.value; refresh().then(render); return; }
+  if (a === 'rmdate' || t.id === 'rmdate') { P.rm.date = t.value || ymd(0); P.rm.proofId = ''; P.rm.preview = ''; refresh().then(render); return; }
+  if (t.id === 'rmfile') {
+    const file = t.files[0]; if (!file) return;
+    try { const data = await resizeToJpeg(file, 1300); const r = await api('POST', '/api/files', { data, kind: 'remit', branchId: P.boot.branch.id }); P.rm.proofId = r.id; P.rm.preview = data; render(); }
+    catch (x) { toast(x.message || 'Could not upload the photo. Please try again.', true); }
+    return;
+  }
   if (t.id === 'idfile') { const file = t.files[0]; if (!file || !P.idDraft) return; try { P.idDraft.data = await resizeToJpeg(file, 1100); } catch (x) { return toast('Could not read that photo. Please try again.', true); } return idRender(); }
   if (t.id === 'cartbarber') P.cart.barberId = t.value;
   if (t.id === 'cu-consent') cu().consent = t.checked;
@@ -624,6 +669,12 @@ document.addEventListener('input', e => {
     return;
   }  if (t.id === 'expq') { P.expQ = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('expq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
   if (t.id === 'remarks') P.remarks = t.value;
+  if (t.id === 'rmactual' || t.id === 'rmresp' || t.id === 'rmnotes') {
+    const m = P.rm; if (t.id === 'rmactual') m.actual = t.value; else if (t.id === 'rmresp') m.resp = t.value; else m.notes = t.value;
+    const btn = document.querySelector('[data-a="rmsubmit"]'); if (btn) btn.disabled = !(m.proofId && m.actual !== '' && !m.busy);
+    const box = document.getElementById('rmvar'); if (box && t.id === 'rmactual') { const v = Math.round((Number(m.actual) - m.calc.expected) * 100) / 100; box.style.display = m.actual === '' ? 'none' : ''; box.innerHTML = '<span>Difference</span><b style="color:' + (Math.abs(v) >= 1 ? 'var(--bad)' : 'var(--ok)') + '">' + (v > 0 ? '+' : '') + peso(v) + '</b>'; }
+    return;
+  }
   if (t.id === 'custq') { P.cust.q = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('custq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
 });
 sheet.addEventListener('close', () => render());

@@ -30,6 +30,7 @@ async function loadView() {
     if (v === 'dashboard') { [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}&branch=${ui.branch}`)); }
+    else if (v === 'remit') ui.remit = await api('GET', `/api/remittances?${qs()}&status=${ui.rstatus || ''}`);
     else if (v === 'activity') ui.audit = await api('GET', '/api/audit');
     else if (v === 'settings') ui.settings = await api('GET', '/api/settings');
     else if (v === 'reviews') ui.reviews = await api('GET', '/api/reviews');
@@ -76,7 +77,7 @@ const ICONS = {
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
@@ -101,13 +102,14 @@ function render() {
     <button class="${on('dashboard')}" data-view="dashboard">${ic('grid')}Dashboard</button>
     <button class="${on('bookings')}" data-view="bookings">${ic('calendar')}Bookings</button>
     <button class="${on('reviews')}" data-view="reviews">${ic('star')}Reviews</button>
+    <button class="${on('remit')}" data-view="remit">${ic('coin')}Daily Remittance</button>
     <div class="navh">Reports</div>${REPORTS.map(([k, l, i]) => `<button class="${on('rep:' + k)}" data-view="rep:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
     <button class="${on('settings')}" data-view="settings">${ic('gear')}Settings</button>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).trim();
-  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -141,6 +143,18 @@ function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
   return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
+}
+function vRemit() {
+  const r = ui.remit, st = ui.rstatus || '';
+  const tag = s => ({ PENDING: ['#b26a00', 'rgba(245,166,35,.16)'], VERIFIED: ['var(--ok)', 'rgba(62,207,142,.13)'], FLAGGED: ['var(--bad)', 'rgba(255,93,108,.13)'], REJECTED: ['#6b6b76', '#ececef'] }[s]);
+  const sel = `<select id="rstatus" style="width:auto"><option value="">All statuses</option>${['PENDING', 'FLAGGED', 'VERIFIED', 'REJECTED'].map(s => `<option ${st === s ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
+  return `<h2>Daily Sales Remittance <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(sel)}
+  ${r ? `<div class="grid"><div class="card stat"><span>Submissions</span><b>${r.totals.count}</b></div><div class="card stat"><span>Expected</span><b>${peso(r.totals.expected)}</b></div><div class="card stat"><span>Remitted</span><b>${peso(r.totals.actual)}</b></div><div class="card stat"><span>Net difference</span><b style="color:${Math.abs(r.totals.variance) >= 1 ? 'var(--bad)' : 'var(--ok)'}">${peso(r.totals.variance)}</b></div></div>
+  <div class="card overflow"><table><tr><th>Date</th><th>Branch</th><th>POS sales</th><th>Cash</th><th>GCash</th><th>Maya</th><th>Other</th><th>Cash expenses</th><th>Expected</th><th>Remitted</th><th>Difference</th><th>Responsible</th><th>Status</th><th>Proof</th><th></th></tr>
+  ${r.rows.map(x => { const [c, bg] = tag(x.status); return `<tr><td>${esc(x.date)}</td><td>${esc(x.branchName)}</td><td>${peso(x.posSales)}</td><td>${peso(x.cashSales)}</td><td>${peso(x.gcashSales)}</td><td>${peso(x.mayaSales)}</td><td>${peso(x.otherSales)}</td><td>${peso(x.cashExpenses)}</td><td><b>${peso(x.expected)}</b></td><td><b>${peso(x.actual)}</b></td>
+    <td style="color:${Math.abs(x.variance) >= 1 ? 'var(--bad)' : 'var(--ok)'};font-weight:700">${x.variance > 0 ? '+' : ''}${peso(x.variance)}</td><td>${esc(x.responsible)}<br><span class="mute" style="font-size:11px">by ${esc(x.submittedBy)}</span></td>
+    <td><span class="tag" style="color:${c};background:${bg}">${x.status}</span></td><td><a href="#" data-act="viewfile" data-id="${x.proofId}">View photo</a></td>
+    <td style="white-space:normal;min-width:190px"><button class="btn ghost sm" data-act="rmhist" data-id="${x.id}">History</button> ${x.status !== 'VERIFIED' ? `<button class="btn sm" data-act="rmreview" data-a="verify" data-id="${x.id}">Verify</button>` : ''} ${x.status === 'PENDING' || x.status === 'FLAGGED' ? `<button class="btn ghost sm" data-act="rmreview" data-a="flag" data-id="${x.id}">Flag</button> <button class="btn bad sm" data-act="rmreview" data-a="reject" data-id="${x.id}">Reject</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="15" class="mute">No remittances in this period.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
 }
 function vDashboard() {
   const l = ui.live, r = ui.rep;
@@ -317,10 +331,10 @@ function parseCSV(text) {
 }
 
 // ---------- events ----------
-async function showIdPhoto(id) {
+async function showIdPhoto(id, base = '/api/idphoto/', heading = 'Customer ID photo') {
   try {
-    const r = await fetch('/api/idphoto/' + id, { headers: { Authorization: 'Bearer ' + token } }); if (!r.ok) throw new Error('Could not load the ID photo');
-    openModal('<h2 style="margin-top:0">Customer ID photo</h2><img src="' + URL.createObjectURL(await r.blob()) + '" alt="ID photo" style="width:100%;border-radius:14px;border:1px solid var(--line)"><p class="mute" style="font-size:12px">Private. Only the owner and staff of that branch can see this photo.</p><button class="btn ghost" data-act="close">Close</button>');
+    const r = await fetch(base + id, { headers: { Authorization: 'Bearer ' + token } }); if (!r.ok) throw new Error('Could not load the ID photo');
+    openModal('<h2 style="margin-top:0">' + heading + '</h2><img src="' + URL.createObjectURL(await r.blob()) + '" alt="ID photo" style="width:100%;border-radius:14px;border:1px solid var(--line)"><p class="mute" style="font-size:12px">Private. Only the owner and staff of that branch can see this photo.</p><button class="btn ghost" data-act="close">Close</button>');
   } catch (x) { alert(x.message); }
 }
 document.addEventListener('click', async e => {
@@ -330,6 +344,13 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
+  if (act === 'viewfile') { e.preventDefault(); return showIdPhoto(d.id, '/api/files/', 'Remittance proof'); }
+  if (act === 'rmhist') { const x = ui.remit.rows.find(r => r.id === d.id); return openModal('<h2 style="margin-top:0">Submission history</h2>' + x.history.map(h => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(h.action)}</b> · ${esc(h.by)}<br><span class="mute" style="font-size:12px">${new Date(h.at).toLocaleString('en-PH')}</span>${h.note ? '<br>' + esc(h.note) : ''}</div>`).join('') + '<br><button class="btn ghost" data-act="close">Close</button>'); }
+  if (act === 'rmreview') {
+    const action = d.a, note = action === 'verify' ? '' : prompt(action === 'flag' ? 'Why is this flagged?' : 'Why is this rejected? The cashier will see this note.'); if (note === null) return;
+    if (action !== 'verify' && !String(note).trim()) return alert('A note is required.');
+    try { await api('PUT', '/api/remittances/' + d.id + '/review', { action, note }); await loadView(); render(); } catch (x) { alert(x.message); } return;
+  }
   if (act === 'viewid') { e.preventDefault(); return showIdPhoto(d.id); }
   if (act === 'logout') { token = ''; try { localStorage.removeItem('bp.token'); } catch (x) { } loggedIn = false; return render(); }
   if (act === 'edit') return form(d.kind, d.id);
@@ -388,6 +409,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.id === 'rstatus') { ui.rstatus = t.value; await loadView(); return render(); }
   if (t.id === 'branchsel') { ui.branch = t.value; render(); await loadView(); return render(); }
   if (t.id === 'tierf') { ui.cust.tier = t.value; ui.cust.page = 1; await loadView(); return render(); }
   if (t.id === 'bfrom' || t.id === 'bto') { if (t.id === 'bfrom') ui.bf = t.value || today(); else ui.bt = t.value || today(); await loadView(); return render(); }
