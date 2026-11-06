@@ -1,5 +1,5 @@
-﻿// BarberPro — Squire-style barbershop app (bookings, POS, clients, staff, reports)
-const KEY = 'barberpro.v1';
+﻿// Brotherhood — Squire-style barbershop app (bookings, POS, clients, staff, reports)
+const KEY = 'Brotherhood.v1';
 const OPEN = 540, CLOSE = 1260; // 9:00 AM - 9:00 PM
 const uid = () => Math.random().toString(36).slice(2, 9);
 const peso = n => '₱' + Number(n || 0).toLocaleString('en-PH');
@@ -14,7 +14,7 @@ const addDays = (s, n) => { const d = new Date(s + 'T00:00'); d.setDate(d.getDat
 
 // ---------- state ----------
 const PUBLIC = location.pathname.startsWith('/book');
-let S = { shop: 'BarberPro', barbers: [], services: [], clients: [], appts: [] };
+let S = { shop: 'Brotherhood', barbers: [], services: [], clients: [], appts: [] };
 let token = ''; try { token = localStorage.getItem('bp.token') || ''; } catch (e) { }
 let loggedIn = PUBLIC, loadErr = '';
 async function api(method, url, body) {

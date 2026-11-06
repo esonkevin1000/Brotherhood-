@@ -1,4 +1,4 @@
-// BarberPro backend — zero dependencies (Node 22.5+ built-in SQLite).
+﻿// Brotherhood backend â€” zero dependencies (Node 22.5+ built-in SQLite).
 // Run:  ADMIN_PASSWORD=yourpass node server.js     (PowerShell: $env:ADMIN_PASSWORD='yourpass'; node server.js)
 import http from 'node:http';
 import fs from 'node:fs';
@@ -8,10 +8,10 @@ import { DatabaseSync } from 'node:sqlite';
 
 const PORT = +process.env.PORT || 3000;
 const PASS = process.env.ADMIN_PASSWORD || 'admin123';
-const SHOP = process.env.SHOP_NAME || 'BarberPro';
+const SHOP = process.env.SHOP_NAME || 'Brotherhood';
 const DIR = import.meta.dirname;
 const OPEN = 540, CLOSE = 1260;
-if (!process.env.ADMIN_PASSWORD) console.warn('⚠  Using default admin password "admin123". Set ADMIN_PASSWORD before going live.');
+if (!process.env.ADMIN_PASSWORD) console.warn('âš   Using default admin password "admin123". Set ADMIN_PASSWORD before going live.');
 
 // ---------- database ----------
 const DB_FILE = process.env.DB_FILE || path.join(DIR, 'barber.db');
@@ -76,7 +76,7 @@ function checkAppt(a, ignoreId) {
   let mins = 0, total = 0;
   for (const id of a.serviceIds) { const s = get('services', id); if (!s) return 'Unknown service'; mins += s.mins; total += s.price; }
   const start = toMin(a.time);
-  if (start < OPEN || start + mins > CLOSE) return 'Outside shop hours (9AM–9PM)';
+  if (start < OPEN || start + mins > CLOSE) return 'Outside shop hours (9AMâ€“9PM)';
   for (const o of list('appts', "where barberId=? and date=? and status in ('booked','done')", a.barberId, a.date)) {
     if (o.id === ignoreId) continue;
     const om = o.serviceIds.reduce((t, i) => t + (get('services', i)?.mins || 30), 0), os = toMin(o.time);
@@ -172,4 +172,4 @@ http.createServer(async (req, res) => {
   } catch (e) {
     send(res, 400, { error: e.message });
   }
-}).listen(PORT, () => console.log(`${SHOP} running → admin http://localhost:${PORT}  |  customer booking http://localhost:${PORT}/book`));
+}).listen(PORT, () => console.log(`${SHOP} running â†’ admin http://localhost:${PORT}  |  customer booking http://localhost:${PORT}/book`));
