@@ -80,6 +80,7 @@ const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'ar
 
 function render() {
   const nav = document.getElementById('nav'), view = document.getElementById('view');
+  document.getElementById('mtop').hidden = true;
   if (!loggedIn) {
     nav.style.display = 'none';
     view.innerHTML = `<div class="online card"><img class="logo" src="/logo.png" alt=""><h2>${esc(S.shop)}</h2><p class="mute" style="text-align:center;margin:-6px 0 6px">Back office login</p><form data-form="login">
@@ -104,7 +105,9 @@ function render() {
     <div class="navh">Management</div>${MGMT.map(([k, l, i]) => `<button class="${on('mgmt:' + k)}" data-view="mgmt:${k}">${ic(i)}${l}</button>`).join('')}
     <div class="navh">System</div><button class="${on('activity')}" data-view="activity">${ic('activity')}Activity</button>
     <button class="${on('settings')}" data-view="settings">${ic('gear')}Settings</button>
-    <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
+    <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
+  document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).trim();
+  view.innerHTML = ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5));
 }
 
 // ---------- report rendering ----------
@@ -206,7 +209,7 @@ function vCustomers() {
     <td>${esc(r.branchName) || '<span class="mute">—</span>'}</td><td>${r.consent ? '<span style="color:var(--ok);font-weight:700">✔ Subscribed</span>' : '<span class="mute">—</span>'}</td><td><button class="btn ghost sm" data-act="edit" data-kind="customers" data-id="${r.id}">Edit</button></td></tr>`).join('') || '<tr><td colspan="10" class="mute">No customers in the directory for this view.</td></tr>'}</table></div>
   <div class="row" style="margin-top:12px;justify-content:center"><button class="btn ghost sm" data-act="page" data-n="-1" ${c.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span class="mute">Page ${c.page} / ${pages}</span><button class="btn ghost sm" data-act="page" data-n="1" ${c.page >= pages ? 'disabled' : ''}>Next ›</button></div>`;
 }
-const MOD_LABEL = { dashboard: 'Dashboard', pos: 'Point of Sale (create sales, take payments)', bookings: 'Bookings (appointments)', queue: 'Walk-in Queue (seat customers)', expenses: 'Expenses', attendance: 'Barber Attendance (time in / out, breaks)', reading: 'Sales Reading (shift, cash, Z-reading)' };
+const MOD_LABEL = { dashboard: 'Dashboard', pos: 'Point of Sale (create sales, take payments)', bookings: 'Bookings (appointments)', queue: 'Walk-in Queue (seat customers)', expenses: 'Expenses', attendance: 'Barber Attendance (time in / out, breaks)', reading: 'Sales Reading (shift, cash, Z-reading)', customers: 'Customer Directory (look up points and tiers)' };
 function vSettings() {
   const s = ui.settings; if (!s) return '<p class="mute">Loading…</p>';
   const e = s.email, owner = S.me.role === 'owner';
@@ -309,8 +312,9 @@ function parseCSV(text) {
 
 // ---------- events ----------
 document.addEventListener('click', async e => {
+  if (e.target.closest('[data-act="menu"]')) { const o = document.getElementById('nav').classList.toggle('open'); document.getElementById('scrim').classList.toggle('show', o); return; }
   const nb = e.target.closest('[data-view]');
-  if (nb) { ui.view = nb.dataset.view; ui.picked.clear(); if (ui.view === 'mgmt:customers') ui.cust.page = 1; render(); await loadView(); return render(); }
+  if (nb) { document.getElementById('nav').classList.remove('open'); document.getElementById('scrim').classList.remove('show'); ui.view = nb.dataset.view; ui.picked.clear(); if (ui.view === 'mgmt:customers') ui.cust.page = 1; render(); await loadView(); return render(); }
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();

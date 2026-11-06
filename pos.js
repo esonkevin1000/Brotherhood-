@@ -17,7 +17,7 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   printer: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
   bottle: '<path d="M10 2h4M10 2v4l-2 3v11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V9l-2-3V2"/>', coin: '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/>',
-  cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>', lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+  cart: '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/>', star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.3-6.2 3.3L7 14.2 2 9.3l6.9-1z"/>', lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
 };
 const ic = (n, c = '') => `<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
 const t12 = t => { const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
@@ -31,10 +31,10 @@ function toast(msg, err) { const t = document.createElement('div'); t.className 
 
 let token = ''; try { token = localStorage.getItem('bp.pos') || ''; } catch (e) { }
 const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: [], boot: null, dash: null, queue: [], att: [], exp: null, shift: null, z: [], zs: [], view: 'dashboard', pin: '', err: '',
-  cart: { items: [], barberId: '', mode: 'later', editing: null }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
+  cart: { items: [], barberId: '', mode: 'later', editing: null }, cust: { q: '', tier: '', rows: [], total: 0 }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
 // which sections this login may open (the owner sets this in Settings → Access)
-const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading' };
+const VMAP = { dashboard: 'dashboard', pos: 'pos', appts: 'bookings', queue: 'queue', expenses: 'expenses', attendance: 'attendance', reading: 'reading', customers: 'customers' };
 const freshCart = () => ({ items: [], editing: null, mode: (typeof P !== 'undefined' && P.cart && P.cart.mode) || 'later' });
 const isAdminRole = () => P.me && ['owner', 'admin'].includes(P.me.role);
 const canOpen = v => (P.mods || []).includes(VMAP[v]);
@@ -52,6 +52,13 @@ async function api(method, url, body) {
 const guard = async fn => { try { return await fn(); } catch (e) { toast(e.message, true); return null; } };
 
 // ---------- data ----------
+const TIER_STEPS = [[5, 'Bronze'], [16, 'Silver'], [26, 'Gold'], [51, 'VIP']];
+const nextTierOf = v => { const n = TIER_STEPS.find(([m]) => v < m); return n ? { name: n[1], need: n[0] - v } : null; };
+async function loadCustomers() {
+  const c = P.cust, br = P.boot?.branch?.id || P.branch || '';
+  const r = await api('GET', '/api/customers?size=40&q=' + encodeURIComponent(c.q) + (c.tier ? '&tier=' + c.tier : '') + (br ? '&branch=' + br : ''));
+  c.rows = r.rows; c.total = r.total;
+}
 async function refresh() {
   if (!P.me) return;
   if (!canOpen(P.view)) P.view = firstView() || P.view;
@@ -59,6 +66,8 @@ async function refresh() {
     P.boot = await api('GET', withBr('/api/pos/bootstrap')); P.shift = P.boot.shift;
     if (canOpen('appts')) { P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings(); } else P.bk = [];
     if (P.view === 'dashboard') P.dash = await api('GET', withBr('/api/pos/dashboard'));
+    if (P.view === 'pos' && P.cart.mode !== 'now') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
+    if (P.view === 'customers') await loadCustomers();
     if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
     if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
     if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expenses?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
@@ -82,7 +91,7 @@ async function afterLogin(j) {
 }
 
 // ---------- shell ----------
-const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments' };
+const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory' };
 function render() {
   if (!P.me) {
     app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
@@ -92,7 +101,7 @@ function render() {
   const b = P.boot;
   if (!canOpen(P.view)) P.view = firstView();
   if (!P.view) { app.innerHTML = `<main class="login"><h1>No access</h1><p class="mute">Your login has no sections turned on. Ask the owner to enable them in Settings → Access.</p><button data-a="logout">Logout</button></main>`; return; }
-  const nav = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue']].filter(([k]) => canOpen(k));
+  const nav = [['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'POS'], ['appts', 'calendar', 'Bookings'], ['queue', 'users', 'Queue'], ['customers', 'star', 'Customers']].filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   app.innerHTML = `<header><button class="burger" data-a="more">${ic('menu')}</button><div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div><span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
     <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
@@ -115,7 +124,8 @@ const VIEWS = {
   },  pos() {
     const b = P.boot, s = P.shift, cats = b.categories, items = b.items.filter(i => P.cat === 'all' || i.categoryId === P.cat);
     return `${s ? '' : `<div class="card" style="border-color:#f2b8bf;background:#fff4f5"><b style="color:var(--bad)">No open shift</b><p class="mute" style="margin:4px 0 12px">Open a shift first so you can take payments.</p><button class="sm" data-a="openshift">${ic('lock', 'sm')} Open shift</button></div>`}
-    ${P.cart.editing ? `<div class="card">Editing ticket · <button class="sm ghost" data-a="canceledit">cancel</button></div>` : `<div class="seg"><button class="${P.cart.mode === 'now' ? 'on' : ''}" data-a="mode" data-m="now">Pay As You Order</button><button class="${P.cart.mode !== 'now' ? 'on' : ''}" data-a="mode" data-m="later">Pay Later</button></div>`}
+    ${P.cart.editing ? `<div class="card">Editing ticket · <button class="sm ghost" data-a="canceledit">cancel</button></div>` : `<div class="seg"><button class="${P.cart.mode === 'now' ? 'on' : ''}" data-a="mode" data-m="now">Pay As You Order</button><button class="${P.cart.mode !== 'now' ? 'on' : ''}" data-a="mode" data-m="later">Pay Later${P.cart.mode !== 'now' && (P.queue || []).filter(o => ['waiting', 'in_chair'].includes(o.status)).length ? ' (' + (P.queue || []).filter(o => ['waiting', 'in_chair'].includes(o.status)).length + ')' : ''}</button></div>`}
+    ${P.cart.mode !== 'now' && !P.cart.editing ? payLaterList() : ''}
     <div class="chips"><button class="chip ${P.cat === 'all' ? 'on' : ''}" data-a="cat" data-c="all">All</button>${cats.map(c => `<button class="chip ${P.cat === c.id ? 'on' : ''}" data-a="cat" data-c="${c.id}">${esc(c.name)}</button>`).join('')}</div>
     <div class="grid">${items.map(i => `<button class="item ${i.type} ${i.photo ? 'hasphoto' : ''}" data-a="add" data-id="${i.id}">${i.photo ? `<img class="pic" src="${esc(i.photo)}" alt="" loading="lazy">` : `<span class="mono">${ic(i.type === 'service' ? 'scissors' : 'bottle')}</span>`}<span class="body"><span class="nm">${esc(i.name)}</span><small>${i.type === 'service' ? i.mins + ' min' : 'Product'}${i.apptOnly ? ' · Appt only' : ''}</small><b>${peso(i.price)}</b></span><span class="plus">${ic('plus', 'sm')}</span></button>`).join('')}</div>`;
   },
@@ -139,7 +149,16 @@ const VIEWS = {
     <div class="kpis"><div class="card kpi g"><div class="ic">${ic('scissors')}</div><small>Now in chair</small><div class="num">${chair.length}</div></div>
       <div class="card kpi b"><div class="ic">${ic('hourglass')}</div><small>Waiting in line</small><div class="num">${waiting.length}</div><small>Est. wait ~${est} min</small></div></div>    <div class="row" style="margin-bottom:12px"><div style="flex:1"><label>Ticket status</label><select data-a="qstatus">${[['active', 'Active queue'], ['waiting', 'Waiting'], ['chair', 'In chair'], ['done', 'Completed today'], ['all', 'All today']].map(([v, l]) => `<option value="${v}" ${f.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div style="flex:1"><label>Filter by barber</label><select data-a="qbarber"><option value="">All barbers</option>${P.boot.staff.map(s => `<option value="${s.id}" ${f.barber === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div></div>
-    ${list.map(o => ticketHtml(o, true)).join('') || '<p class="mute" style="text-align:center">No tickets found in this queue view.</p>'}`;
+    ${list.map(o => ticketHtml(o, 'queue')).join('') || '<p class="mute" style="text-align:center">No tickets found in this queue view.</p>'}`;
+  },
+  customers() {
+    const c = P.cust;
+    return `<div class="row" style="margin-bottom:10px;flex-wrap:nowrap"><input id="custq" placeholder="Search name, phone or email" value="${esc(c.q)}" style="flex:1"><select data-a="custtier" style="width:130px;flex:none"><option value="">All tiers</option>${['member', 'bronze', 'silver', 'gold', 'vip'].map(x => `<option value="${x}" ${c.tier === x ? 'selected' : ''}>${x === 'vip' ? 'VIP' : x[0].toUpperCase() + x.slice(1)}</option>`).join('')}</select></div>
+    <p class="mute" style="margin:0 2px 10px;font-size:13px">${c.total} customer${c.total === 1 ? '' : 's'} · ${esc(P.boot?.branch?.name || '')} · 1 paid visit = 1 point</p>
+    ${c.rows.map(h => { const nt = nextTierOf(h.visits); return `<div class="card" style="padding:14px"><div class="row between" style="flex-wrap:nowrap"><b style="font-size:16px">${esc(h.name)}</b><span class="${tierCls(h.tier)}">${h.tier}</span></div>
+      <div class="row" style="margin-top:8px;gap:18px"><div><div class="num" style="font-size:30px;line-height:1">${h.visits}</div><small class="mute">points</small></div><div style="flex:1;min-width:0"><small class="mute">${nt ? nt.need + ' more visit' + (nt.need === 1 ? '' : 's') + ' to reach ' + nt.name : 'Top tier reached'}</small>${nt ? `<div style="height:6px;border-radius:6px;background:var(--s3);margin-top:6px;overflow:hidden"><div style="height:100%;width:${Math.min(100, Math.round(h.visits / (h.visits + nt.need) * 100))}%;background:#000"></div></div>` : ''}</div></div>
+      <small class="mute" style="display:block;margin-top:8px">${esc(h.phone || '')}${h.phone && h.email ? ' · ' : ''}${esc(h.email || '')}</small>
+      <small class="mute">Last visit: ${h.lastVisit ? new Date(h.lastVisit).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : 'none yet'} · Spent ${peso(h.spent)}${h.preferredCut ? ' · ✂ ' + esc(h.preferredCut) : ''}</small></div>`; }).join('') || '<div class="card" style="text-align:center"><p class="mute" style="margin:6px 0">No customers found for this branch.</p></div>'}`;
   },
   expenses() {
     const e = P.exp; if (!e) return '<p class="mute">Loading…</p>';
@@ -178,12 +197,17 @@ const VIEWS = {
       <label>Closing remarks (optional)</label><textarea id="remarks">${esc(P.remarks)}</textarea><br><br><button class="block" data-a="closeshift">${ic('lock')} Submit & Close Shift</button></div>`;
   }
 };
+function payLaterList() {
+  const open = (P.queue || []).filter(o => ['waiting', 'in_chair'].includes(o.status)).sort((a, b) => (a.status === 'in_chair' ? 0 : 1) - (b.status === 'in_chair' ? 0 : 1) || String(a.createdAt).localeCompare(String(b.createdAt)));
+  return `<details class="card" style="padding:12px" ${open.length ? 'open' : ''}><summary style="cursor:pointer;font-weight:700;list-style:none;display:flex;justify-content:space-between;align-items:center"><span>Pay Later tickets</span><span class="mute">${open.length} open · check out here</span></summary><div style="margin-top:10px">${open.map(o => ticketHtml(o, true)).join('') || '<p class="mute" style="margin:6px 0;text-align:center">No open tickets. Add a service below to start one.</p>'}</div></details>`;
+}
 function ticketHtml(o, actions) {
   const names = o.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ');
   const live = o.status === 'waiting' || o.status === 'in_chair';
   return `<div class="ticket ${o.status}"><div class="no">#${String(o.no).padStart(3, '0')}</div><div class="bd"><div class="row between" style="flex-wrap:nowrap"><b>${esc(o.customerName)}</b><span class="tag ${o.status}">${o.status === 'in_chair' ? 'In Chair' : o.status === 'paid' ? 'Paid' : o.status === 'void' ? 'Void' : o.barberId ? 'Queued' : 'Waiting'}</span></div>
     <small>${names || 'No items yet'}</small><br><small>${o.barberName ? ic('scissors', 'sm') + ' ' + esc(o.barberName) + (o.chairId ? ' · ' + esc(chairName(o.chairId)) : '') : 'No barber yet'}${live ? ' · ' + mins(o.startedAt || o.createdAt) + ' min' : ''}${o.status === 'paid' ? ' · ' + peso(o.total) : ''}</small>${o.cust ? `<br><small><span class="${tierCls(o.cust.tier)}">${o.cust.tier}</span> ${o.cust.visits} visit${o.cust.visits === 1 ? '' : 's'}${o.cust.preferredCut ? ' · ✂ ' + esc(o.cust.preferredCut) : ''}</small>` : ''}
-    ${actions && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div></div>`;
+    ${actions === 'queue' && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ghost" data-a="gopl">Check out in Pay Later</button>`}</div>` : ''}
+    ${actions === true && live ? `<div class="acts">${o.status === 'waiting' ? `<button class="sm" data-a="seat" data-id="${o.id}">${o.barberId ? 'Reassign' : 'Seat'}</button>` : `<button class="sm ok" data-a="checkout" data-id="${o.id}">Checkout</button>`}<button class="sm ghost" data-a="editticket" data-id="${o.id}">Edit</button><button class="sm bad" data-a="void" data-id="${o.id}">Void</button></div>` : ''}</div></div>`;
 }
 function bookingsCard() {
   const t = ymd(0), list = (P.bk || []).filter(b => b.date === t && b.status === 'booked').sort((a, b) => a.time.localeCompare(b.time)), next = list[0];
@@ -380,7 +404,7 @@ document.addEventListener('click', async e => {
   if (a === 'go') { P.view = d.v; await refresh(); return render(); }
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
-      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
+      ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }
   if (a === 'drawergo') { e.preventDefault(); closeSheet(); P.view = d.v; await refresh(); return render(); }
@@ -407,7 +431,8 @@ document.addEventListener('click', async e => {
     } catch (x) { n.err = x.message; if (/no longer/.test(x.message)) return naSlots(); apptSheet(); }
     return;
   }
-  if (a === 'mode') { P.cart.mode = d.m; return render(); }
+  if (a === 'mode') { P.cart.mode = d.m; await refresh(); return render(); }
+  if (a === 'gopl') { P.cart.mode = 'later'; P.view = 'pos'; await refresh(); return render(); }
   if (a === 'cat') { P.cat = d.c; return render(); }
   if (a === 'add') return addItem(d.id);
   if (a === 'cart') { P.custHits = []; return cartSheet(); }
@@ -437,12 +462,12 @@ document.addEventListener('click', async e => {
       const customer = customerPayload(), items = c.items.map(i => ({ itemId: i.itemId, qty: i.qty })), fresh = freshCart();
       if (a === 'saveticket') {
         await api('PUT', '/api/orders/' + c.editing, { items, customer, discountId: c.discountId || '' }); toast('Ticket saved');
-        P.cart = fresh; closeSheet(); P.view = 'queue'; await refresh(); return render();
+        P.cart = fresh; closeSheet(); P.view = 'pos'; await refresh(); return render();
       }
       const o = await api('POST', '/api/orders', { customer, items, discountId: c.discountId || '' });
       P.cart = fresh; await refresh();
       if (a === 'paynow') return paySheet(o);
-      toast('Ticket #' + o.no + ' created'); closeSheet(); P.view = 'queue'; await refresh(); render(); return assignSheet(o.id, c.mode === 'now');
+      toast('Ticket #' + o.no + ' created'); closeSheet(); P.view = 'pos'; await refresh(); render(); return assignSheet(o.id, c.mode === 'now');
     } catch (x) { if (err) err.textContent = x.message; else toast(x.message, true); }
     return;
   }
@@ -451,7 +476,7 @@ document.addEventListener('click', async e => {
     const as = P.as, r = await guard(() => api('PUT', '/api/orders/' + as.id, { chairId: d.id })); if (!r) return;
     const who = P.boot.staff.find(s => s.id === r.barberId)?.name || 'the barber', cn = chairName(r.chairId);
     closeSheet(); toast(r.queued ? 'Added to queue for ' + cn + ' · ' + who : 'Seated at ' + cn + ' with ' + who);
-    P.view = 'queue'; await refresh(); render();
+    await refresh(); render();
     if (as.payAfter) { const o = await guard(() => api('GET', '/api/orders/' + as.id)); if (o) paySheet(o); }
     return;
   }
@@ -503,6 +528,7 @@ document.addEventListener('change', async e => {
   if (a === 'qbarber') { P.qf.barber = t.value; return render(); }
   if (a === 'exprange') { P.expRange = t.value; return refresh(); }
   if (a === 'paydisc') { P.pay.disc = t.value; return renderPay(P.pay); }
+  if (a === 'custtier') { P.cust.tier = t.value; refresh().then(render); return; }
   if (t.id === 'cartbarber') P.cart.barberId = t.value;
   if (t.id === 'cu-consent') cu().consent = t.checked;
   if (t.dataset.den) { P.denoms[t.dataset.den] = Math.max(0, Math.floor(+t.value || 0)); return render(); }
@@ -524,6 +550,7 @@ document.addEventListener('input', e => {
     return;
   }  if (t.id === 'expq') { P.expQ = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('expq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
   if (t.id === 'remarks') P.remarks = t.value;
+  if (t.id === 'custq') { P.cust.q = t.value; clearTimeout(timer); timer = setTimeout(async () => { await refresh(); const i = document.getElementById('custq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); }
 });
 sheet.addEventListener('close', () => render());
 
