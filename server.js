@@ -1682,6 +1682,10 @@ async function handle(req, res) {
     if (method === 'POST' && act === 'void') {
       const b = await readBody(req);
       if (o.status === 'paid' && !admin) bad(403, 'Only an admin can void a paid sale');
+      if (o.status === 'paid') {   // a paid sale is final for staff; the owner/admin may only void it with a reason, and never once it is inside a sales reading
+        const zl = dayLocked(o.branchId, o.date); if (zl) bad(409, `This sale is already included in the sales reading (Z-${zl.no}), so it can no longer be voided.`);
+        if (String(b.reason || '').trim().length < 3) bad(400, 'Enter the reason for voiding a paid sale');
+      }
       if (o.status === 'void') bad(409, 'Already void');
       run("update orders set status='void', voidReason=? where id=?", String(b.reason || '').slice(0, 200), o.id);
       if (o.status === 'in_chair') promoteNext(o.branchId, o.chairId);
