@@ -35,7 +35,8 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const tooMany = (ip, kind, max, windowMs) => { const k = kind + ip, now = Date.now(), a = (hits.get(k) || []).filter(t => now - t < windowMs); return a.length >= max; };
   // coordinates from a Google Maps link (full links directly; short maps.app.goo.gl links are followed once)
   const parseLatLng = u => {
-    const s = decodeURIComponent(String(u || '')); let m;
+    const raw = String(u || ''); let s; try { s = decodeURIComponent(raw); } catch { s = raw.replace(/%2C/gi, ','); }   // page text can contain stray % signs
+    let m;
     for (const re of [/@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/, /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/, /[?&](?:q|ll|query|center)=(-?\d{1,2}\.\d+)[, ](-?\d{1,3}\.\d+)/, /place\/(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/])
       if ((m = re.exec(s))) { const lat = +m[1], lng = +m[2]; if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng }; }
     return null;

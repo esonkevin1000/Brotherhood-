@@ -200,6 +200,7 @@ const locEditor = b => `<details class="card" style="margin-top:6px;padding:10px
   <label class="f" style="margin-top:0">Google Maps link<input id="lu-${b.id}" value="${esc(b.mapUrl || '')}" placeholder="Paste the shop's Google Maps link" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
   <button class="btn sec sm block" style="margin-top:8px" data-locurl="${b.id}">Detect location from link</button>
   <div class="row" style="margin-top:10px"><input id="la-${b.id}" inputmode="decimal" placeholder="Latitude" value="${b.lat ?? ''}"><input id="ln-${b.id}" inputmode="decimal" placeholder="Longitude" value="${b.lng ?? ''}"></div>
+  ${b.lat != null ? `<a class="link" style="display:inline-block;margin-top:8px" href="https://www.google.com/maps?q=${b.lat},${b.lng}" target="_blank" rel="noopener">Check this pin on Google Maps (${Number(b.lat).toFixed(5)}, ${Number(b.lng).toFixed(5)})</a>` : ''}
   <div class="row" style="margin-top:8px"><button class="btn sec sm sp" data-locgps="${b.id}">◎ Use my current location</button><button class="btn sm sp" data-locsave="${b.id}">Save pin</button></div></div></details>`;
 async function saveLoc(id, body) {
   try { const j = await api('/pro/branch-location', { method: 'PUT', body: { branchId: id, ...body } }, S.proToken); toast('Map pin saved'); S.D = null; await loadShopOwner(); return j; } catch (x) { toast(x.message); }
