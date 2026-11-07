@@ -170,6 +170,11 @@ function afterDiscover() {
 const fmtMonth = d => { if (!d) return ''; if (/^\d{4}$/.test(d)) return d; const dt = new Date((d.length === 7 ? d + '-01' : d) + 'T00:00:00'); return dt.toLocaleDateString('en-PH', d.length === 7 ? { month: 'short', year: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }); };
 const certThumb = c => c.image ? `<img src="${esc(c.image)}" alt="Certificate: ${esc(c.title)}" data-lb="${esc(c.image)}" loading="lazy" style="width:64px;height:64px;border-radius:10px;object-fit:cover;cursor:zoom-in;flex:none">` : `<span class="av" style="width:64px;height:64px;border-radius:10px">${ic('star')}</span>`;
 const certRow = c => `<div class="card row">${certThumb(c)}<div class="sp"><div class="nm">${esc(c.title)}${c.verified ? '<span class="tag ok">Verified</span>' : ''}</div><div class="sm mute">${esc([c.org, fmtMonth(c.date)].filter(Boolean).join(' · ') || 'Seminar')}</div></div></div>`;
+const photosEditor = sel => `<div class="sec-h"><h2>Photos</h2></div><div class="card" style="padding:0;overflow:hidden"><div style="height:130px;background:linear-gradient(135deg,#1e2024,#0f1012);${sel.cover ? `background-image:url('${esc(sel.cover)}');` : ''}background-size:cover;background-position:center"></div>
+  <div style="padding:0 14px 14px"><div class="row" style="margin-top:-34px;align-items:flex-end">${pic(sel.photo, sel.name, 'av lg')}<span class="sp"></span></div>
+  <div class="sm mute" style="margin:8px 0 10px">${sel.cover ? 'This is your cover photo.' : 'No cover photo yet. Until you add one, your latest cut is used as your cover.'} A wide photo works best.</div>
+  <div class="row" style="flex-wrap:wrap;gap:8px"><label class="btn sec sm" style="cursor:pointer">Change profile photo<input type="file" id="pavatar" accept="image/*" hidden></label><label class="btn sec sm" style="cursor:pointer">${sel.cover ? 'Change cover photo' : 'Add cover photo'}<input type="file" id="pcoverf" accept="image/*" hidden></label>${sel.cover ? '<button class="btn danger sm" data-covdel>Remove cover</button>' : ''}</div></div></div>
+`;
 const certEditor = sel => `<div class="sec-h"><h2>Seminars & certificates</h2><span class="mute sm">${sel.certs.length}</span></div>
   <div class="list">${sel.certs.map(c => `<div class="card row">${certThumb(c)}<div class="sp"><div class="nm">${esc(c.title)}${c.verified ? '<span class="tag ok">Verified</span>' : ''}</div><div class="sm mute">${esc([c.org, fmtMonth(c.date)].filter(Boolean).join(' · ') || 'Seminar')}</div></div><div style="display:grid;gap:4px">${S.pro.admin ? `<button class="btn sec sm" data-cverify="${c.id}" data-on="${c.verified ? 1 : 0}">${c.verified ? 'Unverify' : 'Verify'}</button>` : ''}<button class="btn danger sm" data-certdel="${c.id}">Remove</button></div></div>`).join('') || '<div class="card empty">Add the seminars you attended. Customers trust barbers who keep learning.</div>'}</div>
   <form id="certf" class="card" style="margin-top:10px"><label class="f" style="margin-top:0">Seminar or certificate name<input name="title" maxlength="100" required placeholder="e.g. Fade Masterclass"></label><label class="f">Organizer (optional)<input name="org" maxlength="80" placeholder="e.g. Viro Bodyworks"></label>
@@ -179,7 +184,7 @@ async function vBarber(id) {
     try { S.cur = await api('/barbers/' + id, {}, S.token); } catch (e) { S.cur = null; return header('', '/discover') + `<div class="err">${esc(e.message)}</div>`; }
   }
   const j = S.cur, b = j.barber, st = j.stats, fav = !!S.token && S.favs.includes(b.id), tab = S.bTab || 'cuts', today = ymd(new Date());
-  const cover = (j.portfolio[0] && j.portfolio[0].url) || j.branch.photo || '';
+  const cover = b.cover || (j.portfolio[0] && j.portfolio[0].url) || j.branch.photo || '';
   const soc = [['instagram', 'Instagram'], ['facebook', 'Facebook'], ['tiktok', 'TikTok']].filter(([k]) => b[k]).map(([k, n]) => { const v = b[k], href = /^https?:/i.test(v) ? v : (k === 'instagram' ? 'https://instagram.com/' : k === 'tiktok' ? 'https://tiktok.com/@' : 'https://facebook.com/') + v.replace(/^@/, ''); return `<a class="tag" href="${esc(href)}" target="_blank" rel="noopener">${n}</a>`; }).join('');
   const stat = (v, l) => `<div><b class="num">${v}</b><span>${l}</span></div>`;
   const nf = j.nextFree, nfTxt = nf ? `${nf.date === today ? 'Today' : nf.date === ymd(new Date(Date.now() + 864e5)) ? 'Tomorrow' : fmtDate(nf.date)} · ${t12(nf.time)}` : '';
@@ -301,7 +306,7 @@ function vPro() {
   if (!sel) return header('Pro tools', '/') + '<div class="empty">No barbers found.</div>';
   return header('Pro tools', '/') + `${S.pro.admin && !['shop', 'mod'].includes(S.proTab) ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
   <div class="tabs">${S.pro.admin ? `<button class="${S.proTab === 'shop' ? 'on' : ''}" data-ptab="shop">Shop</button>` : ''}<button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">${S.pro.admin ? 'Barber' : 'Dashboard'}</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
-  ${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}><div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
+  ${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
   <label class="f">Years of experience<input name="years" type="number" min="0" max="60" value="${sel.years || ''}"></label><label class="f">Specialties (comma separated)<input name="specialties" value="${esc(sel.specialties.join(', '))}" placeholder="Skin Fade, Taper, Pompadour"></label>
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
@@ -661,6 +666,10 @@ app.addEventListener('change', async e => {
   if (e.target.id === 'sort') { S.sort = e.target.value; await refreshResults(); }
   if (e.target.id === 'prosel') { S.proSel = e.target.value; S.proMsg = null; render(); loadDash(); }
   if (e.target.id === 'cfile') { const f = e.target.files[0]; e.target.value = ''; if (f) { try { S.comp.img = await compress(f); S.comp.err = ''; } catch (x) { S.comp.err = x.message; } render(); } }
+  if (e.target.id === 'pcoverf' || e.target.id === 'pavatar') {
+    const f = e.target.files[0], isCover = e.target.id === 'pcoverf'; e.target.value = ''; if (!f) return;
+    try { await api(isCover ? '/pro/cover' : '/pro/photo', { method: 'POST', body: { staffId: S.proSel, data: await compress(f) } }, S.proToken); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.D = null; S.cur = null; await loadPro(); render(); } catch (x) { toast(x.message); }
+  }
   if (e.target.id === 'pstyle') S.pstyle = e.target.value;
   if (e.target.id === 'pfile') {
     const files = [...e.target.files]; let n = 0; e.target.value = '';
@@ -689,7 +698,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -802,6 +811,7 @@ app.addEventListener('click', async e => {
   if (D.svc) { const v = S.D.services.find(x => x.id === D.svc); return v && openShopPicker('svc', v); }
   if (D.fresh != null) { const i = S.fresh && S.fresh[+D.fresh]; return i && openMedia(i); }
   if (D.bookany != null) return openShopPicker('book');
+  if (D.covdel != null) { if (!confirm('Remove your cover photo? Your latest cut will be used instead.')) return; try { await api('/pro/cover?staffId=' + S.proSel, { method: 'DELETE' }, S.proToken); S.D = null; S.cur = null; await loadPro(); toast('Cover removed'); } catch (x) { toast(x.message); } return render(); }
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
   if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); return render(); }
   if (D.drange) { S.dashRange = D.drange; render(); return loadDash(); }

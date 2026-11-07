@@ -30,7 +30,7 @@ create table if not exists bh_notifs(id text primary key, userId text, kind text
 create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
 create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
-  addCol('bh_portfolio', 'style', 'text'); addCol('bh_posts', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
+  addCol('bh_portfolio', 'style', 'text'); addCol('bh_barber', 'cover', 'text'); addCol('bh_posts', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
 
   // ---------- helpers ----------
@@ -173,7 +173,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const brs = all('select * from branches order by rowid'), bm = new Map(brs.map(b => [b.id, b])), rm = ratingMap(), pc = portCount(), brr = branchRatings();
       const mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));   // weeks run Monday to Sunday
       const ex = {
-        cover: new Map(all("select staffId, url from bh_portfolio order by createdAt asc").map(r => [r.staffId, r.url])),   // ascending, so the latest photo wins
+        cover: (m => { for (const r of all("select staffId, cover from bh_barber where cover<>''")) m.set(r.staffId, r.cover); return m; })(new Map(all("select staffId, url from bh_portfolio order by createdAt asc").map(r => [r.staffId, r.url]))),   // latest portfolio photo, unless the barber chose a cover
         week: new Map(all("select barberId, count(*) n from orders where status='paid' and date>=? and barberId<>'' group by barberId", dOf(mon)).map(r => [r.barberId, r.n])),
         cuts: new Map(all("select barberId, count(*) n from orders where status='paid' and barberId<>'' group by barberId").map(r => [r.barberId, r.n])),
         styles: (m => { for (const r of all("select staffId, style from bh_portfolio where style<>''")) (m.get(r.staffId) || m.set(r.staffId, new Set()).get(r.staffId)).add(r.style); return m; })(new Map())
@@ -214,7 +214,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const level = stats.cuts >= 1000 ? 'Legend' : stats.cuts >= 300 ? 'Master Barber' : stats.cuts >= 50 ? 'Pro Barber' : 'Rising Barber';
       let nextFree = null; for (let i = 0; i < 7 && !nextFree; i++) { const d = dOf(new Date(Date.now() + i * 864e5)); try { const sl = slotsFor(s.branchId, d, s.id, 30); if (sl.length) nextFree = { date: d, time: sl[0] }; } catch { } }
       const taggedPosts = all("select p.id, p.text, p.imageUrl image, p.createdAt, (select count(*) from bh_likes l where l.postId=p.id) likes from bh_posts p where p.staffId=? and p.hidden=0 order by p.createdAt desc limit 30", s.id);
-      return send(res, 200, { stats, rankWeek, nextFree, posts: taggedPosts, certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc limit 40', s.id), barber: { ...card, level, followers: stats.followers, bio: pr.bio || '', instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '' },
+      return send(res, 200, { stats, rankWeek, nextFree, posts: taggedPosts, certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc limit 40', s.id), barber: { ...card, level, followers: stats.followers, cover: pr.cover || '', bio: pr.bio || '', instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '' },
         branch: { id: br.id, name: br.name, photo: br.photo || siteCover(br.name) || '', address: br.address || '', phone: br.phone || '', openTime: br.openTime || '09:00', closeTime: br.closeTime || '21:00', mapUrl: br.mapUrl || '' },
         portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc limit 60', s.id), reviews,
         services: servicesList(), favorite: !!(u && one('select 1 x from bh_favorites where userId=? and staffId=?', u.id, s.id)) });
@@ -413,7 +413,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const staff = (admin ? all('select * from staff where active=1 order by name') : [get('staff', mine)]).filter(Boolean).map(s => {
           const pr = one('select * from bh_barber where staffId=?', s.id) || {};
           return { id: s.id, name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', headline: pr.headline || '', bio: pr.bio || '', years: pr.years || 0, specialties: jp(pr.specialties),
-            instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id), certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc', s.id) };
+            instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, cover: pr.cover || '', portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id), certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc', s.id) };
         });
         return send(res, 200, { admin, name: me.name, staff });
       }
@@ -489,8 +489,8 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const b = await readBody(req), s = target(b.staffId), cur = one('select * from bh_barber where staffId=?', s.id) || {};
         const spec = (Array.isArray(b.specialties) ? b.specialties : String(b.specialties || '').split(',')).map(x => clip(x, 30)).filter(Boolean).slice(0, 8);
         const verified = admin && 'verified' in b ? (b.verified ? 1 : 0) : cur.verified || 0;
-        run('insert or replace into bh_barber(staffId,headline,bio,years,specialties,instagram,facebook,tiktok,verified) values(?,?,?,?,?,?,?,?,?)', s.id, clip(b.headline, 80), clip(b.bio, 600),
-          Math.max(0, Math.min(60, Math.floor(+b.years || 0))), JSON.stringify(spec), url(b.instagram), url(b.facebook), url(b.tiktok), verified);
+        run('insert or replace into bh_barber(staffId,headline,bio,years,specialties,instagram,facebook,tiktok,verified,cover) values(?,?,?,?,?,?,?,?,?,?)', s.id, clip(b.headline, 80), clip(b.bio, 600),
+          Math.max(0, Math.min(60, Math.floor(+b.years || 0))), JSON.stringify(spec), url(b.instagram), url(b.facebook), url(b.tiktok), verified, cur.cover || '');
         log(me, 'barber-profile', 'bh_barber', s.id, s.name); return send(res, 200, { ok: true });
       }
       // seminars and certificates (added by the barber, verified by the owner)
@@ -520,6 +520,22 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       if (ctm && method === 'DELETE') {
         const row = get('bh_certs', ctm[1]); if (!row) bad(404, 'Not found'); target(row.staffId); dropImage(row.imageUrl);
         run('delete from bh_certs where id=?', row.id); log(me, 'cert-delete', 'bh_certs', row.id, ''); return send(res, 200, { ok: true });
+      }
+      // cover photo and profile photo (barbers manage their own; the owner can manage anyone's)
+      if (sub === '/pro/cover' && method === 'POST') {
+        const b = await readBody(req, 1_500_000), s = target(b.staffId); if (!b.data) bad(400, 'Choose a photo');
+        const url = certImage(b), cur = one('select * from bh_barber where staffId=?', s.id);
+        if (cur) { dropImage(cur.cover); run('update bh_barber set cover=? where staffId=?', url, s.id); } else run("insert into bh_barber(staffId,cover,verified,specialties) values(?,?,0,'[]')", s.id, url);
+        log(me, 'barber-cover', 'bh_barber', s.id, s.name); return send(res, 201, { url });
+      }
+      if (sub === '/pro/cover' && method === 'DELETE') {
+        const s = target(q.staffId), cur = one('select * from bh_barber where staffId=?', s.id);
+        if (cur && cur.cover) { dropImage(cur.cover); run("update bh_barber set cover='' where staffId=?", s.id); } return send(res, 200, { ok: true });
+      }
+      if (sub === '/pro/photo' && method === 'POST') {
+        const b = await readBody(req, 1_500_000), s = target(b.staffId); if (!b.data) bad(400, 'Choose a photo');
+        const url = certImage(b); dropImage(s.photo); run('update staff set photo=? where id=?', url, s.id);
+        log(me, 'barber-photo', 'staff', s.id, s.name); return send(res, 201, { url });
       }
       if (sub === '/pro/portfolio' && method === 'POST') {
         const b = await readBody(req, 1_500_000), s = target(b.staffId);
