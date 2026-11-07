@@ -107,9 +107,11 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     }
     if (sub === '/login' && method === 'POST') {
       if (tooMany(ip, 'li', 10, 600e3)) bad(429, 'Too many attempts. Please wait a few minutes.');
-      const b = await readBody(req), u = one('select * from bh_users where email=?', normEmail(b.email));
+      const b = await readBody(req), u = one('select * from bh_users where email=?', normEmail(b.email)), pw = String(b.password || '');
       await new Promise(r => setTimeout(r, 300));
-      if (!u || !checkPw(String(b.password || ''), u.passHash)) { hit(ip, 'li'); bad(401, 'Wrong email or password'); }
+      // phone keyboards often append a space after an autosuggested word: accept the password with that stray space/newline trimmed too
+      const good = !!u && (checkPw(pw, u.passHash) || (pw !== pw.trim() && checkPw(pw.trim(), u.passHash)));
+      if (!good) { hit(ip, 'li'); log({ name: 'App: ' + clip(b.email, 60) }, 'app-login-failed', 'bh_users', '', u ? 'wrong password' : 'no account with that email'); bad(401, 'Wrong email or password'); }
       return send(res, 200, { token: tokenOf(u), user: pubUser(u) });
     }
     if (sub === '/me' && method === 'GET') { const u = needUser(req); syncRate(u.id); return send(res, 200, { user: pubUser(u), favorites: all('select staffId from bh_favorites where userId=?', u.id).map(r => r.staffId), unread: unreadOf(u.id) }); }

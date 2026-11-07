@@ -392,7 +392,7 @@ app.addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target, d = Object.fromEntries(new FormData(f));
   if (f.id === 'authf') {
     S.auth.busy = true; S.auth.err = ''; render();
-    try { const j = await api(S.auth.mode === 'signup' ? '/signup' : '/login', { method: 'POST', body: { ...d, agree: !!d.agree } }, null); S.token = j.token; store.set('bh_token', j.token); S.user = j.user; await loadMe(); S.mine = null; nav(S.bk ? '/book' : '/me'); }
+    try { const j = await api(S.auth.mode === 'signup' ? '/signup' : '/login', { method: 'POST', body: { ...d, email: String(d.email || '').trim(), agree: !!d.agree } }, null); S.token = j.token; store.set('bh_token', j.token); S.user = j.user; await loadMe(); S.mine = null; nav(S.bk ? '/book' : '/me'); }
     catch (x) { S.auth.err = x.message; }
     S.auth.busy = false; render();
   } else if (f.id === 'mef') {
