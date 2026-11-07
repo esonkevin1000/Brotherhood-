@@ -344,6 +344,17 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         });
         return send(res, 200, { admin, name: me.name, staff });
       }
+      if (sub === '/pro/shop' && method === 'GET') {   // owner / admin: the shop's own POS numbers across all branches
+        if (!admin) bad(403, 'Owner only');
+        const t = todayStr(), w = dOf(new Date(Date.now() - 6 * 864e5)), by = (sql, ...a) => new Map(all(sql, ...a).map(r => [r.branchId, r]));
+        const today = by("select branchId, ifnull(sum(total),0) s, count(*) n from orders where status='paid' and date=? group by branchId", t), week = by("select branchId, ifnull(sum(total),0) s, count(*) n from orders where status='paid' and date>=? and date<=? group by branchId", w, t);
+        const queue = by("select branchId, sum(status='waiting') waiting, sum(status='in_chair') cutting from orders where date=? and status in ('waiting','in_chair') group by branchId", t), appts = by("select branchId, count(*) n from bookings where date=? and status in ('booked','arrived') group by branchId", t);
+        const branches = all('select * from branches order by rowid').map(b => ({ id: b.id, name: b.name, today: today.get(b.id)?.s || 0, todayCount: today.get(b.id)?.n || 0, week: week.get(b.id)?.s || 0, waiting: queue.get(b.id)?.waiting || 0, cutting: queue.get(b.id)?.cutting || 0,
+          bookings: appts.get(b.id)?.n || 0, onDuty: all('select id from staff where branchId=? and active=1', b.id).filter(x => ['present', 'late'].includes(staffState(x.id, t).state)).length }));
+        const sm = k => branches.reduce((a, b) => a + b[k], 0);
+        return send(res, 200, { date: t, totals: { today: sm('today'), week: sm('week'), transactions: sm('todayCount'), bookings: sm('bookings'), waiting: sm('waiting'), cutting: sm('cutting'), onDuty: sm('onDuty') }, branches,
+          members: one('select count(*) n from bh_users').n, openReports: one("select count(*) n from bh_reports where status='open'").n });
+      }
       if (sub === '/pro/dashboard' && method === 'GET') {
         const s = target(q.staffId), days = [7, 30, 90].includes(+q.days) ? +q.days : 30, to = todayStr(), from = dOf(new Date(Date.now() - (days - 1) * 864e5));
         const m = scoreData(from, to, s.branchId, s.id)[0] || { n: 0, sales: 0, avg: 0, comm: 0, rating: null, rc: 0, custs: 0, returning: 0, worked: 0 };

@@ -162,9 +162,9 @@ function vPro() {
   if (!S.proToken || !S.pro) return header('Pro tools', '/') + `<p class="mute">Sign in with your Brotherhood staff username and password (same as the POS / back office).</p><form id="prolf">${S.proPin ? '<label class="f">6-digit PIN<input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label>' : '<label class="f">Username (owners may leave this blank)<input name="username" autocomplete="username"></label><label class="f">Password<input name="password" type="password" autocomplete="current-password" required></label>'}${S.proErr ? `<div class="err">${esc(S.proErr)}</div>` : ''}<button class="btn block" style="margin-top:14px">Sign in</button><p class="mute sm" style="text-align:center"><button type="button" class="link" data-proPin>${S.proPin ? 'Use username and password instead' : 'Barber or cashier? Sign in with your 6-digit PIN'}</button></p></form>`;
   const sel = S.pro.staff.find(s => s.id === S.proSel) || S.pro.staff[0]; S.proSel = sel?.id;
   if (!sel) return header('Pro tools', '/') + '<div class="empty">No barbers found.</div>';
-  return header('Pro tools', '/') + `${S.pro.admin ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
-  <div class="tabs"><button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">Dashboard</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
-  ${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}><div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
+  return header('Pro tools', '/') + `${S.pro.admin && !['shop', 'mod'].includes(S.proTab) ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
+  <div class="tabs">${S.pro.admin ? `<button class="${S.proTab === 'shop' ? 'on' : ''}" data-ptab="shop">Shop</button>` : ''}<button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">${S.pro.admin ? 'Barber' : 'Dashboard'}</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
+  ${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}><div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
   <label class="f">Years of experience<input name="years" type="number" min="0" max="60" value="${sel.years || ''}"></label><label class="f">Specialties (comma separated)<input name="specialties" value="${esc(sel.specialties.join(', '))}" placeholder="Skin Fade, Taper, Pompadour"></label>
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
@@ -185,6 +185,16 @@ function vDash() {
   <div class="sec-h"><h2>My clients</h2><span class="mute sm">${d.clients.length}</span></div><div class="list">${d.clients.slice(0, 50).map(c => `<div class="card row"><span class="av" style="width:42px;height:42px;font-size:14px">${esc(initials(c.name))}</span><div class="sp"><div class="nm">${esc(c.name)}${c.visits >= 5 ? '<span class="tag">Regular</span>' : ''}</div><div class="sm mute">${c.visits} visit${c.visits === 1 ? '' : 's'} · last ${fmtDate(c.last)}${c.phone ? ' · ' + esc(c.phone) : ''}</div></div><b class="num">${peso(c.spent)}</b></div>`).join('') || '<div class="card empty">Clients appear here after their first paid visit with you.</div>'}</div>
   <div class="sec-h"><h2>Latest reviews</h2></div><div class="list">${d.recentReviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? '<span class="tag ok">Verified visit</span>' : ''}<span class="sp"></span>${stars(r.rating)}</div>${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}${r.reply ? `<div class="sm" style="margin-top:8px;padding:8px 10px;border-left:3px solid var(--blue);background:var(--s3);border-radius:8px"><b>Your reply</b><div>${esc(r.reply)}</div></div>` : ''}<button class="btn sec sm" style="margin-top:8px" data-rreply="${r.id}" data-cur="${esc(r.reply || '')}">${r.reply ? 'Edit reply' : 'Reply'}</button></div>`).join('') || '<div class="card empty">No reviews yet.</div>'}</div>`;
 }
+
+function vOwner() {
+  const d = S.shopData; if (!d) return '<div class="empty">Loading…</div>';
+  const t = d.totals;
+  return `<div class="row" style="margin-bottom:12px;gap:10px"><a class="btn block" href="/pos" style="flex:1">${ic('scissors')} Open POS</a><a class="btn sec block" href="/backend" style="flex:1">Back office</a></div>
+  <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${kpi('Sales today', peso(t.today), `${t.transactions} transactions`)}${kpi('Sales · 7 days', peso(t.week))}${kpi('Bookings today', t.bookings)}${kpi('Queue now', t.waiting + t.cutting, `${t.waiting} waiting · ${t.cutting} cutting`)}</div>
+  <div class="sec-h"><h2>Branches</h2><span class="mute sm">${t.onDuty} barbers on duty</span></div><div class="list">${d.branches.map(b => `<div class="card"><div class="row"><b>${esc(b.name)}</b><span class="sp"></span><b class="num" style="font-size:20px">${peso(b.today)}</b></div><div class="sm mute">${b.todayCount} transactions today · 7 days ${peso(b.week)}</div><div class="sm" style="margin-top:4px"><span class="tag">${b.onDuty} on duty</span> <span class="tag">${b.waiting} waiting</span> <span class="tag">${b.cutting} cutting</span> <span class="tag">${b.bookings} bookings</span></div></div>`).join('')}</div>
+  <div class="sec-h"><h2>Brotherhood app</h2></div><div class="card sm"><b>${d.members}</b> app members${d.openReports ? ` · <button class="link" data-ptab="mod">${d.openReports} reported item${d.openReports === 1 ? '' : 's'} to review</button>` : ' · nothing to review'}</div>`;
+}
+async function loadShopOwner() { try { S.shopData = await api('/pro/shop', {}, S.proToken); } catch (e) { S.shopData = null; toast(e.message); } render(); }
 async function loadDash() {
   S.dash = null; S.earn = null; if (!S.pro || !S.proSel) return;
   try { S.dash = await api(`/pro/dashboard?staffId=${S.proSel}&days=${S.dashDays}`, {}, S.proToken); } catch (e) { S.dash = null; toast(e.message); }
@@ -352,7 +362,7 @@ async function onRoute() {
   const r = route(); window.scrollTo(0, 0);
   if (['discover', 'home', 'book', 'barber', 'shop'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
-  if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; loadDash(); }
+  if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
   if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
   if (r.a === 'community') loadFeed().then(render);
   if (r.a === 'notifications' && S.token) { S.notifs = null; loadNotifs(); }
@@ -389,7 +399,7 @@ app.addEventListener('submit', async e => {
     try { S.user = (await api('/me', { method: 'PUT', body: d })).user; S.meMsg = { ok: true, t: 'Saved' }; } catch (x) { S.meMsg = { ok: false, t: x.message }; } render();
   } else if (f.id === 'prolf') {
     try { const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }), j = await r.json(); if (!r.ok) throw new Error(j.error);
-      S.proToken = j.token; store.set('bh_pro', j.token); await loadPro(); S.proSel = S.pro?.staff[0]?.id; loadDash(); } catch (x) { S.proErr = x.message; } render();
+      S.proToken = j.token; store.set('bh_pro', j.token); await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } else S.proTab = 'dash'; loadDash(); } catch (x) { S.proErr = x.message; } render();
   } else if (f.id === 'prof') {
     try { await api('/pro/profile', { method: 'PUT', body: { staffId: S.proSel, ...d, verified: S.pro.admin ? !!d.verified : undefined } }, S.proToken); S.proMsg = { ok: true, t: 'Profile saved' }; await loadPro(); } catch (x) { S.proMsg = { ok: false, t: x.message }; } render();
   }
@@ -485,7 +495,7 @@ app.addEventListener('click', async e => {
   if (D.sbook) { const c = cutById(D.sbook); S.styleNote = `Style I want: ${c.name} (${c.top.toLowerCase()} on top, ${c.sides.toLowerCase()}). Suggested by Brotherhood Style Finder.`; toast('Pick your barber. Your style will be added to the booking notes.'); S.branch = ''; return nav('/discover'); }
   if (D.ngo) { if (D.ngo.startsWith('#/')) { S.mine = null; return nav(D.ngo.slice(1)); } return; }
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
-  if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); return render(); }
+  if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); return render(); }
   if (D.ddays) { S.dashDays = +D.ddays; render(); return loadDash(); }
   if (D.prologout != null) { S.proToken = null; S.pro = null; store.set('bh_pro', null); return render(); }
 });
