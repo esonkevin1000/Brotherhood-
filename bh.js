@@ -444,8 +444,8 @@ function openRewards() {
   const l = S.loyal; if (!l) return;
   const vs = l.vouchers || [], sTag = v => v.status === 'active' ? '<span class="tag ok">Ready</span>' : v.status === 'used' ? '<span class="tag">Used</span>' : '<span class="tag bad">Expired</span>';
   const o = sheet(`<h3>Rewards</h3><div class="row" style="align-items:baseline;gap:8px"><b class="num" style="font-size:28px">${l.balance}</b><span class="mute sm">points to spend</span></div>
-    <div class="list" style="margin-top:10px">${(l.rewards || []).map(r => `<div class="card row"><div class="sp"><div class="nm">${esc(r.name)}</div><div class="sm mute">${esc(r.label)} · ${r.cost} point${r.cost === 1 ? '' : 's'}</div></div><button class="btn ${l.balance >= r.cost ? '' : 'sec'} sm" data-redeem="${r.id}" ${l.balance >= r.cost ? '' : 'disabled'}>Redeem</button></div>`).join('') || '<div class="card empty sm">No rewards yet. Check back soon.</div>'}</div>
-    ${vs.length ? `<div class="sec-h"><h2>My vouchers</h2></div><div class="list">${vs.map(v => `<div class="card"><div class="row"><div class="sp"><b style="letter-spacing:1px">${esc(v.code)}</b> ${sTag(v)}<div class="sm mute">${esc(v.name)} · ${esc(v.label)}${v.status === 'active' && v.expires ? ' · use by ' + fmtDate(v.expires) : ''}</div></div></div></div>`).join('')}</div><div class="sm mute" style="margin-top:8px">Enter the code in the Promo code box when you book. A voucher you don't use before it expires gives your points back.</div>` : ''}
+    <div class="list" style="margin-top:10px">${(l.rewards || []).map(r => `<div class="card" style="padding:0;overflow:hidden">${r.photo ? `<img src="${esc(r.photo)}" alt="" style="width:100%;height:150px;object-fit:cover;display:block">` : ''}<div class="row" style="padding:12px"><div class="sp"><div class="nm">${esc(r.name)}</div><div class="sm mute">${esc(r.label)} · ${r.cost} point${r.cost === 1 ? '' : 's'}${l.balance >= r.cost ? '' : ` · ${r.cost - l.balance} more to go`}</div></div><button class="btn ${l.balance >= r.cost ? '' : 'sec'} sm" data-redeem="${r.id}" ${l.balance >= r.cost ? '' : 'disabled'}>${l.balance >= r.cost ? 'Claim' : 'Locked'}</button></div></div>`).join('') || '<div class="card empty sm">No rewards yet. Check back soon.</div>'}</div>
+    ${vs.length ? `<div class="sec-h"><h2>My vouchers</h2></div><div class="list">${vs.map(v => `<div class="card"><div class="row" style="gap:10px">${v.photo ? `<img src="${esc(v.photo)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:10px">` : ''}<div class="sp"><b style="letter-spacing:1px">${esc(v.code)}</b> ${sTag(v)}<div class="sm mute">${esc(v.name)} · ${esc(v.label)}${v.status === 'active' && v.expires ? ' · use by ' + fmtDate(v.expires) : ''}</div></div></div></div>`).join('')}</div><div class="sm mute" style="margin-top:8px">Enter the code in the Promo code box when you book. A voucher you don't use before it expires gives your points back.</div>` : ''}
     <div id="rwerr"></div><div class="row" style="margin-top:14px"><button class="btn ghost sp" data-x>Close</button></div>`);
   o.addEventListener('click', async e => {
     const b = e.target.closest('[data-redeem]'); if (!b) return; b.disabled = true;
@@ -455,18 +455,25 @@ function openRewards() {
 }
 const rewardsSection = () => {
   const rs = (S.rewardsList && S.rewardsList.rewards) || [];
-  return `<div class="sec-h"><h2>Rewards</h2><button class="btn white sm" data-rewardadd>New reward</button></div><div class="sm mute" style="margin:-4px 0 8px">Members spend points (1 paid visit = 1 point) to get a one-use voucher. At the cashier it becomes a discount automatically.</div><div class="list">${rs.map(r => `<div class="card"><div class="row"><div class="sp"><div class="nm"><b>${esc(r.name)}</b> ${r.active ? '<span class="tag ok">On</span>' : '<span class="tag">Paused</span>'}</div><div class="sm mute">${esc(r.label)} · ${r.cost} point${r.cost === 1 ? '' : 's'} · ${r.redeemed} redeemed</div></div></div>
-    <div class="row" style="gap:8px;margin-top:8px"><button class="btn sec sm sp" data-rewardtoggle="${r.id}" data-on="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Turn on'}</button><button class="btn danger sm sp" data-rewarddel="${r.id}">Delete</button></div></div>`).join('') || '<div class="card empty sm">No rewards yet. Try "Free haircut" for 10 points, or "₱50 off" for 5 points.</div>'}</div>`;
+  return `<div class="sec-h"><h2>Rewards</h2><button class="btn white sm" data-rewardadd>New reward</button></div><div class="sm mute" style="margin:-4px 0 8px">Members spend points (1 paid visit = 1 point) to get a one-use voucher. At the cashier it becomes a discount automatically.</div><div class="list">${rs.map(r => `<div class="card"><div class="row" style="gap:10px">${r.photo ? `<img src="${esc(r.photo)}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:10px">` : ''}<div class="sp"><div class="nm"><b>${esc(r.name)}</b> ${r.active ? '<span class="tag ok">On</span>' : '<span class="tag">Paused</span>'}</div><div class="sm mute">${esc(r.label)} · ${r.cost} point${r.cost === 1 ? '' : 's'} · ${r.redeemed} redeemed</div></div></div>
+    <div class="row" style="gap:8px;margin-top:8px"><button class="btn sec sm sp" data-rewardtoggle="${r.id}" data-on="${r.active ? 0 : 1}">${r.active ? 'Pause' : 'Turn on'}</button><label class="btn sec sm sp" style="cursor:pointer;text-align:center">${r.photo ? 'Change photo' : 'Add photo'}<input type="file" accept="image/*" hidden data-rwfile="${r.id}"></label><button class="btn danger sm sp" data-rewarddel="${r.id}">Delete</button></div></div>`).join('') || '<div class="card empty sm">No rewards yet. Try "Free haircut" for 10 points, or "₱50 off" for 5 points.</div>'}</div>`;
 };
 function openReward() {
   const o = sheet(`<h3>New reward</h3><label class="f" style="margin-top:0">Name<input id="rwname" maxlength="60" placeholder="e.g. Free haircut"></label>
     <div class="row" style="gap:10px"><label class="f sp" style="margin:0">Discount type<select id="rwkind"><option value="percent">Percent off (%)</option><option value="amount">Peso off (₱)</option></select></label><label class="f" style="margin:0;width:100px">Value<input id="rwvalue" type="number" min="1" step="1" value="100" inputmode="numeric"></label></div>
     <label class="f">Points needed<input id="rwcost" type="number" min="1" max="500" step="1" value="10" inputmode="numeric"></label>
+    <div id="rwimg"></div><div class="row" style="margin-top:10px"><label class="btn sec sm" style="cursor:pointer">${ic('plus')} Add a picture<input type="file" id="rwpic" accept="image/*" hidden></label><span class="mute sm">Like a free haircut or a cap. Members see it.</span></div>
     <div class="sm mute" style="margin-top:6px">100% off means a free service. The discount applies to the whole ticket.</div>
     <div id="rwerr2"></div><div class="row" style="margin-top:14px"><button class="btn ghost sp" data-x>Cancel</button><button class="btn sp" id="rwsave">Create reward</button></div>`);
+  let rwImg = null;
+  o.querySelector('#rwpic').addEventListener('change', async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try { rwImg = await compress(f); o.querySelector('#rwimg').innerHTML = `<div style="position:relative;margin-top:10px"><img src="${rwImg}" alt="" style="width:100%;height:150px;object-fit:cover;border-radius:12px"><button class="btn sm danger" style="position:absolute;top:6px;right:6px;background:var(--bg)" id="rwx">✕</button></div>`; o.querySelector('#rwerr2').innerHTML = ''; o.querySelector('#rwx').onclick = () => { rwImg = null; o.querySelector('#rwimg').innerHTML = ''; }; }
+    catch (x) { o.querySelector('#rwerr2').innerHTML = `<div class="err">${esc(x.message)}</div>`; }
+  });
   o.querySelector('#rwsave').onclick = async ev => {
     const btn = ev.currentTarget; btn.disabled = true;
-    try { await api('/pro/rewards', { method: 'POST', body: { name: o.querySelector('#rwname').value, kind: o.querySelector('#rwkind').value, value: o.querySelector('#rwvalue').value, cost: o.querySelector('#rwcost').value } }, S.proToken); o.remove(); toast('Reward created'); await loadRules(); render(); }
+    try { await api('/pro/rewards', { method: 'POST', body: { photo: rwImg || undefined, name: o.querySelector('#rwname').value, kind: o.querySelector('#rwkind').value, value: o.querySelector('#rwvalue').value, cost: o.querySelector('#rwcost').value } }, S.proToken); o.remove(); toast('Reward created'); await loadRules(); render(); }
     catch (x) { o.querySelector('#rwerr2').innerHTML = `<div class="err">${esc(x.message)}</div>`; btn.disabled = false; }
   };
 }
@@ -899,6 +906,10 @@ app.addEventListener('change', async e => {
     try { await api(isCover ? '/me/cover' : '/me/photo', { method: 'POST', body: { data: await compress(f) } }); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.mem = null; S.feed = null; await loadMe(); render(); } catch (x) { toast(x.message); }
   }
   if (e.target.dataset && e.target.dataset.opk) { const inp = document.querySelector(`[data-opp="${e.target.dataset.opk}"]`); inp.disabled = !e.target.checked; if (e.target.checked) inp.focus(); }
+  if (e.target.dataset && e.target.dataset.rwfile) {
+    const f = e.target.files[0], id = e.target.dataset.rwfile; e.target.value = ''; if (!f) return;
+    try { await api('/pro/rewards/' + id, { method: 'PUT', body: { photo: await compress(f) } }, S.proToken); toast('Picture saved'); await loadRules(); render(); } catch (x) { toast(x.message); }
+  }
   if (e.target.id === 'brep' && S.bk) { S.bk.repEvery = +e.target.value; render(); }
   if (e.target.id === 'brepn' && S.bk) { S.bk.repCount = +e.target.value; }
   if (e.target.id === 'rnoshow' || e.target.id === 'rbuffer') {

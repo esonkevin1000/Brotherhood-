@@ -58,7 +58,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   }
   // rewards: the owner sets what points can buy; redeeming gives the member a private one-use voucher (a promo code only they can use)
   db.exec(`create table if not exists bh_rewards(id text primary key, name text, cost integer, kind text, value real, active integer, discountId text, createdAt text);`);
-  addCol('bh_promos', 'userId', 'text'); addCol('bh_promos', 'rewardId', 'text'); addCol('bh_promos', 'cost', 'integer');
+  addCol('bh_rewards', 'photo', 'text'); addCol('bh_promos', 'userId', 'text'); addCol('bh_promos', 'rewardId', 'text'); addCol('bh_promos', 'cost', 'integer');
   const loyaltyCid = u => u.customerId || one("select customerId c from bookings where userId=? and customerId<>'' order by createdAt desc", u.id)?.c || '';
   // vouchers that are used or still valid cost points; an unused expired voucher gives its points back
   function rewardState(u) {
@@ -66,10 +66,10 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     const vouchers = all('select * from bh_promos where userId=? order by createdAt desc limit 50', u.id).map(p => {
       const uses = promoUses(p.code), expired = !!(p.expires && p.expires < t), st = uses > 0 ? 'used' : expired ? 'expired' : 'active';
       const r = p.rewardId ? get('bh_rewards', p.rewardId) : null;
-      return { code: p.code, name: r?.name || String(p.note || 'Reward').replace(/^Reward: /, ''), label: promoLabel(p), status: st, expires: p.expires || '', cost: p.cost || 0 };
+      return { code: p.code, name: r?.name || String(p.note || 'Reward').replace(/^Reward: /, ''), photo: r?.photo || '', label: promoLabel(p), status: st, expires: p.expires || '', cost: p.cost || 0 };
     });
     const spent = vouchers.filter(v => v.status !== 'expired').reduce((a, v) => a + v.cost, 0);
-    return { cid, visits, balance: Math.max(0, visits - spent), vouchers, rewards: all('select * from bh_rewards where active=1 order by cost, name').map(r => ({ id: r.id, name: r.name, cost: r.cost, label: promoLabel(r) })) };
+    return { cid, visits, balance: Math.max(0, visits - spent), vouchers, rewards: all('select * from bh_rewards where active=1 order by cost, name').map(r => ({ id: r.id, name: r.name, cost: r.cost, label: promoLabel(r), photo: r.photo || '' })) };
   }
   const promoLabel = p => (p.kind === 'percent' ? p.value + '% off' : '₱' + p.value + ' off') + (p.firstVisit ? ' · first visit' : '');
 
@@ -584,7 +584,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       // rewards (owner): what points can buy. Each reward has one matching POS discount, shared by all its vouchers.
       if (sub === '/pro/rewards' && method === 'GET') {
         if (!admin) bad(403, 'Owner only');
-        return send(res, 200, { rewards: all('select * from bh_rewards order by cost, name').map(r => ({ id: r.id, name: r.name, cost: r.cost, kind: r.kind, value: r.value, active: !!r.active, label: promoLabel(r), redeemed: one('select count(*) n from bh_promos where rewardId=?', r.id).n })) });
+        return send(res, 200, { rewards: all('select * from bh_rewards order by cost, name').map(r => ({ id: r.id, name: r.name, cost: r.cost, kind: r.kind, value: r.value, active: !!r.active, photo: r.photo || '', label: promoLabel(r), redeemed: one('select count(*) n from bh_promos where rewardId=?', r.id).n })) });
       }
       if (sub === '/pro/rewards' && method === 'POST') {
         if (!admin) bad(403, 'Owner only'); const b = await readBody(req), name = clip(b.name, 60), kind = b.kind === 'amount' ? 'amount' : 'percent', value = Math.round(+b.value * 100) / 100, cost = Math.round(+b.cost);
@@ -592,16 +592,22 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         if (!(cost >= 1 && cost <= 500)) bad(400, 'Points needed must be from 1 to 500');
         if (!(value > 0) || (kind === 'percent' && value > 100) || (kind === 'amount' && value > 5000)) bad(400, kind === 'percent' ? 'Percent off must be from 1 to 100' : 'Peso off must be from 1 to 5000');
         if (one('select count(*) n from bh_rewards').n >= 20) bad(409, 'Too many rewards. Delete old ones first.');
+        const photo = b.photo ? saveImg({ data: b.photo }) : '';
         const id = uid(), did = uid(); run('insert into discounts(id,name,kind,value,active) values(?,?,?,?,1)', did, 'Reward: ' + name, kind, value);
-        run('insert into bh_rewards(id,name,cost,kind,value,active,discountId,createdAt) values(?,?,?,?,?,1,?,?)', id, name, cost, kind, value, did, nowISO());
+        run('insert into bh_rewards(id,name,cost,kind,value,active,discountId,createdAt,photo) values(?,?,?,?,?,1,?,?,?)', id, name, cost, kind, value, did, nowISO(), photo);
         log(me, 'reward-created', 'bh_rewards', id, name); return send(res, 201, { ok: true, id });
       }
       const rwm = sub.match(/^\/pro\/rewards\/(\w+)$/);
       if (rwm && (method === 'PUT' || method === 'DELETE')) {
         if (!admin) bad(403, 'Owner only'); const r = get('bh_rewards', rwm[1]); if (!r) bad(404, 'Reward not found');
-        if (method === 'PUT') { const b = await readBody(req); run('update bh_rewards set active=? where id=?', b.active ? 1 : 0, r.id); return send(res, 200, { ok: true }); }
+        if (method === 'PUT') {
+          const b = await readBody(req);
+          if ('active' in b) run('update bh_rewards set active=? where id=?', b.active ? 1 : 0, r.id);
+          if ('photo' in b) { const url = b.photo ? saveImg({ data: b.photo }) : ''; dropImg(r.photo); run('update bh_rewards set photo=? where id=?', url, r.id); }
+          return send(res, 200, { ok: true });
+        }
         if (all('select code, expires from bh_promos where rewardId=?', r.id).some(x => !promoUses(x.code) && !(x.expires && x.expires < todayStr()))) bad(409, 'Members still hold unused vouchers for this reward. Pause it instead.');
-        run('delete from bh_rewards where id=?', r.id); log(me, 'reward-deleted', 'bh_rewards', r.id, r.name); return send(res, 200, { ok: true });
+        dropImg(r.photo); run('delete from bh_rewards where id=?', r.id); log(me, 'reward-deleted', 'bh_rewards', r.id, r.name); return send(res, 200, { ok: true });
       }
       // promo codes (owner): create, pause or delete. Each code creates a matching POS discount so a booked customer's ticket gets it automatically.
       if (sub === '/pro/promos' && method === 'GET') {
