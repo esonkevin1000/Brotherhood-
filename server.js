@@ -13,7 +13,8 @@ import { mountBH } from './bh-api.js';
 process.env.TZ ||= 'Asia/Manila';
 const PORT = +process.env.PORT || 3000;
 const PASS = process.env.ADMIN_PASSWORD || 'admin123';
-const ownerUser = () => String(getSetting('ownerUser') || process.env.OWNER_USERNAME || '').trim().toLowerCase();   // chosen by the owner in Settings (or OWNER_USERNAME); blank = old behaviour
+// Recovery: OWNER_USERNAME_FORCE (hosting variable) overrides whatever owner username was saved in Settings, so a forgotten owner username can always be reset from the host.
+const ownerUser = () => String(process.env.OWNER_USERNAME_FORCE || getSetting('ownerUser') || process.env.OWNER_USERNAME || '').trim().toLowerCase();   // chosen by the owner in Settings (or OWNER_USERNAME); blank = old behaviour
 const SHOP = process.env.SHOP_NAME || 'Brotherhood';
 const DIR = import.meta.dirname;
 const BRANCHES = ['Alaminos', 'Bay', 'Calauan', 'Nagcarlan', 'Tiaong', 'San Pablo', 'Sto. Tomas'];
