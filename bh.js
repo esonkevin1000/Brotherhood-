@@ -102,7 +102,7 @@ function vDiscover() {
     const soon = all_.filter(b => b.nextSlot).sort((x, y) => x.nextSlot.localeCompare(y.nextSlot)).slice(0, 10), hot = all_.filter(b => b.weekCuts > 0).sort((x, y) => y.weekCuts - x.weekCuts).slice(0, 10);
     body = `<div class="banners" id="banners">${BANNERS.map(n => `<div class="banner"><div class="sp"><h3>${esc(n.t)}</h3><p>${esc(n.p)}</p><button class="btn white sm" ${n.a}>${esc(n.cta)} ›</button></div><span class="big" aria-hidden="true">${n.e}</span></div>`).join('')}</div>
     <div class="dots" id="bdots">${BANNERS.map((_, i) => `<span class="${i ? '' : 'on'}"></span>`).join('')}</div>
-    ${secRow('Pick a style', '')}<div class="stiles">${tiles.map(t => `<button class="stile ${S.style === t.name ? 'on' : ''}" data-dstyle="${esc(t.name)}">${t.image ? `<img src="${esc(t.image)}" alt="" loading="lazy">` : `<span class="g">${ic('scissors')}</span>`}<span>${esc(t.name)}</span>${t.n ? `<em>${t.n}</em>` : ''}</button>`).join('')}</div>
+    ${secRow('Pick a style', '')}<div class="stiles">${tiles.map(t => `<button class="stile ${S.style === t.name ? 'on' : ''}" data-dstyle="${esc(t.name)}">${t.image ? `<img src="${esc(t.image)}" alt="" loading="lazy">` : `<span class="g">${styleArt(t.name)}</span>`}<span>${esc(t.name)}</span>${t.n ? `<em>${t.n}</em>` : ''}</button>`).join('')}</div>
     ${D.services.length ? secRow('Pick a haircut', '') + `<div class="hscroll">${D.services.map(v => `<button class="tile wide" style="width:190px" data-svc="${v.id}">${v.photo ? `<img class="tp" style="aspect-ratio:16/10" src="${esc(v.photo)}" alt="" loading="lazy">` : ''}<div class="tb"><div class="nm">${esc(v.name)}</div><div class="sm mute">${v.mins || 30} min</div><div class="sm"><b>${peso(v.price)}</b> · Choose a shop ›</div></div></button>`).join('')}</div>` : ''}
     ${soon.length ? secRow('Free today', 'data-dsee="soonest"') + `<div class="hscroll">${soon.map(b => barberTile(b, 'Next ' + t12(b.nextSlot))).join('')}</div>` : ''}
     ${hot.length ? secRow('Trending this week', 'data-dsee="trending"') + `<div class="hscroll">${hot.map(b => barberTile(b, '🔥 ' + b.weekCuts + ' cut' + (b.weekCuts === 1 ? '' : 's'))).join('')}</div>` : ''}
@@ -399,6 +399,41 @@ const CUTS = [
 const CARES = [[1, 'Low', 'Wash and go'], [2, 'Medium', 'A few minutes daily'], [3, 'High', 'I enjoy styling']];
 const SF = { face: '', hair: '', care: 0, done: false };
 const cutById = id => CUTS.find(c => c.id === id);
+// ----- sample illustrations for each haircut (drawn in code; replaced by a barber's real photo once one is uploaded for that style) -----
+let artN = 0;
+const ART_TOP = {
+  'low-fade': 'M27 36 C25 20 38 15 50 15 C62 15 75 20 73 36 C70 29 62 26 50 26 C38 26 30 29 27 36Z',
+  'mid-fade': 'M27 36 C24 17 38 11 50 11 C62 11 76 17 73 36 C70 28 62 24 50 24 C38 24 30 28 27 36Z',
+  'high-fade': 'M28 34 C26 12 36 7 50 7 C64 7 74 12 72 34 C69 26 62 21 50 21 C38 21 31 26 28 34Z',
+  'taper-fade': 'M26 38 C23 18 37 12 50 12 C63 12 77 18 74 38 C71 29 62 25 50 25 C38 25 29 29 26 38Z',
+  'skin-fade': 'M28 35 C26 18 38 12 50 12 C62 12 74 18 72 35 C69 28 62 24 50 24 C38 24 31 28 28 35Z',
+  'burst-fade': 'M27 36 C22 26 26 14 36 14 C40 7 48 7 52 11 C58 7 68 11 68 17 C76 20 78 30 73 36 C70 28 62 25 50 25 C38 25 30 28 27 36Z',
+  'french-crop': 'M26 38 C24 20 36 14 50 14 C64 14 76 20 74 38 L72 33 C66 31 60 33 50 33 C40 33 34 31 28 33Z',
+  'textured-crop': 'M26 38 C24 20 36 13 50 13 C64 13 76 20 74 38 L70 31 L65 36 L60 30 L55 36 L50 30 L45 36 L40 30 L35 36 L30 31Z',
+  'buzz-cut': 'M28.5 34 C27 19 39 14 50 14 C61 14 73 19 71.5 34 C68 26 60 23 50 23 C40 23 32 26 28.5 34Z',
+  'pompadour': 'M26 38 C19 20 30 3 50 3 C70 3 83 18 74 38 C72 30 64 21 50 21 C36 21 28 30 26 38Z',
+  'slick-back': 'M26 36 C25 18 38 11 50 11 C64 11 76 18 74 36 C72 28 64 22 50 22 C36 22 28 28 26 36Z',
+  'two-block': 'M25 40 C22 18 36 11 50 11 C64 11 78 18 75 40 C72 33 66 31 58 33 C52 29 44 31 38 33 C32 31 28 34 25 40Z',
+  'scissor-cut': 'M24 46 C19 18 36 9 52 9 C68 9 81 20 76 46 C74 34 66 27 52 26 C42 26 30 30 24 46Z',
+  'long-flow': 'M25 38 C22 16 38 9 50 9 C62 9 78 16 75 38 C71 28 62 24 50 24 C38 24 29 28 25 38Z M25 36 C19 52 19 72 25 90 L36 86 C32 70 32 52 34 38Z M75 36 C81 52 81 72 75 90 L64 86 C68 70 68 52 66 38Z'
+};
+const ART_FADE = { 'low-fade': [42, 60], 'mid-fade': [34, 50], 'high-fade': [27, 41], 'taper-fade': [46, 58], 'skin-fade': [30, 38], 'burst-fade': [34, 52], 'buzz-cut': [60, 61], 'french-crop': [40, 54], 'textured-crop': [38, 52], 'pompadour': [40, 54], 'slick-back': [42, 56], 'two-block': [36, 50] };
+const ART_LINES = { 'pompadour': 'M34 22 C40 12 56 10 66 20 M38 26 C44 17 56 15 64 24', 'slick-back': 'M32 24 C42 17 58 17 68 24 M30 28 C42 21 58 21 70 28 M34 20 C44 14 56 14 66 20', 'textured-crop': '', 'burst-fade': 'M36 18 C40 14 44 14 46 18 M54 16 C58 12 64 14 64 19' };
+function styleArt(name) {
+  const c = CUTS.find(x => x.name === name), id = c ? c.id : 'taper-fade', i = Math.max(0, CUTS.findIndex(x => x.id === id)), n = ++artN;
+  const skin = ['#d9a982', '#b98563', '#946348'][i % 3], shade = ['#c18f6b', '#a2704f', '#7c5239'][i % 3], bg = [['#2c313a', '#171a1f'], ['#293342', '#14181e'], ['#332f3b', '#1a191f'], ['#2e3b37', '#16201c']][i % 4], hair = '#0e0f11', edge = '#40444d';
+  const f = ART_FADE[id], y0 = 20, y1 = 66, p = v => Math.max(0, Math.min(1, (v - y0) / (y1 - y0)));
+  const side = f ? `<defs><linearGradient id="sf${n}" x1="0" y1="${y0}" x2="0" y2="${y1}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${hair}"/><stop offset="${p(f[0])}" stop-color="${hair}"/><stop offset="${p(f[1])}" stop-color="${hair}" stop-opacity="0"/></linearGradient></defs>
+    <path d="M27.5 26 L37 28 L35 46 L32.5 62 L28.5 64 L26 50Z" fill="url(#sf${n})"/><path d="M72.5 26 L63 28 L65 46 L67.5 62 L71.5 64 L74 50Z" fill="url(#sf${n})"/>` : '';
+  const hasSideHair = id === 'scissor-cut' ? `<path d="M26 40 L35 38 L34 56 L28 54Z M74 40 L65 38 L66 56 L72 54Z" fill="${hair}"/>` : '';
+  const op = id === 'buzz-cut' ? '.82' : '1';
+  return `<svg class="sa" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${esc(name)} illustration" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="bg${n}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${bg[0]}"/><stop offset="1" stop-color="${bg[1]}"/></linearGradient></defs>
+    <rect width="100" height="100" fill="url(#bg${n})"/>
+    ${id === 'long-flow' ? '' : ''}<path d="M8 100 Q12 82 50 79 Q88 82 92 100Z" fill="#2a2f37"/><rect x="42" y="68" width="16" height="16" rx="4" fill="${shade}"/>
+    <ellipse cx="28.5" cy="52" rx="3.6" ry="6" fill="${skin}"/><ellipse cx="71.5" cy="52" rx="3.6" ry="6" fill="${skin}"/><ellipse cx="50" cy="50" rx="22" ry="27" fill="${skin}"/>
+    ${side}${hasSideHair}<path d="${ART_TOP[id]}" fill="${hair}" fill-opacity="${op}" stroke="${edge}" stroke-width=".8" stroke-linejoin="round"/>${ART_LINES[id] ? `<path d="${ART_LINES[id]}" fill="none" stroke="${edge}" stroke-width="1" stroke-linecap="round"/>` : ''}
+    <circle cx="41" cy="51" r="1.5" fill="#1b1210"/><circle cx="59" cy="51" r="1.5" fill="#1b1210"/><path d="M50 53 L48.5 60 L51.5 60" fill="none" stroke="${shade}" stroke-width="1.2" stroke-linecap="round"/><path d="M44.5 67 Q50 70 55.5 67" fill="none" stroke="#6b3f2e" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+}
 function recommend() {
   return CUTS.map(c => { let sc = (c.face.includes(SF.face) ? 50 : 0) + (c.hair.includes(SF.hair) ? 30 : 0); sc += 20 - Math.abs(c.care - (SF.care || 2)) * 10; return { c, sc }; }).filter(x => x.sc >= 50).sort((a, b) => b.sc - a.sc).slice(0, 3);
 }
@@ -407,7 +442,7 @@ function vStyle() {
   if (SF.done) {
     const rec = recommend(), face = FACES.find(f => f[0] === SF.face)[1];
     return header('Your style', '/') + `<div class="card"><div class="sm mute">Based on</div><b>${esc(face)} face · ${esc(HAIRS.find(h => h[0] === SF.hair)[1])} hair · ${CARES.find(c => c[0] === (SF.care || 2))[1]} upkeep</b></div>
-    <div class="list" style="margin-top:12px">${rec.map(({ c }, i) => `<div class="card pop">${i === 0 ? '<span class="tag on">Best match</span> ' : ''}<h3 style="font-size:22px;margin:6px 0 4px">${esc(c.name)}</h3><div class="mute sm" style="margin-bottom:8px">${esc(c.note)}</div>
+    <div class="list" style="margin-top:12px">${rec.map(({ c }, i) => `<div class="card pop"><div class="sart">${styleArt(c.name)}</div>${i === 0 ? '<span class="tag on">Best match</span> ' : ''}<h3 style="font-size:22px;margin:6px 0 4px">${esc(c.name)}</h3><div class="mute sm" style="margin-bottom:8px">${esc(c.note)}</div>
       ${[['Face shape', face], ['Top', c.top], ['Sides', c.sides], ['Styling', c.style], ['Maintenance', 'Every ' + c.every]].map(([k, v]) => `<div class="row sm" style="padding:5px 0;border-top:1px solid var(--line)"><span class="mute" style="width:100px">${k}</span><span>${esc(v)}</span></div>`).join('')}
       <div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn sm ${saved.includes(c.id) ? 'sec' : ''}" data-ssave="${c.id}">${saved.includes(c.id) ? '♥ Saved' : 'Save'}</button><button class="btn sec sm" data-sbook="${c.id}">${ic('cal')} Book with this cut</button></div></div>`).join('') || '<div class="card empty">No strong matches. Try a different upkeep level.</div>'}</div>
     <p class="mute sm" style="margin-top:14px">These are suggestions from simple grooming rules, not an AI scan or a guaranteed result. Show it to your barber and they will adjust it to your head shape, hairline and hair growth.</p>
