@@ -36,6 +36,27 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
   addCol('bookings', 'reminderAt', 'text'); addCol('bookings', 'reviewReqAt', 'text'); addCol('bh_portfolio', 'style', 'text'); addCol('bh_users', 'photo', 'text'); addCol('bh_users', 'cover', 'text'); addCol('bh_barber', 'cover', 'text'); addCol('bh_posts', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
+  // promo codes: each code is tied to a POS discount, so the cashier's discount report shows it too
+  db.exec(`create table if not exists bh_promos(id text primary key, code text unique, kind text, value real, firstVisit integer, maxUses integer, expires text, active integer, note text, discountId text, createdAt text);`);
+  addCol('bookings', 'promoCode', 'text'); addCol('bookings', 'promoAmt', 'real');
+  const cleanCode = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+  const promoUses = code => one("select count(*) n from bookings where promoCode=? and status in ('booked','arrived')", code).n;
+  // checks a promo code for one customer and the services they picked; throws a clear message when it cannot be used
+  function promoCheck(code, itemIds, phone, email) {
+    const c = cleanCode(code); if (!c) bad(400, 'Enter a promo code');
+    const p = one('select * from bh_promos where code=?', c); if (!p || !p.active) bad(404, 'That promo code is not valid');
+    if (p.expires && p.expires < todayStr()) bad(409, 'This promo code has expired');
+    if (p.maxUses > 0 && promoUses(c) >= p.maxUses) bad(409, 'This promo code has reached its limit');
+    const pk = normPhone(phone), ek = normEmail(email);
+    const cust = (pk.length >= 10 && one('select id from customers where phoneKey=?', pk)) || (ek && one('select id from customers where emailKey=?', ek)) || null;
+    if (all("select phone, customerId from bookings where promoCode=? and status in ('booked','arrived')", c).some(x => (cust && x.customerId === cust.id) || (pk.length >= 10 && normPhone(x.phone) === pk))) bad(409, 'You already used this promo code');
+    if (p.firstVisit && cust && one("select 1 x from orders where customerId=? and status='paid'", cust.id)) bad(409, 'This promo is for first-time customers only');
+    const subtotal = (Array.isArray(itemIds) ? itemIds : []).reduce((t, id) => t + (get('items', String(id))?.price || 0), 0);
+    if (!subtotal) bad(400, 'Pick a service first');
+    const raw = p.kind === 'percent' ? subtotal * p.value / 100 : p.value, amt = Math.round(Math.min(subtotal, Math.max(0, raw)) * 100) / 100;
+    return { promo: p, amt, subtotal, total: Math.round((subtotal - amt) * 100) / 100 };
+  }
+  const promoLabel = p => (p.kind === 'percent' ? p.value + '% off' : '₱' + p.value + ' off') + (p.firstVisit ? ' · first visit' : '');
 
   // ---------- helpers ----------
   const hits = new Map();
@@ -315,6 +336,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const b = await readBody(req);
       // optional repeat: every 1, 2, 3, 4 or 6 weeks for 2 to 6 cuts in total; slots that are taken are skipped and reported
       const every = [1, 2, 3, 4, 6].includes(+b.repeatEvery) ? +b.repeatEvery : 0, count = every ? Math.max(2, Math.min(6, Math.round(+b.repeatCount) || 2)) : 1;
+      let pc = null; if (b.promo) pc = promoCheck(b.promo, b.itemIds, u.phone, u.email);   // checked first: a bad code stops the booking with a clear message
       const make = date => {
         const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
         run('update bookings set userId=? where id=?', u.id, x.id); if (x.customerId && !u.customerId) { run('update bh_users set customerId=? where id=?', x.customerId, u.id); u.customerId = x.customerId; }
@@ -322,11 +344,17 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         log({ name: 'App: ' + u.name }, 'booking', 'bookings', x.id, `${x.date} ${x.time} ${x.branchName}`); return x;
       };
       const bk = make(String(b.date || '')); hit(ip, 'bk'); const series = [];
+      if (pc) { run('update bookings set promoCode=?, promoAmt=? where id=?', pc.promo.code, pc.amt, bk.id); bk.promo = { code: pc.promo.code, amt: pc.amt }; }   // only the first cut of a repeat series gets the promo
       for (let i = 1; i < count; i++) {
         const d = dOf(new Date(new Date(bk.date + 'T00:00:00').getTime() + i * every * 7 * 864e5));
         try { const x = make(d); series.push({ date: x.date, time: x.time, ok: true, staff: x.staffName }); } catch (er) { series.push({ date: d, time: String(b.time), ok: false, reason: er.message }); }
       }
-      return send(res, 201, { ok: true, booking: { id: bk.id, date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, items: bk.items, total: bk.total }, series });
+      return send(res, 201, { ok: true, booking: { id: bk.id, date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, items: bk.items, total: bk.total, promo: bk.promo || null }, series });
+    }
+    if (sub === '/promo/check' && method === 'GET') {
+      const u = needUser(req); if (tooMany(ip, 'pc', 30, 3600e3)) bad(429, 'Too many tries. Please try again later.'); hit(ip, 'pc');
+      const r = promoCheck(q.code, String(q.items || '').split(',').filter(Boolean), u.phone, u.email);
+      return send(res, 200, { code: r.promo.code, label: promoLabel(r.promo), amt: r.amt, subtotal: r.subtotal, total: r.total });
     }
     if (sub === '/bookings' && method === 'GET') {
       const u = needUser(req), now = Date.now();
@@ -335,7 +363,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const reviewed = b.orderId ? !!one('select 1 x from reviews where orderId=?', b.orderId) : false;
         const paid = b.orderId ? one("select status from orders where id=?", b.orderId)?.status === 'paid' : false;
         return { id: v.id, branchId: v.branchId, branchName: v.branchName, staffId: v.staffId, staffName: v.staffName, staffPhoto: v.staffPhoto, date: v.date, time: v.time, mins: v.mins, status: v.status,
-          items: v.items, itemIds: v.itemIds, total: v.total, notes: v.notes || '', canCancel: v.status === 'booked' && start - now >= 3600e3, canReview: paid && !reviewed, reviewed };
+          items: v.items, itemIds: v.itemIds, total: v.total, promoCode: b.promoCode || '', promoAmt: b.promoAmt || 0, notes: v.notes || '', canCancel: v.status === 'booked' && start - now >= 3600e3, canReview: paid && !reviewed, reviewed };
       });
       return send(res, 200, { bookings: rows });
     }
@@ -524,6 +552,31 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         if ('noshowMax' in b) { const v = Math.round(+b.noshowMax); if (![0, 1, 2, 3, 4, 5].includes(v)) bad(400, 'Choose 0 (off) to 5'); setSetting('noshowMax', String(v)); }
         if ('bufferMins' in b) { const v = Math.round(+b.bufferMins); if (![0, 5, 10, 15, 20, 30].includes(v)) bad(400, 'Choose 0, 5, 10, 15, 20 or 30 minutes'); setSetting('bufferMins', String(v)); }
         log(me, 'booking-rules', 'settings', '', JSON.stringify(b).slice(0, 120)); return send(res, 200, { ok: true });
+      }
+      // promo codes (owner): create, pause or delete. Each code creates a matching POS discount so a booked customer's ticket gets it automatically.
+      if (sub === '/pro/promos' && method === 'GET') {
+        if (!admin) bad(403, 'Owner only');
+        return send(res, 200, { promos: all('select * from bh_promos order by createdAt desc limit 100').map(p => ({ id: p.id, code: p.code, kind: p.kind, value: p.value, firstVisit: !!p.firstVisit, maxUses: p.maxUses || 0, expires: p.expires || '', active: !!p.active, note: p.note || '', label: promoLabel(p), uses: promoUses(p.code), expired: !!(p.expires && p.expires < todayStr()),
+          saved: Math.round(all("select promoAmt from bookings where promoCode=? and status='arrived'", p.code).reduce((t, x) => t + (x.promoAmt || 0), 0)) })) });
+      }
+      if (sub === '/pro/promos' && method === 'POST') {
+        if (!admin) bad(403, 'Owner only'); const b = await readBody(req), code = cleanCode(b.code), kind = b.kind === 'amount' ? 'amount' : 'percent', value = Math.round(+b.value * 100) / 100;
+        if (code.length < 3) bad(400, 'The code needs 3 to 20 letters or numbers');
+        if (!(value > 0) || (kind === 'percent' && value > 90) || (kind === 'amount' && value > 5000)) bad(400, kind === 'percent' ? 'Percent off must be from 1 to 90' : 'Peso off must be from 1 to 5000');
+        if (one('select 1 x from bh_promos where code=?', code)) bad(409, 'That code already exists');
+        if (one('select count(*) n from bh_promos').n >= 100) bad(409, 'Too many promo codes. Delete old ones first.');
+        const expires = /^\d{4}-\d{2}-\d{2}$/.test(String(b.expires || '')) ? String(b.expires) : ''; if (expires && expires < todayStr()) bad(400, 'The end date is in the past');
+        const maxUses = Math.max(0, Math.min(100000, Math.round(+b.maxUses) || 0)), id = uid(), did = uid();
+        run('insert into discounts(id,name,kind,value,active) values(?,?,?,?,1)', did, 'Promo ' + code, kind, value);
+        run('insert into bh_promos(id,code,kind,value,firstVisit,maxUses,expires,active,note,discountId,createdAt) values(?,?,?,?,?,?,?,1,?,?,?)', id, code, kind, value, b.firstVisit ? 1 : 0, maxUses, expires, clip(b.note, 120), did, nowISO());
+        log(me, 'promo-created', 'bh_promos', id, code); return send(res, 201, { ok: true, id, code });
+      }
+      const prm = sub.match(/^\/pro\/promos\/(\w+)$/);
+      if (prm && (method === 'PUT' || method === 'DELETE')) {
+        if (!admin) bad(403, 'Owner only'); const p = get('bh_promos', prm[1]); if (!p) bad(404, 'Promo not found');
+        if (method === 'PUT') { const b = await readBody(req); run('update bh_promos set active=? where id=?', b.active ? 1 : 0, p.id); log(me, b.active ? 'promo-on' : 'promo-off', 'bh_promos', p.id, p.code); return send(res, 200, { ok: true }); }
+        if (one("select 1 x from bookings where promoCode=? and status='booked'", p.code)) bad(409, 'Customers still have upcoming bookings with this code. Pause it instead.');
+        run('delete from bh_promos where id=?', p.id); log(me, 'promo-deleted', 'bh_promos', p.id, p.code); return send(res, 200, { ok: true });
       }
       // no-show watch (owner): customers who missed appointments in the last 90 days, and who is paused from online booking
       if (sub === '/pro/noshows' && method === 'GET') {

@@ -45,17 +45,27 @@ Hindi pa kasama sa Health Score: kontrol sa gastos at kondisyon ng equipment.
 | **Paulit-ulit na booking** (bawat 1 hanggang 6 na linggo, 2 hanggang 6 na gupit; ang mga linggong puno o nakablock ay nilalaktawan at ipinapakita) | Customer: booking page, Repeat |
 | Tag na "⚠ no-show" sa appointment card ng barber | Barber: Dashboard |
 
+## 2c. Idinagdag sa phase 3: promo codes
+
+| Feature | Saan makikita |
+|---|---|
+| **Promo codes:** percent off o peso off, pang first-time customer lang (opsyonal), limitasyon ng kabuuang gamit, petsa ng pagtatapos, pause o delete | Owner: Insights, Promo codes |
+| **Sa customer:** ilalagay ang code sa booking page at makikita agad ang bagong presyo | Customer: booking page |
+| **Awtomatiko sa cashier:** kapag nag-arrive ang booking, ang ticket ay may discount na (gumagawa ang bawat code ng katumbas na discount sa POS, kaya lumalabas din sa Discounts report) | POS |
+| Mga patakaran: isang gamit kada tao (ayon sa phone o email), hindi na mabibilang ang na-cancel o no-show, ang paulit-ulit na booking ay sa unang gupit lang | |
+
+Paalala: ang promo ay nakakabit sa booking sa app. Ang walk-in ay patuloy na gumagamit ng mga discount na pinipili ng cashier (lalabas din doon ang "Promo CODE" bilang pwedeng piliin).
+
 ## 3. Susunod (inirerekomendang pagkakasunod-sunod)
 
 1. **SMS na paalala** (kailangan ng SMS provider; ang email ay tapos na).
-2. **Promo codes at first-visit offer** na may limitasyon ng gamit (kailangang kumonekta sa mga discount ng POS).
-3. **Pagkuha ng reward:** voucher code na ibibigay ng cashier at itatala.
-4. **Inventory:** bilang ng stock, awtomatikong bawas kapag nabenta, babala sa mababang stock. (Hinahawakan nito ang pagbebenta sa POS, kaya gagawin nang maingat at may test.)
-5. **Prepayment at singil sa no-show** (kailangan ng payment gateway).
-6. **Mga patakaran bawat client:** halimbawa prepay-only na flag.
-7. **Brotherhood Academy:** mga kurso at certification.
-8. **Multi-tenant (organization):** iisang marketplace para sa maraming shop. Malaking pagbabago sa seguridad ng data.
-9. **Marketing campaign na may ROI** (kailangan muna ng promo codes at email o SMS).
+2. **Pagkuha ng reward:** voucher code na ibibigay ng cashier at itatala.
+3. **Inventory:** bilang ng stock, awtomatikong bawas kapag nabenta, babala sa mababang stock. (Hinahawakan nito ang pagbebenta sa POS, kaya gagawin nang maingat at may test.)
+4. **Prepayment at singil sa no-show** (kailangan ng payment gateway).
+5. **Mga patakaran bawat client:** halimbawa prepay-only na flag.
+6. **Brotherhood Academy:** mga kurso at certification.
+7. **Multi-tenant (organization):** iisang marketplace para sa maraming shop. Malaking pagbabago sa seguridad ng data.
+8. **Marketing campaign na may ROI** (kailangan muna ng promo codes at email o SMS).
 
 ## 4. Hindi pa kaya o kailangan ng ibang serbisyo
 

@@ -1546,6 +1546,7 @@ async function handle(req, res) {
       const items = priceItems(jp(cur.itemIds).map(i => ({ itemId: i, qty: 1 })));
       const cust = (cur.customerId && get('customers', cur.customerId)) || findCustomer(cur.phone, '') || upsertCustomer({ name: cur.customerName, phone: cur.phone }, 'online', cur.branchId);
       const o = createTicket(me, cur.branchId, cust.id, cust.name, items, cur.staffId);
+      if (cur.promoCode) { const pr = one('select discountId from bh_promos where code=?', cur.promoCode); if (pr?.discountId) { run('update orders set discountId=? where id=?', pr.discountId, o.id); o.discountId = pr.discountId; } }   // promo from the app: the ticket opens with that discount already applied
       run("update bookings set status='arrived', orderId=? where id=?", o.id, cur.id); log(me, 'booking-arrived', 'bookings', cur.id, `#${o.no} ${cur.customerName}`);
       return send(res, 200, { order: o, seated: o.status === 'in_chair' });
     }

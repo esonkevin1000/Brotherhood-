@@ -246,7 +246,7 @@ async function loadSlots() {
 function vBook() {
   const k = S.bk, D = S.D; if (!k || !D) { setTimeout(() => nav('/discover')); return ''; }
   const br = D.shops.find(s => s.id === k.branchId), team = D.barbers.filter(b => b.branchId === k.branchId), days = Array.from({ length: 14 }, (_, i) => new Date(Date.now() + i * 864e5));
-  if (k.done) return header('Booked!') + `<div class="ok pop"><b>You're booked, ${esc(S.user.name.split(' ')[0])}!</b><br>${fmtDate(k.done.date)} at ${t12(k.done.time)} · ${esc(k.done.branch)}<br>${esc(k.done.items.map(i => i.name).join(' + '))} with ${esc(k.done.staff)} · ${peso(k.done.total)}<br><span class="sm">Pay at the shop. Cancel up to 1 hour before.</span>${seriesHtml(k)}</div><button class="btn block" data-go="/bookings">View my bookings</button>`;
+  if (k.done) return header('Booked!') + `<div class="ok pop"><b>You're booked, ${esc(S.user.name.split(' ')[0])}!</b><br>${fmtDate(k.done.date)} at ${t12(k.done.time)} · ${esc(k.done.branch)}<br>${esc(k.done.items.map(i => i.name).join(' + '))} with ${esc(k.done.staff)} · ${peso(k.done.total)}${k.done.promo ? `<br>Promo <b>${esc(k.done.promo.code)}</b>: you save ${peso(k.done.promo.amt)} · you pay ${peso(Math.max(0, k.done.total - k.done.promo.amt))}` : ''}<br><span class="sm">Pay at the shop. Cancel up to 1 hour before.</span>${seriesHtml(k)}</div><button class="btn block" data-go="/bookings">View my bookings</button>`;
   const total = D.services.filter(s => k.items.includes(s.id)).reduce((t, s) => t + s.price, 0);
   return header('Book a cut', k.staffId !== 'any' ? '/barber/' + k.staffId : '/discover') + `<div class="card row">${ic('pin')}<div class="sp"><b>${esc(br?.name || '')}</b><div class="sm mute">${esc(br?.address || '')}</div></div></div>
   ${k.pkg ? `<div class="card row" style="margin-top:10px"><div class="pa s">${pkgArt(k.pkg.key)}</div><div class="sp"><b>${esc(k.pkg.name)}</b><div class="sm mute">${peso(k.pkg.price)} · the barber's price, pay at the shop</div></div><button class="link" data-rmpkg>Remove</button></div>` : ''}<div class="sec-h"><h2>1 · Barber</h2></div><div class="chips"><button class="chip ${k.staffId === 'any' ? 'on' : ''}" data-bstaff="any">Any available</button>${team.map(b => `<button class="chip ${k.staffId === b.id ? 'on' : ''}" data-bstaff="${b.id}">${esc(b.name)}</button>`).join('')}</div>
@@ -256,12 +256,13 @@ function vBook() {
   ${(S.user?.styles || []).length ? `<div class="sm mute" style="margin-top:14px">Add a saved style to your notes</div><div class="chips">${S.user.styles.map(cutById).filter(Boolean).map(c => `<button class="chip" data-snote="${c.id}">${esc(c.name)}</button>`).join('')}</div>` : ''}
   <label class="f">Notes for your barber (optional)<textarea id="bnotes" rows="2" maxlength="300" placeholder="Reference cut, allergies, anything we should know">${esc(k.notes)}</textarea></label>
   ${repeatCard(k)}
+  ${promoCard(k)}
   ${k.err ? `<div class="err">${esc(k.err)}</div>` : ''}
-  <div class="foot"><div><div class="sp"><div class="sm mute">${k.pkg ? 'Package · pay at the shop' : 'Total · pay at the shop'}</div><b class="num" style="font-size:22px">${peso(k.pkg ? k.pkg.price : total)}</b></div><button class="btn" data-confirm style="min-width:160px" ${k.items.length && k.time && !k.busy ? '' : 'disabled'}>${k.busy ? 'Booking…' : 'Confirm booking'}</button></div></div>`;
+  <div class="foot"><div><div class="sp"><div class="sm mute">${k.pkg ? 'Package · pay at the shop' : 'Total · pay at the shop'}</div>${k.promo ? `<span class="sm mute" style="text-decoration:line-through">${peso(k.pkg ? k.pkg.price : total)}</span> ` : ''}<b class="num" style="font-size:22px">${peso(Math.max(0, (k.pkg ? k.pkg.price : total) - (k.promo ? k.promo.amt : 0)))}</b></div><button class="btn" data-confirm style="min-width:160px" ${k.items.length && k.time && !k.busy ? '' : 'disabled'}>${k.busy ? 'Booking…' : 'Confirm booking'}</button></div></div>`;
 }
 async function confirmBooking() {
   const k = S.bk; k.busy = true; k.err = ''; render();
-  try { const j = await api('/book', { method: 'POST', body: { branchId: k.branchId, staffId: k.staffId, itemIds: k.items, date: k.date, time: k.time, notes: (k.pkg ? `Package: ${k.pkg.name} (${peso(k.pkg.price)}). ` : '') + k.notes, repeatEvery: k.repEvery || undefined, repeatCount: k.repEvery ? (k.repCount || 4) : undefined } }); k.done = j.booking; k.series = j.series || []; S.mine = null; S.styleNote = ''; }
+  try { const j = await api('/book', { method: 'POST', body: { branchId: k.branchId, staffId: k.staffId, itemIds: k.items, date: k.date, time: k.time, notes: (k.pkg ? `Package: ${k.pkg.name} (${peso(k.pkg.price)}). ` : '') + k.notes, promo: k.promo ? k.promo.code : undefined, repeatEvery: k.repEvery || undefined, repeatCount: k.repEvery ? (k.repCount || 4) : undefined } }); k.done = j.booking; k.series = j.series || []; S.mine = null; S.styleNote = ''; }
   catch (e) { k.err = e.message; if (/no longer available/i.test(e.message)) loadSlots(); }
   k.busy = false; render();
 }
@@ -400,14 +401,43 @@ const logoText = () => S.shop && !/^brotherhood$/i.test(S.shop) ? esc(S.shop) : 
 // ----- booking rules and no-show watch (owner), blocked time (barber), repeat bookings (member) -----
 const seriesHtml = k => (k.series || []).length ? `<div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.12);padding-top:8px" class="sm"><b>Repeat bookings</b>${k.series.map(x => `<div>${x.ok ? '✓' : '✕'} ${fmtDate(x.date)} at ${t12(x.time)}${x.ok ? '' : ` <span style="opacity:.8">· ${esc(x.reason)}</span>`}</div>`).join('')}</div>` : '';
 const repeatCard = k => `<div class="card" style="margin-top:12px"><div class="row" style="gap:10px"><label class="f sp" style="margin:0">Repeat<select id="brep"><option value="0">One time</option>${[1, 2, 3, 4, 6].map(n => `<option value="${n}" ${k.repEvery === n ? 'selected' : ''}>Every ${n === 1 ? 'week' : n + ' weeks'}</option>`).join('')}</select></label>${k.repEvery ? `<label class="f" style="margin:0;width:110px">Cuts<select id="brepn">${[2, 3, 4, 5, 6].map(n => `<option value="${n}" ${(k.repCount || 4) === n ? 'selected' : ''}>${n} in total</option>`).join('')}</select></label>` : ''}</div>${k.repEvery ? '<div class="sm mute" style="margin-top:6px">Same barber and time each time. Weeks that are taken are skipped and you will see which ones. Bookings can be up to 60 days ahead.</div>' : ''}</div>`;
-async function loadRules() { try { [S.rules, S.nsw] = await Promise.all([api('/pro/rules', {}, S.proToken), api('/pro/noshows', {}, S.proToken)]); } catch (e) { toast(e.message); } }
+async function loadRules() { try { [S.rules, S.nsw, S.promos] = await Promise.all([api('/pro/rules', {}, S.proToken), api('/pro/noshows', {}, S.proToken), api('/pro/promos', {}, S.proToken)]); } catch (e) { toast(e.message); } }
 const rulesSection = () => {
   const r = S.rules, n = S.nsw; if (!r || !n) return '';
   return `<div class="sec-h"><h2>Booking rules</h2></div><div class="card"><label class="f" style="margin-top:0">Pause online booking after missed appointments<select id="rnoshow">${[0, 1, 2, 3, 4, 5].map(v => `<option value="${v}" ${r.noshowMax === v ? 'selected' : ''}>${v ? v + ' missed in 90 days' : 'Off'}</option>`).join('')}</select></label>
     <label class="f">Buffer between cuts<select id="rbuffer">${[0, 5, 10, 15, 20, 30].map(v => `<option value="${v}" ${r.bufferMins === v ? 'selected' : ''}>${v ? v + ' minutes' : 'No buffer'}</option>`).join('')}</select></label>
     <div class="sm mute" style="margin-top:10px">Email reminders: ${r.emailReady ? '<b style="color:var(--ok)">connected</b>. Customers get a reminder about a day before, and members get a review request after their cut.' : '<b>not connected</b>. Add RESEND_API_KEY in the hosting variables to turn on reminders and review requests.'}</div></div>
-  <div class="sec-h"><h2>No-show watch</h2><span class="mute sm">last 90 days</span></div><div class="list">${n.rows.map(x => `<div class="card row"><div class="sp"><div class="nm">${esc(x.name)}${x.blocked ? '<span class="tag bad">Paused</span>' : x.allowed ? '<span class="tag ok">Allowed</span>' : ''}</div><div class="sm mute">${x.count} missed · last ${fmtDate(x.last)}${x.phone ? ' · ' + esc(x.phone) : ''}</div></div>${x.customerId && (x.blocked || x.allowed) ? `<button class="btn ${x.blocked ? 'white' : 'sec'} sm" data-nsallow="${x.customerId}" data-allow="${x.blocked ? 1 : 0}">${x.blocked ? 'Allow booking' : 'Restrict'}</button>` : ''}</div>`).join('') || '<div class="card empty sm">No missed appointments in the last 90 days.</div>'}</div>`;
+  <div class="sec-h"><h2>No-show watch</h2><span class="mute sm">last 90 days</span></div><div class="list">${n.rows.map(x => `<div class="card row"><div class="sp"><div class="nm">${esc(x.name)}${x.blocked ? '<span class="tag bad">Paused</span>' : x.allowed ? '<span class="tag ok">Allowed</span>' : ''}</div><div class="sm mute">${x.count} missed · last ${fmtDate(x.last)}${x.phone ? ' · ' + esc(x.phone) : ''}</div></div>${x.customerId && (x.blocked || x.allowed) ? `<button class="btn ${x.blocked ? 'white' : 'sec'} sm" data-nsallow="${x.customerId}" data-allow="${x.blocked ? 1 : 0}">${x.blocked ? 'Allow booking' : 'Restrict'}</button>` : ''}</div>`).join('') || '<div class="card empty sm">No missed appointments in the last 90 days.</div>'}</div>` + promosSection();
 };
+
+// ----- promo codes: owner creates them (Insights); customers type one on the booking page -----
+const promosSection = () => {
+  const ps = (S.promos && S.promos.promos) || [];
+  return `<div class="sec-h"><h2>Promo codes</h2><button class="btn white sm" data-promoadd>New code</button></div><div class="list">${ps.map(p => `<div class="card"><div class="row"><div class="sp"><div class="nm"><b style="letter-spacing:1px">${esc(p.code)}</b> ${p.expired ? '<span class="tag bad">Expired</span>' : p.active ? '<span class="tag ok">Active</span>' : '<span class="tag">Paused</span>'}</div><div class="sm mute">${esc(p.label)}${p.expires ? ' · until ' + fmtDate(p.expires) : ''}${p.note ? ' · ' + esc(p.note) : ''}</div><div class="sm mute">${p.uses} used${p.maxUses ? ' of ' + p.maxUses : ''} · ${peso(p.saved)} given as discount</div></div></div>
+    <div class="row" style="gap:8px;margin-top:8px"><button class="btn sec sm sp" data-promotoggle="${p.id}" data-on="${p.active ? 0 : 1}">${p.active ? 'Pause' : 'Turn on'}</button><button class="btn danger sm sp" data-promodel="${p.id}">Delete</button></div></div>`).join('') || '<div class="card empty sm">No promo codes yet. Make one (like WELCOME20) and share it on Facebook or Instagram. When a customer books with it, the discount is applied to their ticket automatically at the cashier.</div>'}</div>`;
+};
+function openPromo() {
+  const o = sheet(`<h3>New promo code</h3><label class="f" style="margin-top:0">Code<input id="pcode" maxlength="20" placeholder="e.g. WELCOME20" autocapitalize="characters" style="text-transform:uppercase"></label>
+    <div class="row" style="gap:10px"><label class="f sp" style="margin:0">Discount type<select id="pkind"><option value="percent">Percent off (%)</option><option value="amount">Peso off (₱)</option></select></label><label class="f" style="margin:0;width:110px">Value<input id="pvalue" type="number" min="1" step="1" value="20" inputmode="numeric"></label></div>
+    <label class="row" style="gap:10px;margin:12px 0;cursor:pointer"><input type="checkbox" id="pfirst" style="width:20px;height:20px"><b>First-time customers only</b></label>
+    <div class="row" style="gap:10px"><label class="f sp" style="margin:0">Total uses (0 = unlimited)<input id="pmax" type="number" min="0" step="1" value="0" inputmode="numeric"></label><label class="f sp" style="margin:0">Ends on (optional)<input id="pexp" type="date" min="${ymd(new Date())}"></label></div>
+    <label class="f">Note (only you see this)<input id="pnote" maxlength="120" placeholder="e.g. Facebook launch"></label>
+    <div id="perr"></div><div class="row" style="margin-top:14px"><button class="btn ghost sp" data-x>Cancel</button><button class="btn sp" id="psavebtn">Create code</button></div>`);
+  o.querySelector('#psavebtn').onclick = async ev => {
+    const btn = ev.currentTarget; btn.disabled = true;
+    try {
+      await api('/pro/promos', { method: 'POST', body: { code: o.querySelector('#pcode').value, kind: o.querySelector('#pkind').value, value: o.querySelector('#pvalue').value, firstVisit: o.querySelector('#pfirst').checked, maxUses: o.querySelector('#pmax').value, expires: o.querySelector('#pexp').value, note: o.querySelector('#pnote').value } }, S.proToken);
+      o.remove(); toast('Promo code created'); await loadRules(); render();
+    } catch (x) { o.querySelector('#perr').innerHTML = `<div class="err">${esc(x.message)}</div>`; btn.disabled = false; }
+  };
+}
+const promoCard = k => `<div class="card" style="margin-top:12px"><div class="row" style="gap:8px;align-items:end"><label class="f sp" style="margin:0">Promo code (optional)<input id="bpromo" maxlength="20" autocapitalize="characters" autocomplete="off" placeholder="Enter code" value="${esc(k.promoCode || '')}" style="text-transform:uppercase"></label><button class="btn sec sm" data-promoapply ${k.items.length ? '' : 'disabled'}>Apply</button></div>${k.promo ? `<div class="sm" style="margin-top:8px;color:var(--ok)">✓ <b>${esc(k.promo.code)}</b> · ${esc(k.promo.label)}. You save ${peso(k.promo.amt)}. Applied at the cashier when you arrive.</div>` : k.promoErr ? `<div class="sm" style="margin-top:8px;color:#ff8a8a">${esc(k.promoErr)}</div>` : !k.items.length ? '<div class="sm mute" style="margin-top:8px">Pick a service first, then apply your code.</div>' : ''}</div>`;
+async function applyPromo() {
+  const k = S.bk; k.promoCode = (document.getElementById('bpromo')?.value || '').trim(); k.promo = null; k.promoErr = '';
+  if (!k.promoCode) { k.promoErr = 'Enter a promo code'; return render(); }
+  try { k.promo = await api(`/promo/check?code=${encodeURIComponent(k.promoCode)}&items=${k.items.join(',')}`); } catch (e) { k.promoErr = e.message; }
+  render();
+}
 async function loadBlocks() { try { S.blocks = (await api('/pro/blocks?staffId=' + S.proSel, {}, S.proToken)).blocks; } catch { S.blocks = []; } }
 const blocksSection = () => `<div class="sec-h"><h2>Time off & blocks</h2><button class="btn white sm" data-blockadd>Block time</button></div><div class="list">${(S.blocks || []).map(b => `<div class="card row"><div class="sp"><b>${fmtDate(b.date)}</b><div class="sm mute">${b.allDay ? 'Whole day' : t12(b.from) + ' to ' + t12(b.to)}${b.reason ? ' · ' + esc(b.reason) : ''}</div></div><button class="btn danger sm" data-blockdel="${b.id}">Remove</button></div>`).join('') || '<div class="card empty sm">No blocked time. Block a break, training or a day off so nobody can book it.</div>'}</div>`;
 function openBlock() {
@@ -820,6 +850,7 @@ let qTimer;
 app.addEventListener('input', e => {
   if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(refreshResults, 250); }
   if (e.target.id === 'bnotes' && S.bk) S.bk.notes = e.target.value;
+  if (e.target.id === 'bpromo' && S.bk) S.bk.promoCode = e.target.value;
   if (e.target.id === 'cq') { S.cq = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(async () => { await loadFeed(); render(); }, 300); }
 });
 app.addEventListener('change', async e => {
@@ -868,7 +899,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-nsallow],[data-blockadd],[data-blockdel],[data-idays],[data-ldays],[data-client],[data-copylink],[data-sharelink],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-nsallow],[data-promoadd],[data-promotoggle],[data-promodel],[data-promoapply],[data-blockadd],[data-blockdel],[data-idays],[data-ldays],[data-client],[data-copylink],[data-sharelink],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -904,7 +935,7 @@ app.addEventListener('click', async e => {
   }
   if (D.book) { const b = S.cur?.barber; startBooking(b.branchId, b.id); if (!S.token) nav('/auth'); return; }
   if (D.bstaff) { S.bk.staffId = D.bstaff; return loadSlots(); }
-  if (D.bsvc) { const k = S.bk; k.items = k.items.includes(D.bsvc) ? k.items.filter(x => x !== D.bsvc) : [...k.items, D.bsvc]; return loadSlots(); }
+  if (D.bsvc) { const k = S.bk; k.promo = null; k.promoErr = ''; k.items = k.items.includes(D.bsvc) ? k.items.filter(x => x !== D.bsvc) : [...k.items, D.bsvc]; return loadSlots(); }
   if (D.bday) { S.bk.date = D.bday; return loadSlots(); }
   if (D.btime) { S.bk.time = D.btime; return render(); }
   if (D.confirm != null) return confirmBooking();
@@ -1007,6 +1038,10 @@ app.addEventListener('click', async e => {
   }
   if (D.sharelink) { try { await navigator.share({ title: D.sname + ' · Book a cut', url: D.sharelink }); } catch { } return; }
   if (D.nsallow) { try { await api('/pro/noshow-allow', { method: 'POST', body: { customerId: D.nsallow, allow: D.allow === '1' } }, S.proToken); toast(D.allow === '1' ? 'Customer can book online again' : 'Customer restricted'); await loadRules(); } catch (x) { toast(x.message); } return render(); }
+  if (D.promoadd != null) return openPromo();
+  if (D.promoapply != null) return applyPromo();
+  if (D.promotoggle) { try { await api('/pro/promos/' + D.promotoggle, { method: 'PUT', body: { active: D.on === '1' } }, S.proToken); toast(D.on === '1' ? 'Promo is on' : 'Promo paused'); await loadRules(); } catch (x) { toast(x.message); } return render(); }
+  if (D.promodel) { if (!confirm('Delete this promo code? This cannot be undone.')) return; try { await api('/pro/promos/' + D.promodel, { method: 'DELETE' }, S.proToken); toast('Deleted'); await loadRules(); } catch (x) { toast(x.message); } return render(); }
   if (D.blockadd != null) return openBlock();
   if (D.blockdel) { if (!confirm('Remove this blocked time?')) return; try { await api('/pro/blocks/' + D.blockdel, { method: 'DELETE' }, S.proToken); await loadBlocks(); toast('Removed'); } catch (x) { toast(x.message); } return render(); }
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
