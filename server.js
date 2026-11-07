@@ -341,6 +341,8 @@ const nextTier = v => { const n = [...TIERS].reverse().find(([min]) => min > v);
 const getSetting = k => one('select v from settings where k=?', k)?.v;
 const setSetting = (k, v) => run('insert into settings(k,v) values(?,?) on conflict(k) do update set v=excluded.v', k, v);
 // one-time: online booking is for Vip Compadre only (Buddy and Amigo are walk-in). The owner can change it later under Services & Products ("Show on online booking").
+// one-time: JB joins the Calauan shop with his photo; the owner sets his chair, commission and allowance in Management → Barbers / Staff
+if (!getSetting('migJB')) { const cb = one("select id, defaultPct from branches where lower(name)='calauan'"); if (cb) { if (!one("select 1 x from staff where lower(name)='jb' and branchId=?", cb.id)) insert('staff', { name: 'JB', branchId: cb.id, chairId: '', pct: cb.defaultPct || 40, allowance: 0, photo: '/site/jb.jpg', active: 1 }); setSetting('migJB', '1'); } }
 if (!getSetting('migOnlineVip')) { run("update items set bookable=0 where name in ('Buddy','Amigo') and type='service'"); run("update items set bookable=1 where name='Vip Compadre'"); setSetting('migOnlineVip', '1'); }
 const DEFAULT_TERMS = `TERMS & CONDITIONS AND CONSENT: BROTHERHOOD BARBER
 
