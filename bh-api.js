@@ -14,6 +14,7 @@ create index if not exists bh_port_staff on bh_portfolio(staffId, createdAt);
 create table if not exists bh_favorites(userId text, staffId text, createdAt text, primary key(userId, staffId));
 create table if not exists bh_certs(id text primary key, staffId text, title text, org text, date text, imageUrl text, verified integer default 0, createdAt text);
 create index if not exists bh_certs_staff on bh_certs(staffId);
+create table if not exists bh_saves(userId text, postId text, createdAt text, primary key(userId, postId));
 create table if not exists bh_posts(id text primary key, userId text, staffId text, text text, imageUrl text, createdAt text, hidden integer default 0);
 create index if not exists bh_posts_time on bh_posts(createdAt);
 create table if not exists bh_likes(postId text, userId text, primary key(postId, userId));
@@ -29,7 +30,7 @@ create table if not exists bh_notifs(id text primary key, userId text, kind text
 create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
 create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
-  addCol('bh_portfolio', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
+  addCol('bh_portfolio', 'style', 'text'); addCol('bh_posts', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
 
   // ---------- helpers ----------
@@ -157,7 +158,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       run("update bookings set userId='' where userId=?", u.id); run("update reviews set userId='' where userId=?", u.id);
       run('delete from bh_favorites where userId=?', u.id);
       run('delete from bh_notifs where userId=?', u.id); run('delete from bh_waitlist where userId=?', u.id);
-      for (const t of ['bh_likes', 'bh_comments', 'bh_follows', 'bh_blocks', 'bh_reports']) run(`delete from ${t} where userId=?`, u.id);
+      for (const t of ['bh_likes', 'bh_comments', 'bh_follows', 'bh_blocks', 'bh_reports', 'bh_saves']) run(`delete from ${t} where userId=?`, u.id);
       run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
       run('delete from bh_comments where postId in (select id from bh_posts where userId=?)', u.id);
       for (const r of all('select imageUrl from bh_posts where userId=?', u.id)) { const im = /\/img\/(\w+)/.exec(r.imageUrl || ''); if (im) run('delete from images where id=?', im[1]); }
@@ -294,16 +295,39 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     // ----- community -----
     const blockedOf = id => id ? new Set([...all('select blockedId x from bh_blocks where userId=?', id), ...all('select userId x from bh_blocks where blockedId=?', id)].map(r => r.x)) : new Set();
     const nameMap = () => new Map(all('select id,name from bh_users').map(u => [u.id, short(u.name)]));
-    const postView = (r, me, names) => ({ id: r.id, text: r.text, image: r.imageUrl || '', createdAt: r.createdAt, userId: r.userId, author: names.get(r.userId) || 'Member', mine: !!me && me.id === r.userId,
+    const postView = (r, me, names) => ({ id: r.id, text: r.text, image: r.imageUrl || '', style: r.style || '', createdAt: r.createdAt, userId: r.userId, author: names.get(r.userId) || 'Member', mine: !!me && me.id === r.userId,
       staffId: r.staffId || '', staffName: r.staffId ? get('staff', r.staffId)?.name || '' : '', likes: one('select count(*) n from bh_likes where postId=?', r.id).n, comments: one('select count(*) n from bh_comments where postId=? and hidden=0', r.id).n,
-      liked: !!me && !!one('select 1 x from bh_likes where postId=? and userId=?', r.id, me.id), following: !!me && !!one('select 1 x from bh_follows where userId=? and targetId=?', me.id, r.userId) });
+      liked: !!me && !!one('select 1 x from bh_likes where postId=? and userId=?', r.id, me.id), saved: !!me && !!one('select 1 x from bh_saves where userId=? and postId=?', me.id, r.id),
+      following: !!me && !!one('select 1 x from bh_follows where userId=? and targetId=?', me.id, r.userId) });
     const spammy = t => (String(t).match(/https?:\/\//gi) || []).length > 2;
+    // discovery grid: barbers' portfolio cuts plus members' photo posts, filterable by style
+    if (sub === '/cuts' && method === 'GET') {
+      const me = userOf(req), blocked = blockedOf(me?.id), style = clip(q.style, 30), names = nameMap(), sm = new Map(all('select id,name,branchId,active from staff').map(x => [x.id, x]));
+      const cuts = all('select id,staffId,url,caption,style,createdAt from bh_portfolio order by createdAt desc limit 120').filter(p => sm.get(p.staffId)?.active).map(p => ({ kind: 'cut', id: p.id, image: p.url, title: p.caption || p.style || 'Fresh cut', style: p.style || '', barberId: p.staffId, barberName: sm.get(p.staffId).name, branchId: sm.get(p.staffId).branchId, createdAt: p.createdAt }));
+      const posts = all("select id,userId,staffId,text,imageUrl,style,createdAt from bh_posts where hidden=0 and imageUrl<>'' order by createdAt desc limit 120").filter(p => !blocked.has(p.userId)).map(p => ({ kind: 'post', id: p.id, image: p.imageUrl, title: String(p.text || '').slice(0, 40) || p.style || 'Photo', style: p.style || '', barberId: p.staffId || '', barberName: p.staffId ? sm.get(p.staffId)?.name || '' : '', branchId: p.staffId ? sm.get(p.staffId)?.branchId || '' : '', author: names.get(p.userId) || 'Member', createdAt: p.createdAt }));
+      let items = [...cuts, ...posts].sort((x, y) => y.createdAt.localeCompare(x.createdAt)); const styles = [...new Set(items.map(i => i.style).filter(Boolean))].sort();
+      if (style) items = items.filter(i => i.style === style);
+      return send(res, 200, { items: items.slice(0, 90), styles });
+    }
     if (sub === '/feed' && method === 'GET') {
-      const me = userOf(req), blocked = blockedOf(me?.id), names = nameMap(), before = clip(q.before, 40) || '9999';
-      let rows = all('select * from bh_posts where hidden=0 and createdAt<? order by createdAt desc limit 200', before);
-      if (q.scope === 'following' && me) { const f = new Set(all('select targetId x from bh_follows where userId=?', me.id).map(r => r.x)); const fb = new Set(all('select staffId x from bh_favorites where userId=?', me.id).map(r => r.x)); rows = rows.filter(r => f.has(r.userId) || r.userId === me.id || (r.staffId && fb.has(r.staffId))); }
-      rows = rows.filter(r => !blocked.has(r.userId)).slice(0, 20);
-      return send(res, 200, { posts: rows.map(r => postView(r, me, names)), more: rows.length === 20 });
+      const me = userOf(req), blocked = blockedOf(me?.id), names = nameMap(), before = clip(q.before, 40) || '9999', style = clip(q.style, 30), term = clip(q.q, 60).toLowerCase(), scope = String(q.scope || 'all');
+      let rows = all('select * from bh_posts where hidden=0 and createdAt<? order by createdAt desc limit 300', before);
+      if (scope !== 'all' && !me) bad(401, 'Please log in');
+      if (scope === 'following') { const f = new Set(all('select targetId x from bh_follows where userId=?', me.id).map(r => r.x)), fb = new Set(all('select staffId x from bh_favorites where userId=?', me.id).map(r => r.x)); rows = rows.filter(r => f.has(r.userId) || r.userId === me.id || (r.staffId && fb.has(r.staffId))); }
+      else if (scope === 'mine') rows = rows.filter(r => r.userId === me.id);
+      else if (scope === 'saved') { const sv = new Set(all('select postId x from bh_saves where userId=?', me.id).map(r => r.x)); rows = rows.filter(r => sv.has(r.id)); }
+      if (style) rows = rows.filter(r => r.style === style);
+      if (term) rows = rows.filter(r => [r.text, r.style, names.get(r.userId), r.staffId ? get('staff', r.staffId)?.name : ''].join(' ').toLowerCase().includes(term));
+      if (scope !== 'mine') rows = rows.filter(r => !blocked.has(r.userId));
+      rows = rows.slice(0, 20);
+      const out = { posts: rows.map(r => postView(r, me, names)), more: rows.length === 20 };
+      if (scope === 'mine') { const mine = all('select id from bh_posts where userId=? and hidden=0', me.id); out.stats = { posts: mine.length, likes: mine.reduce((n, p) => n + one('select count(*) n from bh_likes where postId=?', p.id).n, 0), following: one('select count(*) n from bh_favorites where userId=?', me.id).n }; }
+      if (q.spot === '1') {   // barber of the week: most completed cuts since Monday
+        const mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+        const top = all("select barberId, count(*) n from orders where status='paid' and date>=? and barberId<>'' group by barberId order by n desc", dOf(mon)).find(x => get('staff', x.barberId)?.active), sp = top ? get('staff', top.barberId) : null;
+        out.spotlight = sp ? { id: sp.id, name: sp.name, photo: sp.photo || '', branchName: get('branches', sp.branchId)?.name || '', cuts: top.n } : null;
+      }
+      return send(res, 200, out);
     }
     if (sub === '/posts' && method === 'POST') {
       const u = needUser(req); if (tooMany(ip, 'po', 10, 3600e3)) bad(429, 'You are posting too fast. Please try again later.');
@@ -315,16 +339,20 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const iid = uid() + uid(); run('insert into images(id,mime,data,createdAt) values(?,?,?,?)', iid, m[1], buf, nowISO()); image = '/img/' + iid;
       }
       const staffId = b.staffId && get('staff', String(b.staffId)) ? String(b.staffId) : '', id = uid();
-      run('insert into bh_posts(id,userId,staffId,text,imageUrl,createdAt,hidden) values(?,?,?,?,?,?,0)', id, u.id, staffId, text, image, nowISO()); hit(ip, 'po');
+      run('insert into bh_posts(id,userId,staffId,text,imageUrl,style,createdAt,hidden) values(?,?,?,?,?,?,?,0)', id, u.id, staffId, text, image, clip(b.style, 30), nowISO()); hit(ip, 'po');
       return send(res, 201, { post: postView(get('bh_posts', id), u, nameMap()) });
     }
-    const pm0 = sub.match(/^\/posts\/(\w+)(?:\/(like|comments))?$/);
+    const pm0 = sub.match(/^\/posts\/(\w+)(?:\/(like|comments|save))?$/);
     if (pm0) {
       const post = get('bh_posts', pm0[1]); if (!post || post.hidden) bad(404, 'Post not found');
       if (!pm0[2] && method === 'DELETE') {
         const u = needUser(req); if (post.userId !== u.id) bad(403, 'You can only delete your own posts');
         const im = /\/img\/(\w+)/.exec(post.imageUrl || ''); if (im) run('delete from images where id=?', im[1]);
-        run('delete from bh_likes where postId=?', post.id); run('delete from bh_comments where postId=?', post.id); run('delete from bh_posts where id=?', post.id); return send(res, 200, { ok: true });
+        run('delete from bh_likes where postId=?', post.id); run('delete from bh_comments where postId=?', post.id); run('delete from bh_saves where postId=?', post.id); run('delete from bh_posts where id=?', post.id); return send(res, 200, { ok: true });
+      }
+      if (pm0[2] === 'save' && (method === 'PUT' || method === 'DELETE')) {
+        const u = needUser(req); if (method === 'PUT') run('insert or ignore into bh_saves(userId,postId,createdAt) values(?,?,?)', u.id, post.id, nowISO()); else run('delete from bh_saves where userId=? and postId=?', u.id, post.id);
+        return send(res, 200, { saved: method === 'PUT' });
       }
       if (pm0[2] === 'like' && (method === 'PUT' || method === 'DELETE')) {
         const u = needUser(req); if (method === 'PUT') { const had = one('select 1 x from bh_likes where postId=? and userId=?', post.id, u.id); run('insert or ignore into bh_likes(postId,userId) values(?,?)', post.id, u.id); if (!had && post.userId !== u.id) notify(post.userId, 'like', `${short(u.name)} liked your post`, '#/community', 'like-' + post.id + '-' + u.id); } else run('delete from bh_likes where postId=? and userId=?', post.id, u.id);

@@ -15,14 +15,14 @@ const ICON = {
   ver: '<path d="M12 2 9.5 4.5 6 4.6 5.4 8 3 10.5 4.6 13.5 4 17l3.3 1.1L9.5 21l2.5-1.4 2.5 1.4 2.2-2.9L20 17l-.6-3.5L21 10.5 18.6 8 18 4.6l-3.5-.1z"/><path d="m8.5 12 2.5 2.5 4.5-5" stroke="#fff"/>',
   scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', plus: '<path d="M12 5v14M5 12h14"/>', bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 21a2 2 0 0 0 4 0"/>', chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>', team: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2.5.6 4 2.2 4 5.2"/>'
 };
-Object.assign(ICON, { grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>' });
+Object.assign(ICON, { bookmark: '<path d="M6 3h12v18l-6-4-6 4z"/>', grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>' });
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
 const stars = n => '<span class="star">' + '★'.repeat(Math.round(n)) + '</span><span style="color:var(--line)">' + '★'.repeat(5 - Math.round(n)) + '</span>';
 const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url)}" alt="${esc(name)}" loading="lazy">` : `<span class="${cls}">${esc(initials(name))}</span>`;
 const rate = (a, n) => n ? `<span class="star">★</span> ${a.toFixed(1)} <span class="mute">(${n})</span>` : '<span class="mute sm">New</span>';
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { } } };
 
-const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', proPin: false, unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashRange: 'week', toastMsg: '' };
+const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', ctab: 'feed', cstyle: '', cq: '', spot: null, cuts: null, proPin: false, unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashRange: 'week', toastMsg: '' };
 
 async function api(path, opt = {}, token = S.token) {
   const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
@@ -77,7 +77,7 @@ const fmtMonth = d => { if (!d) return ''; if (/^\d{4}$/.test(d)) return d; cons
 const certThumb = c => c.image ? `<img src="${esc(c.image)}" alt="Certificate: ${esc(c.title)}" data-lb="${esc(c.image)}" loading="lazy" style="width:64px;height:64px;border-radius:10px;object-fit:cover;cursor:zoom-in;flex:none">` : `<span class="av" style="width:64px;height:64px;border-radius:10px">${ic('star')}</span>`;
 const certRow = c => `<div class="card row">${certThumb(c)}<div class="sp"><div class="nm">${esc(c.title)}${c.verified ? '<span class="tag ok">Verified</span>' : ''}</div><div class="sm mute">${esc([c.org, fmtMonth(c.date)].filter(Boolean).join(' · ') || 'Seminar')}</div></div></div>`;
 const certEditor = sel => `<div class="sec-h"><h2>Seminars & certificates</h2><span class="mute sm">${sel.certs.length}</span></div>
-  <div class="list">${sel.certs.map(c => `<div class="card row">${certThumb(c)}<div class="sp"><div class="nm">${esc(c.title)}${c.verified ? '<span class="tag ok">Verified</span>' : ''}</div><div class="sm mute">${esc([c.org, fmtMonth(c.date)].filter(Boolean).join(' · ') || 'Seminar')}</div></div><div style="display:grid;gap:4px">${S.pro.admin ? `<button class="btn sec sm" data-cverify="${c.id}" data-on="${c.verified ? 1 : 0}">${c.verified ? 'Unverify' : 'Verify'}</button>` : ''}<button class="btn danger sm" data-cdel="${c.id}">Remove</button></div></div>`).join('') || '<div class="card empty">Add the seminars you attended. Customers trust barbers who keep learning.</div>'}</div>
+  <div class="list">${sel.certs.map(c => `<div class="card row">${certThumb(c)}<div class="sp"><div class="nm">${esc(c.title)}${c.verified ? '<span class="tag ok">Verified</span>' : ''}</div><div class="sm mute">${esc([c.org, fmtMonth(c.date)].filter(Boolean).join(' · ') || 'Seminar')}</div></div><div style="display:grid;gap:4px">${S.pro.admin ? `<button class="btn sec sm" data-cverify="${c.id}" data-on="${c.verified ? 1 : 0}">${c.verified ? 'Unverify' : 'Verify'}</button>` : ''}<button class="btn danger sm" data-certdel="${c.id}">Remove</button></div></div>`).join('') || '<div class="card empty">Add the seminars you attended. Customers trust barbers who keep learning.</div>'}</div>
   <form id="certf" class="card" style="margin-top:10px"><label class="f" style="margin-top:0">Seminar or certificate name<input name="title" maxlength="100" required placeholder="e.g. Fade Masterclass"></label><label class="f">Organizer (optional)<input name="org" maxlength="80" placeholder="e.g. Viro Bodyworks"></label>
   <label class="f">Month attended (optional)<input name="date" type="month"></label><label class="f">Photo of the certificate (optional)<input name="file" type="file" accept="image/*"></label>${S.certErr ? `<div class="err">${esc(S.certErr)}</div>` : ''}<button class="btn block" style="margin-top:12px" ${S.certBusy ? 'disabled' : ''}>${S.certBusy ? 'Adding…' : 'Add seminar'}</button><p class="mute sm" style="margin:8px 0 0">The owner can mark real certificates as Verified.</p></form>`;
 async function vBarber(id) {
@@ -405,26 +405,109 @@ setInterval(async () => { if (S.token && !document.hidden) { try { const j = awa
 
 // ----- community -----
 const ago = iso => { const m = Math.max(0, (Date.now() - new Date(iso)) / 60000); return m < 1 ? 'just now' : m < 60 ? Math.floor(m) + 'm' : m < 1440 ? Math.floor(m / 60) + 'h' : Math.floor(m / 1440) + 'd'; };
-async function loadFeed() { try { S.feed = await api('/feed?scope=' + S.feedScope); } catch { S.feed = { posts: [], more: false }; } }
+const QUICK = ['✂️', '💈', '🔥', '💯', '👏', '🙌', '❤️'];
+async function loadFeed() {
+  const tab = S.ctab || 'feed', scope = tab === 'saved' ? 'saved' : tab === 'me' ? 'mine' : S.feedScope;
+  if (scope !== 'all' && !S.token) { S.feed = { posts: [], more: false, needLogin: true }; return; }
+  const qs = new URLSearchParams({ scope, style: tab === 'feed' ? S.cstyle : '', q: S.cq || '', spot: tab === 'feed' ? '1' : '' });
+  try { S.feed = await api('/feed?' + qs); if (tab === 'feed') S.spot = S.feed.spotlight || null; } catch { S.feed = { posts: [], more: false }; }
+}
+async function loadCuts() { try { S.cuts = await api('/cuts?style=' + encodeURIComponent(S.cstyle || '')); } catch { S.cuts = { items: [], styles: [] }; } }
+async function loadCommunity() { if ((S.ctab || 'feed') === 'cuts') await loadCuts(); else await loadFeed(); render(); }
 function postCard(p) {
-  const c = S.open[p.id];
-  return `<div class="card pop"><div class="row"><span class="av" style="width:40px;height:40px;font-size:14px">${esc(initials(p.author))}</span><div class="sp"><b>${esc(p.author)}</b><div class="sm mute">${ago(p.createdAt)}${p.staffName ? ` · cut by <a href="#/barber/${p.staffId}" style="color:var(--blue)">${esc(p.staffName)}</a>` : ''}</div></div>
-    ${!p.mine && S.user ? `<button class="btn sec sm" data-pfollow="${p.userId}" data-on="${p.following ? 1 : 0}">${p.following ? 'Following' : 'Follow'}</button>` : ''}</div>
-    ${p.text ? `<p style="margin:10px 0 0;white-space:pre-wrap;word-break:break-word">${esc(p.text)}</p>` : ''}${p.image ? `<img src="${esc(p.image)}" alt="Post photo" data-lb="${esc(p.image)}" loading="lazy" style="width:100%;border-radius:12px;margin-top:10px;max-height:480px;object-fit:cover;cursor:zoom-in">` : ''}
-    <div class="row" style="margin-top:10px"><button class="btn sec sm heart ${p.liked ? 'on' : ''}" data-plike="${p.id}">${ic('heart')} ${p.likes}</button><button class="btn sec sm" data-pcomm="${p.id}">${ic('chat')} ${p.comments}</button><span class="sp"></span>
+  return `<article class="card pop post"><div class="row"><span class="av" style="width:40px;height:40px;font-size:14px">${esc(initials(p.author))}</span><div class="sp"><b>${esc(p.author)}</b><div class="sm mute">${ago(p.createdAt)}${p.staffName ? ` · cut by <a href="#/barber/${p.staffId}" style="color:var(--text);text-decoration:underline">${esc(p.staffName)}</a>` : ''}</div></div>
+    ${!p.mine && S.user ? `<button class="btn sec sm" data-pfollow="${p.userId}" data-on="${p.following ? 1 : 0}">${p.following ? 'Following' : 'Follow'}</button>` : ''}
     <details style="position:relative"><summary class="btn sec sm" style="list-style:none">•••</summary><div class="card" style="position:absolute;right:0;z-index:4;width:170px;padding:6px;display:grid;gap:4px">${p.mine ? `<button class="btn ghost sm" data-pdel="${p.id}" data-ptype="post">Delete post</button>` : `<button class="btn ghost sm" data-preport="${p.id}">Report post</button><button class="btn ghost sm" data-pblock="${p.userId}">Block ${esc(p.author)}</button>`}</div></details></div>
-    ${c ? `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">${c.list.map(x => `<div class="sm" style="margin-bottom:8px"><b>${esc(x.author)}</b> <span class="mute">${ago(x.createdAt)}</span>${x.mine ? ` <button class="link" data-cdel="${x.id}" data-post="${p.id}">delete</button>` : ''}<div style="white-space:pre-wrap;word-break:break-word">${esc(x.text)}</div></div>`).join('') || '<div class="sm mute" style="margin-bottom:8px">No comments yet.</div>'}
-      ${S.user ? `<div class="row"><input id="cin-${p.id}" maxlength="300" placeholder="Add a comment"><button class="btn sm" data-csend="${p.id}">Send</button></div>` : '<button class="link" data-go="/auth">Log in to comment</button>'}</div>` : ''}</div>`;
+    ${p.text ? `<p style="margin:10px 0 0;white-space:pre-wrap;word-break:break-word">${esc(p.text)}</p>` : ''}
+    ${p.style ? `<div style="margin-top:8px"><span class="gold">${esc(p.style)}</span></div>` : ''}
+    ${p.image ? `<img class="media" src="${esc(p.image)}" alt="Post photo" data-lb="${esc(p.image)}" loading="lazy">` : ''}
+    <div class="act"><button class="heart ${p.liked ? 'on' : ''}" data-plike="${p.id}" aria-label="Like">${ic('heart')} ${p.likes}</button><button data-pcomm="${p.id}" aria-label="Comments">${ic('chat')} ${p.comments}</button><button class="sv ${p.saved ? 'on' : ''}" data-psave="${p.id}" aria-label="Save">${ic('bookmark')}</button><span class="sp"></span>
+    ${p.staffId ? `<button class="btn white sm" data-go="/barber/${p.staffId}" style="color:#09090a">Book ${esc(p.staffName.split(' ')[0])}</button>` : ''}</div></article>`;
 }
 function vCommunity() {
-  const f = S.feed, cp = S.comp;
-  return header('Community') + `<div class="tabs"><button class="${S.feedScope === 'all' ? 'on' : ''}" data-fscope="all">Latest</button><button class="${S.feedScope === 'following' ? 'on' : ''}" data-fscope="following">Following</button></div>
-  ${S.user ? `<div class="card" style="margin-bottom:12px"><textarea id="ctext" rows="2" maxlength="500" placeholder="Share a cut, a tip, or something for the brotherhood">${esc(cp.text)}</textarea>
-    ${cp.img ? `<div style="position:relative;margin-top:8px"><img src="${cp.img}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:12px"><button class="btn sm danger" style="position:absolute;top:6px;right:6px;background:var(--bg)" data-cimgx>✕</button></div>` : ''}
-    ${cp.err ? `<div class="err">${esc(cp.err)}</div>` : ''}<div class="row" style="margin-top:8px"><label class="btn sec sm" style="cursor:pointer">${ic('plus')} Photo<input type="file" id="cfile" accept="image/*" hidden></label><span class="sp"></span><button class="btn sm" data-cpost ${cp.busy ? 'disabled' : ''}>${cp.busy ? 'Posting…' : 'Post'}</button></div></div>`
-    : `<div class="card row" style="margin-bottom:12px"><div class="sp mute sm">Join the conversation. Log in to post, like and comment.</div><button class="btn sm" data-go="/auth">Log in</button></div>`}
-  <div class="list">${!f ? '<div class="empty">Loading…</div>' : f.posts.map(postCard).join('') || `<div class="empty">${S.feedScope === 'following' ? 'Follow members to see their posts here.' : 'No posts yet. Be the first!'}</div>`}</div>
+  const tab = S.ctab || 'feed', f = S.feed, u = S.user, sp = S.spot;
+  const tabs = [['feed', 'FEED'], ['cuts', 'CUTS'], ['saved', 'SAVED'], ['me', 'PROFILE']], styleNames = CUTS.map(c => c.name);
+  const chips = (list, cur, attr, allLabel) => `<div class="chips"><button class="chip ${cur ? '' : 'on'}" ${attr}="">${allLabel}</button>${list.map(x => `<button class="chip ${cur === x ? 'on' : ''}" ${attr}="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+  const loginCard = msg => `<div class="card empty">${esc(msg)}<div style="margin-top:10px"><button class="btn sm" data-go="/auth">Log in</button></div></div>`;
+  let body = '';
+  if (tab === 'feed') {
+    body = `<div class="chips"><button class="chip ${S.feedScope === 'all' ? 'on' : ''}" data-cscope="all">Latest</button><button class="chip ${S.feedScope === 'following' ? 'on' : ''}" data-cscope="following">Following</button></div>` + chips(styleNames, S.cstyle, 'data-cstyle', 'All styles');
+  } else if (tab === 'cuts') {
+    const c = S.cuts; body = chips(c ? c.styles : [], S.cstyle, 'data-cstyle', 'All styles');
+    body += !c ? '<div class="empty">Loading…</div>' : c.items.length ? `<div class="pgrid">${c.items.map((i, k) => `<button class="pcard" data-ctile="${k}"><span class="ptag">${i.kind === 'cut' ? 'CUT' : 'POST'}</span><img src="${esc(i.image)}" alt="${esc(i.title)}" loading="lazy"><div class="pt">${esc(i.title)}</div><div class="ps">${esc(i.style || i.barberName || i.author || '')}</div></button>`).join('')}</div>` : '<div class="card empty">No cuts here yet. Be the first to post one.</div>';
+  } else if (tab === 'me') {
+    if (!u) body = loginCard('Log in to see your profile and posts.');
+    else { const st = (f && f.stats) || { posts: 0, likes: 0, following: S.favs.length };
+      body = `<div class="card row"><span class="av lg" style="width:64px;height:64px;font-size:22px;border-width:2px">${esc(initials(u.name))}</span><div class="sp"><b style="font-size:17px">${esc(u.name)}</b><div class="sm mute">${esc(u.city || 'Brotherhood member')}</div></div><button class="btn sec sm" data-go="/me">Account</button></div>
+      <div class="stats5" style="grid-template-columns:repeat(3,1fr)"><div><b class="num">${st.posts}</b><span>Posts</span></div><div><b class="num">${st.likes}</b><span>Likes</span></div><div><b class="num">${st.following}</b><span>Barbers followed</span></div></div>`; }
+  }
+  let list = '';
+  if (tab === 'feed' || tab === 'saved' || tab === 'me') {
+    if (!f) list = '<div class="empty">Loading…</div>';
+    else if (f.needLogin) list = tab === 'me' ? '' : loginCard(tab === 'saved' ? 'Log in to see the posts you saved.' : 'Log in to see posts from the members and barbers you follow.');
+    else list = f.posts.length ? f.posts.map(postCard).join('') : `<div class="card empty">${tab === 'saved' ? `<div style="font-size:30px">${ic('bookmark')}</div><b>No saved items yet</b><div class="sm">Tap the bookmark on any post to save it here.</div>` : tab === 'me' ? 'You have not posted yet. Share your first cut.' : S.feedScope === 'following' ? 'Follow members or barbers to see their posts here.' : S.cstyle || S.cq ? 'No posts match. Try another style or search.' : 'No posts yet. Be the first!'}</div>`;
+  }
+  return header('Community') + `<div class="mute sm" style="margin:-4px 0 4px">Cuts and wins from the brotherhood.</div>
+  <div class="chero"><div class="sp"><h2>Show your best cut</h2><p>Post a fresh cut, tag your barber, and inspire the brotherhood.</p><button class="btn white" data-compose>Post a cut ›</button></div>
+    <div class="mini"><button data-go="/style"><b>Style finder</b><span>Find your cut</span></button><button data-go="/discover"><b>Barbers</b><span>Book your chair</span></button></div></div>
+  <div class="ctiles">${sp ? `<button class="ctile" data-go="/barber/${sp.id}"><span class="sm mute" style="letter-spacing:1px">BARBER OF THE WEEK</span><div class="row">${pic(sp.photo, sp.name, 'av')}<div class="sp"><b>${esc(sp.name)}</b><div class="sm mute">${esc(sp.branchName)}</div></div></div><span class="sm">${sp.cuts} cut${sp.cuts === 1 ? '' : 's'} this week ›</span></button>`
+      : `<button class="ctile" data-go="/discover"><span class="sm mute" style="letter-spacing:1px">BARBERS</span><b style="font-size:17px">Find your barber</b><span class="sm">Explore ›</span></button>`}
+    <button class="ctile" data-go="/map"><span class="sm mute" style="letter-spacing:1px">NEAR YOU</span><b style="font-size:17px">Shops &amp; chairs nearby</b><span class="sm">Explore ›</span></button></div>
+  <div class="ctabs">${tabs.map(([k, n]) => `<button class="${tab === k ? 'on' : ''}" data-ctab="${k}">${n}</button>`).join('')}</div>
+  ${tab !== 'cuts' && tab !== 'me' ? `<div class="row" style="margin-bottom:12px;gap:8px"><div class="search sp">${ic('search')}<input id="cq" placeholder="${tab === 'saved' ? 'Search saved items' : 'Search posts, styles or barbers'}" value="${esc(S.cq || '')}" autocomplete="off"></div>${u ? `<span class="av" style="width:40px;height:40px;font-size:14px">${esc(initials(u.name))}</span>` : ''}<button class="btn white" data-compose>+ Post</button></div>` : `<div class="row" style="justify-content:flex-end;margin-bottom:10px"><button class="btn white sm" data-compose>+ Post</button></div>`}
+  ${body}<div class="list">${list}</div>
   <p class="mute sm" style="text-align:center;margin-top:18px">Be respectful. Report anything that breaks the brotherhood rules. Posts reported by 3 members are hidden for review.</p>`;
+}
+function sheet(inner) {
+  const o = document.createElement('div'); o.className = 'lb'; o.style.alignItems = 'end'; o.innerHTML = `<div class="sheet pop">${inner}</div>`;
+  o.addEventListener('click', e => { const g = e.target.closest('[data-go]'); if (g) { o.remove(); return nav(g.dataset.go); } if (e.target === o || e.target.closest('[data-x]')) o.remove(); }); document.body.appendChild(o); return o;
+}
+function openComposer() {
+  if (!S.token) return nav('/auth');
+  const barbers = (S.D && S.D.barbers) || [];
+  const o = sheet(`<h3>Post a cut</h3><textarea id="cptext" rows="3" maxlength="500" placeholder="Share a fresh cut, a tip, or something for the brotherhood"></textarea>
+    <div id="cpimg"></div><div class="row" style="margin-top:8px"><label class="btn sec sm" style="cursor:pointer">${ic('plus')} Photo<input type="file" id="cpfile" accept="image/*" hidden></label><span class="mute sm">Optional</span></div>
+    <label class="f">Style<select id="cpstyle"><option value="">No style tag</option>${CUTS.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}</select></label>
+    <label class="f">Tag your barber<select id="cpbarber"><option value="">Not tagged</option>${barbers.map(b => `<option value="${b.id}">${esc(b.name)} · ${esc(b.branchName)}</option>`).join('')}</select></label>
+    <div id="cperr"></div><div class="row" style="margin-top:14px"><button class="btn ghost sp" data-x>Cancel</button><button class="btn sp" id="cpgo">Post</button></div>`);
+  let img = null; const err = m => { o.querySelector('#cperr').innerHTML = m ? `<div class="err">${esc(m)}</div>` : ''; };
+  o.querySelector('#cpfile').addEventListener('change', async e => {
+    const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+    try { img = await compress(file); o.querySelector('#cpimg').innerHTML = `<div style="position:relative;margin-top:8px"><img src="${img}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:12px"><button class="btn sm danger" style="position:absolute;top:6px;right:6px;background:var(--bg)" id="cpx">✕</button></div>`; err(''); o.querySelector('#cpx').onclick = () => { img = null; o.querySelector('#cpimg').innerHTML = ''; }; } catch (x) { err(x.message); }
+  });
+  o.querySelector('#cpgo').onclick = async ev => {
+    const btn = ev.currentTarget; btn.disabled = true; btn.textContent = 'Posting…'; err('');
+    try {
+      await api('/posts', { method: 'POST', body: { text: o.querySelector('#cptext').value, data: img || undefined, style: o.querySelector('#cpstyle').value, staffId: o.querySelector('#cpbarber').value || undefined } });
+      o.remove(); toast('Posted'); S.ctab = 'feed'; S.feedScope = 'all'; S.cstyle = ''; S.cq = ''; await loadCommunity();
+    } catch (x) { err(x.message); btn.disabled = false; btn.textContent = 'Post'; }
+  };
+}
+async function openComments(postId) {
+  const post = (S.feed && S.feed.posts.find(x => x.id === postId)) || null; let list = [];
+  try { list = (await api(`/posts/${postId}/comments`)).comments; } catch (x) { return toast(x.message); }
+  const o = sheet(`<h3>Comments</h3><div id="cmlist"></div><div class="emo">${QUICK.map(e => `<button data-emo="${e}" aria-label="React ${e}">${e}</button>`).join('')}</div>
+    ${S.user ? `<div class="row"><input id="cmin" maxlength="300" placeholder="Write a comment…"><button class="btn sm" id="cmgo">Send</button></div>` : '<div style="text-align:center"><button class="link" data-x data-go="/auth">Log in to comment</button></div>'}`);
+  const draw = () => { o.querySelector('#cmlist').innerHTML = list.length ? list.map(x => `<div class="sm" style="margin-bottom:10px"><b>${esc(x.author)}</b> <span class="mute">${ago(x.createdAt)}</span>${x.mine ? ` <button class="link" data-cdelc="${x.id}">delete</button>` : ''}<div style="white-space:pre-wrap;word-break:break-word;font-size:14px">${esc(x.text)}</div></div>`).join('') : '<div class="empty" style="padding:22px 10px"><b>No comments yet</b><div class="sm">Your words could make someone\'s day. Be the first to comment!</div></div>'; };
+  draw();
+  const send = async text => {
+    if (!S.token) return nav('/auth'); text = String(text || '').trim(); if (!text) return;
+    try { const j = await api(`/posts/${postId}/comments`, { method: 'POST', body: { text } }); list.push(j.comment); if (post) post.comments++; draw(); const i = o.querySelector('#cmin'); if (i) i.value = ''; render(); } catch (x) { toast(x.message); }
+  };
+  o.addEventListener('click', async e => {
+    const em = e.target.closest('[data-emo]'); if (em) return send(em.dataset.emo);
+    if (e.target.closest('#cmgo')) return send(o.querySelector('#cmin').value);
+    const d = e.target.closest('[data-cdelc]'); if (d) { try { await api('/comments/' + d.dataset.cdelc, { method: 'DELETE' }); list = list.filter(x => x.id !== d.dataset.cdelc); if (post) post.comments--; draw(); render(); } catch (x) { toast(x.message); } }
+  });
+}
+function openMedia(i) {
+  const o = sheet(`<img src="${esc(i.image)}" alt="" style="width:100%;max-height:52vh;object-fit:contain;border-radius:12px;background:#000;display:block">
+    <div style="margin:10px 0 2px"><b>${esc(i.title)}</b> ${i.style ? `<span class="gold">${esc(i.style)}</span>` : ''}</div><div class="sm mute">${i.kind === 'cut' ? 'Cut by' : 'Posted by ' + esc(i.author || 'a member') + (i.barberName ? ' · cut by' : '')} ${esc(i.barberName || '')}</div>
+    <div class="row" style="margin-top:12px"><button class="btn ghost sp" data-x>Close</button>${i.barberId ? `<button class="btn sec sp" data-gob>View barber</button><button class="btn sp" data-bookit>Book this cut</button>` : ''}</div>`);
+  o.addEventListener('click', e => {
+    if (e.target.closest('[data-gob]')) { o.remove(); nav('/barber/' + i.barberId); }
+    if (e.target.closest('[data-bookit]')) { S.styleNote = `Style I want: ${i.style || 'same as the photo'}${i.title ? ' (' + i.title + ')' : ''}. Reference photo from the Community.`; o.remove(); startBooking(i.branchId, i.barberId); if (!S.token) nav('/auth'); }
+  });
 }
 const REASONS = ['Spam', 'Harassment or hate', 'Nudity or sexual content', 'Violence', 'Other'];
 function vMod() {
@@ -452,18 +535,18 @@ async function render() {
   const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart, sy = window.scrollY;
   const showNav = !['barber', 'book', 'auth', 'pro', 'notifications', 'style', 'shop'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
   app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'home' && r.a === 'home') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
-  if (focus === 'q') { const el = document.getElementById('q'); el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
+  if (focus === 'q' || focus === 'cq') { const el = document.getElementById(focus); if (el) el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
   if (r.a === 'map') mountMap();
   if (r.a === 'barber' || r.a === 'book' || r.a === 'shop') window.scrollTo(0, r.a === 'book' ? sy : 0);
 }
 async function onRoute() {
   const r = route(); window.scrollTo(0, 0);
   if (r.a === 'barber') { S.cur = null; S.bTab = 'cuts'; S.bStyle = ''; }
-  if (['discover', 'home', 'book', 'barber', 'shop', 'map'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
+  if (['discover', 'home', 'book', 'barber', 'shop', 'map', 'community'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
   if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
-  if (r.a === 'community') loadFeed().then(render);
+  if (r.a === 'community') loadCommunity();
   if (r.a === 'notifications' && S.token) { S.notifs = null; loadNotifs(); }
   if (r.a === 'book' && S.bk && !S.token) { nav('/auth'); return; }
   render();
@@ -475,7 +558,7 @@ let qTimer;
 app.addEventListener('input', e => {
   if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(async () => { await loadDiscover().catch(() => { }); render(); }, 250); }
   if (e.target.id === 'bnotes' && S.bk) S.bk.notes = e.target.value;
-  if (e.target.id === 'ctext') S.comp.text = e.target.value;
+  if (e.target.id === 'cq') { S.cq = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(async () => { await loadFeed(); render(); }, 300); }
 });
 app.addEventListener('change', async e => {
   if (e.target.id === 'sort') { S.sort = e.target.value; await loadDiscover(); render(); }
@@ -509,7 +592,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-cverify],[data-cdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -530,7 +613,7 @@ app.addEventListener('click', async e => {
   if (D.spec) { S.specialty = S.specialty === D.spec ? '' : D.spec; await loadDiscover(); return render(); }
   if (D.tab) { S.tab = D.tab; return render(); }
   if (D.cverify) { try { await api('/pro/certs/' + D.cverify, { method: 'PUT', body: { verified: D.on !== '1' } }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
-  if (D.cdel) { if (!confirm('Remove this seminar?')) return; try { await api('/pro/certs/' + D.cdel, { method: 'DELETE' }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
+  if (D.certdel) { if (!confirm('Remove this seminar?')) return; try { await api('/pro/certs/' + D.certdel, { method: 'DELETE' }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
   if (D.btab) { S.bTab = D.btab; return render(); }
   if (D.bstyle != null) { S.bStyle = D.bstyle; return render(); }
   if (D.cut) { const p = S.cur?.portfolio.find(x => x.id === D.cut); if (p) openCut(p); return; }
@@ -559,26 +642,20 @@ app.addEventListener('click', async e => {
     try { await api('/me', { method: 'DELETE', body: { password: pw } }); S.token = null; S.user = null; store.set('bh_token', null); toast('Account deleted'); nav('/'); } catch (x) { toast(x.message); } return;
   }
   if (D.lb) { const o = document.createElement('div'); o.className = 'lb'; o.innerHTML = `<img src="${esc(D.lb)}" alt=""><button aria-label="Close">✕</button>`; o.onclick = () => o.remove(); document.body.appendChild(o); return; }
-  if (D.fscope) { S.feedScope = D.fscope; S.feed = null; render(); await loadFeed(); return render(); }
-  if (D.cimgx != null) { S.comp.img = null; return render(); }
-  if (D.cpost != null) {
-    const c = S.comp; c.busy = true; c.err = ''; render();
-    try { await api('/posts', { method: 'POST', body: { text: c.text, data: c.img || undefined } }); S.comp = { text: '', img: null, busy: false, err: '' }; await loadFeed(); toast('Posted'); }
-    catch (x) { c.err = x.message; c.busy = false; } return render();
+  if (D.ctab) { S.ctab = D.ctab; S.cstyle = ''; S.cq = ''; S.feed = null; render(); return loadCommunity(); }
+  if (D.cscope) { S.feedScope = D.cscope; S.feed = null; render(); return loadCommunity(); }
+  if (D.cstyle != null) { S.cstyle = D.cstyle; if ((S.ctab || 'feed') === 'cuts') S.cuts = null; else S.feed = null; render(); return loadCommunity(); }
+  if (D.compose != null) return openComposer();
+  if (D.ctile != null) { const i = S.cuts && S.cuts.items[+D.ctile]; if (i) openMedia(i); return; }
+  if (D.psave) {
+    if (!S.token) return nav('/auth'); const p = S.feed.posts.find(x => x.id === D.psave);
+    try { const j = await api(`/posts/${p.id}/save`, { method: p.saved ? 'DELETE' : 'PUT' }); p.saved = j.saved; if (!j.saved && S.ctab === 'saved') S.feed.posts = S.feed.posts.filter(x => x.id !== p.id); toast(j.saved ? 'Saved' : 'Removed from saved'); render(); } catch (x) { toast(x.message); } return;
   }
   if (D.plike) {
     if (!S.token) return nav('/auth'); const p = S.feed.posts.find(x => x.id === D.plike);
     try { const j = await api(`/posts/${p.id}/like`, { method: p.liked ? 'DELETE' : 'PUT' }); p.liked = !p.liked; p.likes = j.likes; render(); } catch (x) { toast(x.message); } return;
   }
-  if (D.pcomm) {
-    if (S.open[D.pcomm]) { delete S.open[D.pcomm]; return render(); }
-    try { S.open[D.pcomm] = { list: (await api(`/posts/${D.pcomm}/comments`)).comments }; } catch (x) { toast(x.message); } return render();
-  }
-  if (D.csend) {
-    const inp = document.getElementById('cin-' + D.csend), text = inp.value.trim(); if (!text) return;
-    try { const j = await api(`/posts/${D.csend}/comments`, { method: 'POST', body: { text } }); S.open[D.csend].list.push(j.comment); S.feed.posts.find(x => x.id === D.csend).comments++; } catch (x) { return toast(x.message); } return render();
-  }
-  if (D.cdel) { try { await api('/comments/' + D.cdel, { method: 'DELETE' }); const c = S.open[D.post]; c.list = c.list.filter(x => x.id !== D.cdel); S.feed.posts.find(x => x.id === D.post).comments--; } catch (x) { toast(x.message); } return render(); }
+  if (D.pcomm) return openComments(D.pcomm);
   if (D.pfollow) {
     const on = D.on === '1'; try { await api('/follow/' + D.pfollow, { method: on ? 'DELETE' : 'PUT' }); S.feed.posts.forEach(x => { if (x.userId === D.pfollow) x.following = !on; }); render(); } catch (x) { toast(x.message); } return;
   }
