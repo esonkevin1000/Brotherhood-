@@ -3,7 +3,7 @@
   "name": "Brotherhood",
   "short_name": "Brotherhood",
   "description": "Discover barbers, book your cut, join the brotherhood.",
-  "start_url": "/brotherhood",
+  "start_url": "/member",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

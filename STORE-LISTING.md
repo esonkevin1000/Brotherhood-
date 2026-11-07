@@ -53,7 +53,7 @@ Free for customers. You pay at the shop.
 
 ## Hakbang (Android)
 1. Gumawa ng Google Play developer account ($25, may ID verification).
-2. Gumawa ng bagong TWA package para sa customer app. Halimbawa package name: `com.brotherhood.app`, start URL `https://getbrotherhoodapp.com/brotherhood`. (Hiwalay ito sa POS app na `com.brotherhood.pos`.)
+2. Gumawa ng bagong TWA package para sa customer app. Halimbawa package name: `com.brotherhood.app`, start URL `https://getbrotherhoodapp.com/member` (ang `/brotherhood` ay gumagana pa rin bilang kapalit na link). (Hiwalay ito sa POS app na `com.brotherhood.pos`.)
 3. I-build ang signed AAB (PWABuilder o Bubblewrap).
 4. Sa Play Console, i-on ang Play App Signing. Kunin ang SHA-256 ng app signing key at idagdag sa `assetlinks.json` sa ilalim ng bagong package. (Ako na ang magdadagdag sa file kapag ibinigay mo ang fingerprint.)
 5. Punan ang listing, Data safety, content rating, at App access.

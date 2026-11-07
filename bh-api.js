@@ -138,7 +138,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const mailTo = b => { if (b.userId) { const u = get('bh_users', b.userId); return u ? { to: u.email, name: u.name } : null; } const c = b.customerId ? get('customers', b.customerId) : null; return c && c.email && c.consent ? { to: c.email, name: c.name } : null; };
   function runJobs() {
     if (!emailReady()) return;
-    const now = Date.now(), link = `${baseUrl()}/brotherhood#/bookings`;
+    const now = Date.now(), link = `${baseUrl()}/member#/bookings`;
     for (const b of all("select * from bookings where status='booked' and reminderAt is null and date>=? and date<=?", todayStr(), dOf(new Date(now + 2 * 864e5)))) {
       const start = new Date(`${b.date}T${b.time}:00`).getTime(), hrs = (start - now) / 36e5;
       if (hrs > 24 || hrs < 2) continue;
