@@ -12,6 +12,8 @@ create table if not exists bh_barber(staffId text primary key, headline text, bi
 create table if not exists bh_portfolio(id text primary key, staffId text, url text, caption text, createdAt text);
 create index if not exists bh_port_staff on bh_portfolio(staffId, createdAt);
 create table if not exists bh_favorites(userId text, staffId text, createdAt text, primary key(userId, staffId));
+create table if not exists bh_certs(id text primary key, staffId text, title text, org text, date text, imageUrl text, verified integer default 0, createdAt text);
+create index if not exists bh_certs_staff on bh_certs(staffId);
 create table if not exists bh_posts(id text primary key, userId text, staffId text, text text, imageUrl text, createdAt text, hidden integer default 0);
 create index if not exists bh_posts_time on bh_posts(createdAt);
 create table if not exists bh_likes(postId text, userId text, primary key(postId, userId));
@@ -197,7 +199,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const level = stats.cuts >= 1000 ? 'Legend' : stats.cuts >= 300 ? 'Master Barber' : stats.cuts >= 50 ? 'Pro Barber' : 'Rising Barber';
       let nextFree = null; for (let i = 0; i < 7 && !nextFree; i++) { const d = dOf(new Date(Date.now() + i * 864e5)); try { const sl = slotsFor(s.branchId, d, s.id, 30); if (sl.length) nextFree = { date: d, time: sl[0] }; } catch { } }
       const taggedPosts = all("select p.id, p.text, p.imageUrl image, p.createdAt, (select count(*) from bh_likes l where l.postId=p.id) likes from bh_posts p where p.staffId=? and p.hidden=0 order by p.createdAt desc limit 30", s.id);
-      return send(res, 200, { stats, rankWeek, nextFree, posts: taggedPosts, barber: { ...card, level, followers: stats.followers, bio: pr.bio || '', instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '' },
+      return send(res, 200, { stats, rankWeek, nextFree, posts: taggedPosts, certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc limit 40', s.id), barber: { ...card, level, followers: stats.followers, bio: pr.bio || '', instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '' },
         branch: { id: br.id, name: br.name, photo: br.photo || siteCover(br.name) || '', address: br.address || '', phone: br.phone || '', openTime: br.openTime || '09:00', closeTime: br.closeTime || '21:00', mapUrl: br.mapUrl || '' },
         portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc limit 60', s.id), reviews,
         services: servicesList(), favorite: !!(u && one('select 1 x from bh_favorites where userId=? and staffId=?', u.id, s.id)) });
@@ -369,7 +371,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const staff = (admin ? all('select * from staff where active=1 order by name') : [get('staff', mine)]).filter(Boolean).map(s => {
           const pr = one('select * from bh_barber where staffId=?', s.id) || {};
           return { id: s.id, name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', headline: pr.headline || '', bio: pr.bio || '', years: pr.years || 0, specialties: jp(pr.specialties),
-            instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id) };
+            instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id), certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc', s.id) };
         });
         return send(res, 200, { admin, name: me.name, staff });
       }
@@ -448,6 +450,34 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         run('insert or replace into bh_barber(staffId,headline,bio,years,specialties,instagram,facebook,tiktok,verified) values(?,?,?,?,?,?,?,?,?)', s.id, clip(b.headline, 80), clip(b.bio, 600),
           Math.max(0, Math.min(60, Math.floor(+b.years || 0))), JSON.stringify(spec), url(b.instagram), url(b.facebook), url(b.tiktok), verified);
         log(me, 'barber-profile', 'bh_barber', s.id, s.name); return send(res, 200, { ok: true });
+      }
+      // seminars and certificates (added by the barber, verified by the owner)
+      const certDate = v => /^\d{4}(-\d{2}(-\d{2})?)?$/.test(String(v || '')) ? String(v) : '';
+      const certImage = b => {
+        if (!b.data) return '';
+        const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.data)); if (!m) bad(400, 'Image must be JPEG, PNG or WebP');
+        const buf = Buffer.from(m[2], 'base64'); if (buf.length > 700_000) bad(413, 'Image is too large (max about 700KB)');
+        const iid = uid() + uid(); run('insert into images(id,mime,data,createdAt) values(?,?,?,?)', iid, m[1], buf, nowISO()); return '/img/' + iid;
+      };
+      const dropImage = url => { const im = /\/img\/(\w+)/.exec(url || ''); if (im) run('delete from images where id=?', im[1]); };
+      if (sub === '/pro/certs' && method === 'POST') {
+        const b = await readBody(req, 1_500_000), s = target(b.staffId), title = clip(b.title, 100); if (!title) bad(400, 'Enter the seminar or certificate name');
+        if (one('select count(*) n from bh_certs where staffId=?', s.id).n >= 40) bad(409, 'You can add up to 40 seminars');
+        const id = uid(), image = certImage(b);
+        run('insert into bh_certs(id,staffId,title,org,date,imageUrl,verified,createdAt) values(?,?,?,?,?,?,0,?)', id, s.id, title, clip(b.org, 80), certDate(b.date), image, nowISO());
+        log(me, 'cert-add', 'bh_certs', id, s.name + ': ' + title); return send(res, 201, { id });
+      }
+      const ctm = sub.match(/^\/pro\/certs\/(\w+)$/);
+      if (ctm && method === 'PUT') {
+        const row = get('bh_certs', ctm[1]); if (!row) bad(404, 'Not found'); target(row.staffId); const b = await readBody(req);
+        const title = 'title' in b ? clip(b.title, 100) : row.title; if (!title) bad(400, 'Enter the seminar or certificate name');
+        const verified = admin && 'verified' in b ? (b.verified ? 1 : 0) : row.verified || 0;   // only the owner can verify
+        run('update bh_certs set title=?, org=?, date=?, verified=? where id=?', title, 'org' in b ? clip(b.org, 80) : row.org, 'date' in b ? certDate(b.date) : row.date, verified, row.id);
+        log(me, 'cert-update', 'bh_certs', row.id, ''); return send(res, 200, { ok: true });
+      }
+      if (ctm && method === 'DELETE') {
+        const row = get('bh_certs', ctm[1]); if (!row) bad(404, 'Not found'); target(row.staffId); dropImage(row.imageUrl);
+        run('delete from bh_certs where id=?', row.id); log(me, 'cert-delete', 'bh_certs', row.id, ''); return send(res, 200, { ok: true });
       }
       if (sub === '/pro/portfolio' && method === 'POST') {
         const b = await readBody(req, 1_500_000), s = target(b.staffId);
