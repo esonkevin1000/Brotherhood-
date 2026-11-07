@@ -358,7 +358,9 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
           members: one('select count(*) n from bh_users').n, openReports: one("select count(*) n from bh_reports where status='open'").n });
       }
       if (sub === '/pro/dashboard' && method === 'GET') {
-        const s = target(q.staffId), days = [7, 30, 90].includes(+q.days) ? +q.days : 30, to = todayStr(), from = dOf(new Date(Date.now() - (days - 1) * 864e5));
+        const s = target(q.staffId), range = ['today', 'week', 'month', 'all'].includes(q.range) ? q.range : 'week', to = todayStr(), now = new Date();
+        const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));   // weeks run Monday to Sunday
+        const from = range === 'today' ? to : range === 'week' ? dOf(monday) : range === 'month' ? to.slice(0, 8) + '01' : (one("select min(date) d from orders where status='paid' and barberId=?", s.id)?.d || to), days = range;
         const m = scoreData(from, to, s.branchId, s.id)[0] || { n: 0, sales: 0, avg: 0, comm: 0, rating: null, rc: 0, custs: 0, returning: 0, worked: 0 };
         // clients: everyone this barber has completed a paid service for (all time), grouped by customer
         const orders = all("select * from orders where status='paid' and barberId=? order by date", s.id).map(parseOrder), by = new Map();
