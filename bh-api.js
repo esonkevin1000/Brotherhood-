@@ -95,14 +95,16 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const branchRatings = () => new Map(all('select branchId, count(*) n, avg(rating) a from reviews group by branchId').map(r => [r.branchId, { n: r.n, a: Math.round(r.a * 10) / 10 }]));
   const portCount = () => new Map(all('select staffId, count(*) n from bh_portfolio group by staffId').map(r => [r.staffId, r.n]));
 
-  function barberCard(s, rm, pc, br) {
+  const levelOf = n => n >= 1000 ? 'Legend' : n >= 300 ? 'Master Barber' : n >= 50 ? 'Pro Barber' : 'Rising Barber';
+  function barberCard(s, rm, pc, br, ex) {
     const p = one('select * from bh_barber where staffId=?', s.id) || {}, r = rm.get(s.id) || { n: 0, a: 0, v: 0 }, spec = jp(p.specialties), photos = pc.get(s.id) || 0;
-    let slots = 0; try { slots = slotsFor(s.branchId, todayStr(), s.id, 30).length; } catch { }
+    let sl = []; try { sl = slotsFor(s.branchId, todayStr(), s.id, 30); } catch { } const slots = sl.length;
     const complete = [p.headline, p.bio, s.photo, p.years, spec.length, photos >= 3].filter(Boolean).length / 6;
     // ranking: verified-review quality (Bayesian), same-day availability, profile completeness, verification — never raw popularity
     const bayes = (r.a * r.n + 4.2 * 5) / (r.n + 5), score = bayes / 5 * 50 + Math.min(slots, 6) / 6 * 20 + complete * 20 + (p.verified ? 10 : 0);
     return { id: s.id, name: s.name, photo: s.photo || '', branchId: s.branchId, branchName: br.get(s.branchId)?.name || '', headline: p.headline || '', years: p.years || 0, specialties: spec,
-      rating: r.a, reviews: r.n, verifiedReviews: r.v, verified: !!p.verified, portfolio: photos, slotsToday: slots, score: Math.round(score * 10) / 10 };
+      rating: r.a, reviews: r.n, verifiedReviews: r.v, verified: !!p.verified, portfolio: photos, slotsToday: slots, nextSlot: sl[0] || '', score: Math.round(score * 10) / 10,
+      ...(ex ? { cover: ex.cover.get(s.id) || '', weekCuts: ex.week.get(s.id) || 0, level: levelOf(ex.cuts.get(s.id) || 0), styles: [...(ex.styles.get(s.id) || [])] } : {}) };
   }
   const servicesList = () => all("select id,name,price,mins,photo,apptOnly from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) }));
 
@@ -169,19 +171,31 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     // ----- discover -----
     if (sub === '/discover' && method === 'GET') {
       const brs = all('select * from branches order by rowid'), bm = new Map(brs.map(b => [b.id, b])), rm = ratingMap(), pc = portCount(), brr = branchRatings();
-      let barbers = all('select * from staff where active=1').map(s => barberCard(s, rm, pc, bm));
+      const mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));   // weeks run Monday to Sunday
+      const ex = {
+        cover: new Map(all("select staffId, url from bh_portfolio order by createdAt asc").map(r => [r.staffId, r.url])),   // ascending, so the latest photo wins
+        week: new Map(all("select barberId, count(*) n from orders where status='paid' and date>=? and barberId<>'' group by barberId", dOf(mon)).map(r => [r.barberId, r.n])),
+        cuts: new Map(all("select barberId, count(*) n from orders where status='paid' and barberId<>'' group by barberId").map(r => [r.barberId, r.n])),
+        styles: (m => { for (const r of all("select staffId, style from bh_portfolio where style<>''")) (m.get(r.staffId) || m.set(r.staffId, new Set()).get(r.staffId)).add(r.style); return m; })(new Map())
+      };
+      let barbers = all('select * from staff where active=1').map(s => barberCard(s, rm, pc, bm, ex));
       const term = clip(q.q, 60).toLowerCase(), bid = clip(q.branch, 20), spec = clip(q.specialty, 40).toLowerCase();
       if (bid) barbers = barbers.filter(b => b.branchId === bid);
-      if (term) barbers = barbers.filter(b => [b.name, b.branchName, b.headline, ...b.specialties].join(' ').toLowerCase().includes(term));
+      if (term) barbers = barbers.filter(b => [b.name, b.branchName, b.headline, ...b.specialties, ...b.styles].join(' ').toLowerCase().includes(term));
+      const style = clip(q.style, 30).toLowerCase();
+      if (style) barbers = barbers.filter(b => b.styles.some(x => x.toLowerCase() === style) || b.specialties.some(x => x.toLowerCase() === style));
+      if (q.verified === '1') barbers = barbers.filter(b => b.verified);
       if (spec) barbers = barbers.filter(b => b.specialties.some(x => x.toLowerCase() === spec));
       if (q.available === '1') barbers = barbers.filter(b => b.slotsToday > 0);
       if (+q.minRating > 0) barbers = barbers.filter(b => b.rating >= +q.minRating);
-      barbers.sort(q.sort === 'rating' ? (a, b) => b.rating - a.rating || b.reviews - a.reviews : q.sort === 'experience' ? (a, b) => b.years - a.years : q.sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.score - a.score);
+      barbers.sort(q.sort === 'rating' ? (a, b) => b.rating - a.rating || b.reviews - a.reviews : q.sort === 'experience' ? (a, b) => b.years - a.years : q.sort === 'name' ? (a, b) => a.name.localeCompare(b.name)
+        : q.sort === 'trending' ? (a, b) => b.weekCuts - a.weekCuts || b.score - a.score : q.sort === 'soonest' ? (a, b) => (a.nextSlot || '99:99').localeCompare(b.nextSlot || '99:99') || b.score - a.score : (a, b) => b.score - a.score);
       const shops = brs.filter(b => !bid || b.id === bid).map(b => ({ id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '',
         photo: b.photo || siteCover(b.name) || '', lat: b.lat ?? null, lng: b.lng ?? null, rating: brr.get(b.id)?.a || 0, reviews: brr.get(b.id)?.n || 0, barbers: all('select count(*) n from staff where branchId=? and active=1', b.id)[0].n }))
         .filter(s => !term || (s.name + ' ' + s.address).toLowerCase().includes(term) || barbers.some(x => x.branchId === s.id));
       const specialties = [...new Set(all('select specialties from bh_barber').flatMap(r => jp(r.specialties)))].sort();
-      return send(res, 200, { shops, barbers, specialties, services: servicesList() });
+      const styleTiles = all("select p.style name, count(*) n, (select p2.url from bh_portfolio p2 where p2.style=p.style order by p2.createdAt desc limit 1) image from bh_portfolio p join staff s on s.id=p.staffId and s.active=1 where p.style<>'' group by p.style order by n desc");
+      return send(res, 200, { shops, barbers, specialties, styleTiles, services: servicesList() });
     }
     const bm = sub.match(/^\/barbers\/(\w+)$/);
     if (bm && method === 'GET') {

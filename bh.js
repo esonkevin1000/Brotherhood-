@@ -22,7 +22,7 @@ const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url
 const rate = (a, n) => n ? `<span class="star">★</span> ${a.toFixed(1)} <span class="mute">(${n})</span>` : '<span class="mute sm">New</span>';
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { } } };
 
-const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', ctab: 'feed', cstyle: '', cq: '', spot: null, cuts: null, proPin: false, unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashRange: 'week', toastMsg: '' };
+const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', style: '', verified: false, minRating: 0, R: null, fresh: null, ctab: 'feed', cstyle: '', cq: '', spot: null, cuts: null, proPin: false, unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashRange: 'week', toastMsg: '' };
 
 async function api(path, opt = {}, token = S.token) {
   const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
@@ -36,8 +36,7 @@ const route = () => { const [a, b, c] = (location.hash.slice(1) || '/').split('/
 
 // ---------- data ----------
 async function loadDiscover() {
-  const qs = new URLSearchParams({ q: S.q, branch: S.branch, specialty: S.specialty, available: S.avail ? '1' : '', sort: S.sort });
-  S.D = await api('/discover?' + qs);
+  S.D = await api('/discover');   // the unfiltered base (Home, Map, shop pages, booking); Discover's filtered results live in S.R
 }
 async function loadMe() {
   if (!S.token) { S.user = null; S.favs = []; return; }
@@ -52,7 +51,7 @@ const barberRow = b => `<button class="bcard" data-go="/barber/${b.id}">${pic(b.
 const shopCard = s => `<button class="shop" data-shop="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="${esc(s.name)}" loading="lazy">` : ''}<div class="in"><div class="nm">${esc(s.name)}</div>
   <div class="sm mute">${ic('pin').replace('class="i"', 'class="i" style="width:14px;height:14px;vertical-align:-2px"')} ${esc(s.address || s.name)} · ${t12(s.openTime)}–${t12(s.closeTime)}</div><div class="sm" style="margin-top:2px">${rate(s.rating, s.reviews)} <span class="mute">· ${s.barbers} barbers</span></div></div></button>`;
 
-const barberTile = b => `<button class="tile" data-go="/barber/${b.id}">${b.photo ? `<img class="tp" src="${esc(b.photo)}" alt="${esc(b.name)}" loading="lazy">` : `<span class="tp ph">${esc(initials(b.name))}</span>`}<div class="tb"><div class="nm">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</div><div class="sm mute tl">${esc(b.headline || b.specialties[0] || 'Barber')}</div><div class="sm">${rate(b.rating, b.reviews)}</div><div class="sm mute tl">${esc(b.branchName)}${b.slotsToday ? ' · ' + b.slotsToday + ' slots today' : ''}</div></div></button>`;
+const barberTile = (b, badge) => `<button class="tile" data-go="/barber/${b.id}"><div class="tw">${(b.photo || b.cover) ? `<img class="tp" src="${esc(b.photo || b.cover)}" alt="${esc(b.name)}" loading="lazy">` : `<span class="tp ph">${esc(initials(b.name))}</span>`}${badge ? `<span class="tbadge">${esc(badge)}</span>` : ''}</div><div class="tb"><div class="nm">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</div><div class="sm mute tl">${esc(b.headline || b.specialties[0] || 'Barber')}</div><div class="sm">${rate(b.rating, b.reviews)}</div><div class="sm mute tl">${esc(b.branchName)}${b.slotsToday ? ' · ' + b.slotsToday + ' slots today' : ''}</div></div></button>`;
 const shopTile = s => `<button class="tile wide" data-shop="${s.id}">${s.photo ? `<img class="tp" src="${esc(s.photo)}" alt="${esc(s.name)}" loading="lazy">` : `<span class="tp ph">${esc(initials(s.name))}</span>`}<div class="tb"><div class="nm">${esc(s.name)}</div><div class="sm mute tl">${esc(s.address || 'Brotherhood Barbershop')}</div><div class="sm">${rate(s.rating, s.reviews)} <span class="mute">· ${s.barbers} barber${s.barbers === 1 ? '' : 's'}</span></div><div class="sm mute tl">${t12(s.openTime)}–${t12(s.closeTime)}</div></div></button>`;
 function vHome() {
   const D = S.D, up = (S.mine || []).filter(b => b.status === 'booked' && b.date >= ymd(new Date())).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
@@ -60,18 +59,113 @@ function vHome() {
   ${installCard()}${up ? `<div class="card pop" style="margin-bottom:6px"><div class="sm mute">YOUR NEXT CUT</div><div class="nm" style="margin-top:4px">${fmtDate(up.date)} · ${t12(up.time)}</div><div class="sm mute">${esc(up.items.map(i => i.name).join(' + '))} with ${esc(up.staffName)} · ${esc(up.branchName)}</div></div>` : ''}
   <button class="bcard" data-go="/style" style="margin-top:6px"><span class="av" style="background:var(--s2)">${ic('scissors')}</span><div class="sp"><div class="nm">Find your cut</div><div class="sm mute">Pick your face shape and get cut ideas to show your barber</div></div></button>
   <div class="sec-h"><h2>Top barbers</h2><button class="link" data-go="/discover">See all</button></div>
-  ${D ? (D.barbers.length ? `<div class="hscroll">${D.barbers.slice(0, 12).map(barberTile).join('')}</div>` : '<div class="empty">No barbers yet.</div>') : '<div class="empty">Loading…</div>'}
+  ${D ? (D.barbers.length ? `<div class="hscroll">${D.barbers.slice(0, 12).map(b => barberTile(b)).join('')}</div>` : '<div class="empty">No barbers yet.</div>') : '<div class="empty">Loading…</div>'}
   <div class="sec-h"><h2>Our shops</h2><button class="link" data-go="/map">View map</button></div>${D ? `<div class="hscroll">${D.shops.map(shopTile).join('')}</div>` : ''}`;
 }
+// ----- Discover: a marketplace of barbers and haircuts -----
+Object.assign(ICON, { filter: '<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>' });
+const SORTS = [['best', 'Best match'], ['soonest', 'Soonest available'], ['trending', 'Trending this week'], ['rating', 'Top rated'], ['nearest', 'Nearest to me'], ['experience', 'Most experienced'], ['name', 'A to Z']];
+const discoverActive = () => !!(S.q || S.branch || S.style || S.avail || S.minRating || S.verified || S.sort !== 'best' || S.tab === 'shops');
+async function loadResults() {
+  if (!discoverActive()) { S.R = null; return; }
+  const qs = new URLSearchParams({ q: S.q, branch: S.branch, specialty: S.specialty, style: S.style, available: S.avail ? '1' : '', verified: S.verified ? '1' : '', minRating: S.minRating || '', sort: S.sort === 'nearest' ? 'best' : S.sort });
+  try { S.R = await api('/discover?' + qs); } catch { S.R = { barbers: [], shops: [] }; }
+}
+async function loadFresh() { try { S.fresh = (await api('/cuts')).items.filter(i => i.image).slice(0, 14); } catch { S.fresh = []; } }
+const shopOf = id => (S.D?.shops || []).find(s => s.id === id);
+const withKm = list => list.map(b => { const sh = shopOf(b.branchId); return { ...b, km: S.geo && sh && sh.lat != null ? kmBetween(S.geo.lat, S.geo.lng, sh.lat, sh.lng) : null }; });
+const secRow = (title, attr, inner = '') => `<div class="sec-h"><h2>${title}</h2>${attr ? `<button class="link" ${attr}>See all ›</button>` : ''}</div>${inner}`;
+const barberBig = b => {
+  const img = b.cover || b.photo, fav = !!S.token && S.favs.includes(b.id), tags = [b.verified ? '✓ Verified' : '', b.weekCuts ? `🔥 ${b.weekCuts} this week` : '', !b.reviews && !b.weekCuts && !b.verified ? 'New' : ''].filter(Boolean);
+  return `<article class="bigc"><div class="bigimg" data-go="/barber/${b.id}" role="link" aria-label="${esc(b.name)}" style="${img ? `background-image:url('${esc(img)}')` : ''}">${img ? '' : `<span class="ph">${esc(initials(b.name))}</span>`}<div class="tagrow">${tags.map(t => `<span class="mtag">${t}</span>`).join('')}</div><button class="hbtn ${fav ? 'on' : ''}" data-fav="${b.id}" aria-label="${fav ? 'Unfollow' : 'Follow'}">${ic('heart')}</button></div>
+  <div class="bigb" data-go="/barber/${b.id}"><div class="row"><b class="nm">${esc(b.name)}</b>${b.verified ? `<span class="ver">${ic('ver')}</span>` : ''}<span class="sp"></span><span class="sm">${rate(b.rating, b.reviews)}</span></div>
+  <div class="sm mute">${b.nextSlot ? `Next free ${t12(b.nextSlot)}` : 'Fully booked today'} · ${esc(b.branchName)}${b.km != null ? ' · ' + kmText(b.km) : ''}</div>
+  <div class="chiprow">${b.level ? `<span class="gold" style="font-size:11px;padding:3px 9px">${esc(b.level)}</span>` : ''}${(b.styles && b.styles.length ? b.styles : b.specialties).slice(0, 3).map(x => `<span>${esc(x)}</span>`).join('')}</div></div></article>`;
+};
+const BANNERS = [
+  { t: 'Your next cut, booked in seconds', p: 'Free for customers. Pick a shop, a barber and a time.', cta: 'Book now', a: 'data-bookany', e: '💈' },
+  { t: 'Not sure what to get?', p: 'Pick your face shape and get cut ideas to show your barber.', cta: 'Try the Style finder', a: 'data-go="/style"', e: '✂️' },
+  { t: 'Show off your fresh cut', p: 'Post it, tag your barber, and join the brotherhood.', cta: 'Open Community', a: 'data-go="/community"', e: '🔥' }
+];
+function filterBar() {
+  const D = S.D, label = Object.fromEntries(SORTS), shopName = S.branch ? (shopOf(S.branch)?.name || 'Shop') : 'All shops';
+  return `<div class="fbar"><div class="chips"><button class="chip" data-fsheet aria-label="All filters">${ic('filter').replace('class="i"', 'class="i" style="width:16px;height:16px;vertical-align:-3px"')}</button><button class="chip ${S.sort !== 'best' ? 'on' : ''}" data-fsort>${esc(label[S.sort])} ▾</button><button class="chip ${S.avail ? 'on' : ''}" data-avail>Available today</button><button class="chip ${S.minRating ? 'on' : ''}" data-frate>★ 4.0+</button><button class="chip ${S.verified ? 'on' : ''}" data-fver>✓ Verified</button><button class="chip ${S.branch ? 'on' : ''}" data-floc>${esc(shopName)} ▾</button><button class="chip ${S.style ? 'on' : ''}" data-fstyle>${S.style ? esc(S.style) : 'Style'} ▾</button></div></div>`;
+}
 function vDiscover() {
-  const D = S.D;
-  const brChips = D ? [['', 'All shops'], ...D.shops.map(s => [s.id, s.name])] : [];
-  return header('Discover') + `<div class="search">${ic('search')}<input id="q" placeholder="Search barber, shop or style" value="${esc(S.q)}" autocomplete="off"></div>
-  <div class="chips" style="margin-top:10px"><button class="chip ${S.avail ? 'on' : ''}" data-avail>Available today</button>${brChips.map(([id, n]) => `<button class="chip ${S.branch === id ? 'on' : ''}" data-branchf="${id}">${esc(n)}</button>`).join('')}</div>
-  ${D && D.specialties.length ? `<div class="chips">${D.specialties.map(s => `<button class="chip ${S.specialty === s ? 'on' : ''}" data-spec="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : ''}
-  <div class="row"><div class="tabs sp"><button class="${S.tab === 'barbers' ? 'on' : ''}" data-tab="barbers">Barbers</button><button class="${S.tab === 'shops' ? 'on' : ''}" data-tab="shops">Shops</button><button data-go="/map">Map</button></div>
-  ${S.tab === 'barbers' ? `<select id="sort" style="width:auto"><option value="best" ${S.sort === 'best' ? 'selected' : ''}>Best match</option><option value="rating" ${S.sort === 'rating' ? 'selected' : ''}>Top rated</option><option value="experience" ${S.sort === 'experience' ? 'selected' : ''}>Experience</option><option value="name" ${S.sort === 'name' ? 'selected' : ''}>Name</option></select>` : ''}</div>
-  <div class="list" id="results">${!D ? '<div class="empty">Loading…</div>' : S.tab === 'barbers' ? (D.barbers.map(barberRow).join('') || '<div class="empty">No barbers match. Try different filters.</div>') : (D.shops.map(shopCard).join('') || '<div class="empty">No shops match.</div>')}</div>`;
+  const D = S.D, active = discoverActive(), locLabel = S.branch ? (shopOf(S.branch)?.name || 'Shop') : S.geo ? 'Near you' : 'All shops';
+  const head = `<div class="dhead" id="dhead"><div class="row" style="margin-bottom:10px"><button class="locchip" data-floc aria-label="Choose location">${ic('pin')}<b>${esc(locLabel)}</b><span>▾</span></button><span class="sp"></span><button class="iconb" data-go="/map" aria-label="Map">${ic('pin')}</button><button class="iconb" data-go="${S.token ? '/me' : '/auth'}" aria-label="Barbers you follow">${ic('heart')}</button></div>
+    <div class="search">${ic('search')}<input id="q" placeholder="Search barbers, haircuts or shops" value="${esc(S.q)}" autocomplete="off"></div></div>`;
+  if (!D) return head + '<div class="empty">Loading…</div>';
+  let body = '';
+  if (!active) {
+    const all_ = withKm(D.barbers), counts = new Map((D.styleTiles || []).map(t => [t.name, t])), tiles = CUTS.map(c => ({ name: c.name, n: counts.get(c.name)?.n || 0, image: counts.get(c.name)?.image || '' })).sort((x, y) => y.n - x.n);
+    const soon = all_.filter(b => b.nextSlot).sort((x, y) => x.nextSlot.localeCompare(y.nextSlot)).slice(0, 10), hot = all_.filter(b => b.weekCuts > 0).sort((x, y) => y.weekCuts - x.weekCuts).slice(0, 10);
+    body = `<div class="banners" id="banners">${BANNERS.map(n => `<div class="banner"><div class="sp"><h3>${esc(n.t)}</h3><p>${esc(n.p)}</p><button class="btn white sm" ${n.a}>${esc(n.cta)} ›</button></div><span class="big" aria-hidden="true">${n.e}</span></div>`).join('')}</div>
+    <div class="dots" id="bdots">${BANNERS.map((_, i) => `<span class="${i ? '' : 'on'}"></span>`).join('')}</div>
+    ${secRow('Pick a style', '')}<div class="stiles">${tiles.map(t => `<button class="stile ${S.style === t.name ? 'on' : ''}" data-dstyle="${esc(t.name)}">${t.image ? `<img src="${esc(t.image)}" alt="" loading="lazy">` : `<span class="g">${ic('scissors')}</span>`}<span>${esc(t.name)}</span>${t.n ? `<em>${t.n}</em>` : ''}</button>`).join('')}</div>
+    ${D.services.length ? secRow('Pick a haircut', '') + `<div class="hscroll">${D.services.map(v => `<button class="tile wide" style="width:190px" data-svc="${v.id}">${v.photo ? `<img class="tp" style="aspect-ratio:16/10" src="${esc(v.photo)}" alt="" loading="lazy">` : ''}<div class="tb"><div class="nm">${esc(v.name)}</div><div class="sm mute">${v.mins || 30} min</div><div class="sm"><b>${peso(v.price)}</b> · Choose a shop ›</div></div></button>`).join('')}</div>` : ''}
+    ${soon.length ? secRow('Free today', 'data-dsee="soonest"') + `<div class="hscroll">${soon.map(b => barberTile(b, 'Next ' + t12(b.nextSlot))).join('')}</div>` : ''}
+    ${hot.length ? secRow('Trending this week', 'data-dsee="trending"') + `<div class="hscroll">${hot.map(b => barberTile(b, '🔥 ' + b.weekCuts + ' cut' + (b.weekCuts === 1 ? '' : 's'))).join('')}</div>` : ''}
+    ${S.fresh && S.fresh.length ? secRow('Fresh cuts', '') + `<div class="hscroll">${S.fresh.map((i, k) => `<button class="tile sq" data-fresh="${k}"><div class="tw"><img class="tp" src="${esc(i.image)}" alt="${esc(i.title)}" loading="lazy">${i.style ? `<span class="tbadge">${esc(i.style)}</span>` : ''}</div><div class="tb"><div class="sm tl"><b>${esc(i.title)}</b></div><div class="sm mute tl">${esc(i.barberName || i.author || '')}</div></div></button>`).join('')}</div>` : ''}
+    ${secRow('Top shops', 'data-dsee="shops"')}<div class="hscroll">${D.shops.map(shopTile).join('')}</div>
+    ${filterBar()}<div class="sec-h" style="margin-top:8px"><h2>Explore barbers nearby</h2><span class="mute sm">${all_.length}</span></div><div class="list">${all_.map(barberBig).join('') || '<div class="empty">No barbers yet.</div>'}</div>`;
+  } else {
+    const R = S.R, shopsMode = S.tab === 'shops';
+    let list = R ? withKm(R.barbers) : null; if (list && S.sort === 'nearest') list.sort((x, y) => (x.km ?? 1e9) - (y.km ?? 1e9));
+    body = filterBar() + `<div class="row" style="margin:6px 0 10px"><div class="tabs sp" style="margin:0"><button class="${!shopsMode ? 'on' : ''}" data-tab="barbers">Barbers</button><button class="${shopsMode ? 'on' : ''}" data-tab="shops">Shops</button></div><button class="link" data-dreset>Clear all</button></div>
+    ${!R ? '<div class="empty">Loading…</div>' : shopsMode ? `<div class="list">${R.shops.map(shopCard).join('') || '<div class="card empty">No shops match.</div>'}</div>` : `<div class="mute sm" style="margin-bottom:8px">${list.length} barber${list.length === 1 ? '' : 's'}${S.sort === 'nearest' && !S.geo ? ' · allow location to sort by distance' : ''}</div><div class="list">${list.map(barberBig).join('') || '<div class="card empty">No barbers match. Try removing a filter.</div>'}</div>`}`;
+  }
+  return head + body;
+}
+function pickSheet(title, opts, cur, cb) {
+  const o = sheet(`<h3>${esc(title)}</h3>${opts.map(([v, l, sub]) => `<button class="opt" data-pick="${esc(v)}"><span class="sp"><b>${esc(l)}</b>${sub ? `<span class="sm mute">${esc(sub)}</span>` : ''}</span><span class="ck">${String(cur) === String(v) ? '✓' : ''}</span></button>`).join('')}`);
+  o.addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (b) { o.remove(); cb(b.dataset.pick); } });
+}
+async function refreshResults() { await loadResults(); render(); }
+function nearMe() {
+  return new Promise(ok => {
+    if (!navigator.geolocation) { toast('Your browser cannot share its location'); return ok(false); }
+    navigator.geolocation.getCurrentPosition(p => { S.geo = { lat: p.coords.latitude, lng: p.coords.longitude }; ok(true); }, () => { toast('Allow location access to use Near me'); ok(false); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+  });
+}
+function shopOptions() { return (S.D?.shops || []).map(s => { const km = S.geo && s.lat != null ? kmBetween(S.geo.lat, S.geo.lng, s.lat, s.lng) : null; return [s.id, s.name, `${t12(s.openTime)}–${t12(s.closeTime)}${km != null ? ' · ' + kmText(km) : ''} · ${s.barbers} barber${s.barbers === 1 ? '' : 's'}`, km]; }).sort((a, b) => (a[3] ?? 1e9) - (b[3] ?? 1e9)); }
+function openShopPicker(mode, svc) {
+  const opts = shopOptions().map(([id, n, sub]) => [id, n, sub]);
+  if (mode === 'filter') opts.unshift(['', 'All shops', ''], ['__near', 'Near me', 'Sort by distance from you']);
+  pickSheet(mode === 'svc' ? `Where do you want your ${svc.name}?` : mode === 'book' ? 'Choose a shop to book' : 'Choose a shop', opts, mode === 'filter' ? S.branch : '', async v => {
+    if (v === '__near') { if (await nearMe()) { S.branch = ''; S.sort = 'nearest'; await refreshResults(); } return; }
+    if (mode === 'filter') { S.branch = v; return refreshResults(); }
+    startBooking(v, 'any'); if (svc) { S.bk.items = [svc.id]; loadSlots(); } if (!S.token) nav('/auth');
+  });
+}
+function openFilters() {
+  const o = sheet(''), draw = () => {
+    const chip = (attr, val, label, on) => `<button class="chip ${on ? 'on' : ''}" ${attr}="${esc(val)}">${esc(label)}</button>`;
+    o.querySelector('.sheet').innerHTML = `<h3>Filters</h3>
+      <div class="sm mute" style="margin:8px 0 4px">Sort by</div><div class="chips" style="flex-wrap:wrap">${SORTS.map(([v, l]) => chip('data-xs', v, l, S.sort === v)).join('')}</div>
+      <div class="sm mute" style="margin:8px 0 4px">Shop</div><div class="chips" style="flex-wrap:wrap">${chip('data-xb', '', 'All shops', !S.branch)}${(S.D?.shops || []).map(s => chip('data-xb', s.id, s.name, S.branch === s.id)).join('')}</div>
+      <div class="sm mute" style="margin:8px 0 4px">Style</div><div class="chips" style="flex-wrap:wrap">${chip('data-xy', '', 'Any style', !S.style)}${CUTS.map(c => chip('data-xy', c.name, c.name, S.style === c.name)).join('')}</div>
+      <div class="sm mute" style="margin:8px 0 4px">More</div><div class="chips" style="flex-wrap:wrap">${chip('data-xa', '1', 'Available today', S.avail)}${chip('data-xr', '1', '★ 4.0+', S.minRating)}${chip('data-xv', '1', '✓ Verified', S.verified)}</div>
+      <div class="row" style="margin-top:16px"><button class="btn ghost sp" data-xreset>Clear all</button><button class="btn sp" data-x>Show results</button></div>`;
+  };
+  draw();
+  o.addEventListener('click', async e => {
+    const t = e.target.closest('[data-xs],[data-xb],[data-xy],[data-xa],[data-xr],[data-xv],[data-xreset]'); if (!t) { if (e.target === o || e.target.closest('[data-x]')) refreshResults(); return; }
+    const d = t.dataset;
+    if ('xs' in d) { if (d.xs === 'nearest' && !S.geo && !(await nearMe())) return; S.sort = d.xs; } else if ('xb' in d) S.branch = d.xb; else if ('xy' in d) S.style = d.xy; else if ('xa' in d) S.avail = !S.avail; else if ('xr' in d) S.minRating = S.minRating ? 0 : 4; else if ('xv' in d) S.verified = !S.verified;
+    else if ('xreset' in d) resetDiscover();
+    draw(); loadResults();
+  });
+}
+function resetDiscover() { S.q = ''; S.branch = ''; S.specialty = ''; S.style = ''; S.avail = false; S.minRating = 0; S.verified = false; S.sort = 'best'; S.tab = 'barbers'; S.R = null; }
+let bannerTimer = null;
+function afterDiscover() {
+  const dh = document.getElementById('dhead'); if (dh) document.documentElement.style.setProperty('--dh', dh.offsetHeight - 1 + 'px');
+  clearInterval(bannerTimer); const bn = document.getElementById('banners'); if (!bn) return;
+  const dots = [...document.querySelectorAll('#bdots span')], step = () => bn.children[0] ? bn.children[0].offsetWidth + 10 : 300;
+  const mark = () => { const i = Math.round(bn.scrollLeft / step()); dots.forEach((d, k) => d.classList.toggle('on', k === i)); };
+  bn.addEventListener('scroll', () => requestAnimationFrame(mark), { passive: true });
+  bannerTimer = setInterval(() => { if (route().a !== 'discover' || !document.getElementById('banners') || document.hidden) return clearInterval(bannerTimer); const i = Math.round(bn.scrollLeft / step()); bn.scrollTo({ left: ((i + 1) % BANNERS.length) * step(), behavior: 'smooth' }); }, 5000);
 }
 const fmtMonth = d => { if (!d) return ''; if (/^\d{4}$/.test(d)) return d; const dt = new Date((d.length === 7 ? d + '-01' : d) + 'T00:00:00'); return dt.toLocaleDateString('en-PH', d.length === 7 ? { month: 'short', year: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }); };
 const certThumb = c => c.image ? `<img src="${esc(c.image)}" alt="Certificate: ${esc(c.title)}" data-lb="${esc(c.image)}" loading="lazy" style="width:64px;height:64px;border-radius:10px;object-fit:cover;cursor:zoom-in;flex:none">` : `<span class="av" style="width:64px;height:64px;border-radius:10px">${ic('star')}</span>`;
@@ -537,11 +631,13 @@ async function render() {
   app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'home' && r.a === 'home') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
   if (focus === 'q' || focus === 'cq') { const el = document.getElementById(focus); if (el) el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
   if (r.a === 'map') mountMap();
+  if (r.a === 'discover') afterDiscover();
   if (r.a === 'barber' || r.a === 'book' || r.a === 'shop') window.scrollTo(0, r.a === 'book' ? sy : 0);
 }
 async function onRoute() {
   const r = route(); window.scrollTo(0, 0);
   if (r.a === 'barber') { S.cur = null; S.bTab = 'cuts'; S.bStyle = ''; }
+  if (r.a === 'discover') { if (!S.fresh) loadFresh().then(() => { if (route().a === 'discover') render(); }); if (discoverActive() && !S.R) loadResults().then(render); }
   if (['discover', 'home', 'book', 'barber', 'shop', 'map', 'community'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
@@ -556,12 +652,12 @@ addEventListener('hashchange', onRoute);
 // ---------- events ----------
 let qTimer;
 app.addEventListener('input', e => {
-  if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(async () => { await loadDiscover().catch(() => { }); render(); }, 250); }
+  if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(refreshResults, 250); }
   if (e.target.id === 'bnotes' && S.bk) S.bk.notes = e.target.value;
   if (e.target.id === 'cq') { S.cq = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(async () => { await loadFeed(); render(); }, 300); }
 });
 app.addEventListener('change', async e => {
-  if (e.target.id === 'sort') { S.sort = e.target.value; await loadDiscover(); render(); }
+  if (e.target.id === 'sort') { S.sort = e.target.value; await refreshResults(); }
   if (e.target.id === 'prosel') { S.proSel = e.target.value; S.proMsg = null; render(); loadDash(); }
   if (e.target.id === 'cfile') { const f = e.target.files[0]; e.target.value = ''; if (f) { try { S.comp.img = await compress(f); S.comp.err = ''; } catch (x) { S.comp.err = x.message; } render(); } }
   if (e.target.id === 'pstyle') S.pstyle = e.target.value;
@@ -592,7 +688,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -608,10 +704,10 @@ app.addEventListener('click', async e => {
   }
   if (D.wldel) { try { await api('/waitlist/' + D.wldel, { method: 'DELETE' }); S.wait = (S.wait || []).filter(x => x.id !== D.wldel); } catch (x) { toast(x.message); } return render(); }
   if (D.bookshop) { startBooking(D.bookshop, 'any'); if (!S.token) nav('/auth'); return; }
-  if (D.avail != null) { S.avail = !S.avail; await loadDiscover(); return render(); }
-  if (D.branchf != null) { S.branch = D.branchf; await loadDiscover(); return render(); }
-  if (D.spec) { S.specialty = S.specialty === D.spec ? '' : D.spec; await loadDiscover(); return render(); }
-  if (D.tab) { S.tab = D.tab; return render(); }
+  if (D.avail != null) { S.avail = !S.avail; return refreshResults(); }
+  if (D.branchf != null) { S.branch = D.branchf; return refreshResults(); }
+  if (D.spec) { S.specialty = S.specialty === D.spec ? '' : D.spec; return refreshResults(); }
+  if (D.tab) { S.tab = D.tab; return refreshResults(); }
   if (D.cverify) { try { await api('/pro/certs/' + D.cverify, { method: 'PUT', body: { verified: D.on !== '1' } }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
   if (D.certdel) { if (!confirm('Remove this seminar?')) return; try { await api('/pro/certs/' + D.certdel, { method: 'DELETE' }, S.proToken); await loadPro(); } catch (x) { toast(x.message); } return render(); }
   if (D.btab) { S.bTab = D.btab; return render(); }
@@ -693,6 +789,18 @@ app.addEventListener('click', async e => {
     toast('Getting your location… stand inside the shop');
     return navigator.geolocation.getCurrentPosition(p => saveLoc(D.locgps, { lat: p.coords.latitude, lng: p.coords.longitude }), () => toast('Could not get your location. Allow location access and try again.'), { enableHighAccuracy: true, timeout: 15000 });
   }
+  if (D.floc != null) return openShopPicker('filter');
+  if (D.fsheet != null) return openFilters();
+  if (D.fsort != null) return pickSheet('Sort by', SORTS, S.sort, async v => { if (v === 'nearest' && !S.geo && !(await nearMe())) return; S.sort = v; refreshResults(); });
+  if (D.frate != null) { S.minRating = S.minRating ? 0 : 4; return refreshResults(); }
+  if (D.fver != null) { S.verified = !S.verified; return refreshResults(); }
+  if (D.fstyle != null) return pickSheet('Style', [['', 'Any style'], ...CUTS.map(c => [c.name, c.name])], S.style, v => { S.style = v; refreshResults(); });
+  if (D.dstyle) { S.style = S.style === D.dstyle ? '' : D.dstyle; window.scrollTo(0, 0); return refreshResults(); }
+  if (D.dsee) { if (D.dsee === 'shops') S.tab = 'shops'; else { S.sort = D.dsee; if (D.dsee === 'soonest') S.avail = true; } window.scrollTo(0, 0); return refreshResults(); }
+  if (D.dreset != null) { resetDiscover(); return render(); }
+  if (D.svc) { const v = S.D.services.find(x => x.id === D.svc); return v && openShopPicker('svc', v); }
+  if (D.fresh != null) { const i = S.fresh && S.fresh[+D.fresh]; return i && openMedia(i); }
+  if (D.bookany != null) return openShopPicker('book');
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
   if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); return render(); }
   if (D.drange) { S.dashRange = D.drange; render(); return loadDash(); }
