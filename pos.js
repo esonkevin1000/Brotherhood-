@@ -653,7 +653,7 @@ function receiptSheet(o) {
     ${o.change ? `<div class="row between"><span>Change</span><b style="color:var(--gold);font-size:20px">${peso(o.change)}</b></div>` : ''}<br><button class="block" data-a="closesheet">Done</button>`);
 }
 
-// ---------- printable sales reading (no sales receipts / invoices are printed) ----------
+// ---------- sales reading on screen (nothing is printed except the payslip) ----------
 const dt = iso => iso ? new Date(iso).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 const R = (l, r, b) => `<div class="r"><span>${esc(l)}</span><span>${b ? '<b>' + esc(r) + '</b>' : esc(r)}</span></div>`;
 const head = b => `<h3>${esc((P.shop || 'Brotherhood').toUpperCase())} BARBERSHOP</h3><div class="c">${esc(b.branchName || '')}</div>${b.address ? `<div class="c">${esc(b.address)}</div>` : ''}${b.phone ? `<div class="c">${esc(b.phone)}</div>` : ''}`;
@@ -666,11 +666,11 @@ function readingHtml(z) {
     + '<hr><b>CASH DRAWER</b>' + R('Opening float', peso(z.openingFloat)) + R('+ Cash sales', peso(z.cashSales)) + R('+ Cash in', peso(z.cashIn)) + R('- Out / expenses', peso(z.cashOut))
     + R('Expected cash', peso(z.expected), true) + R('Declared cash', peso(z.counted)) + R('VARIANCE', peso(z.variance), true)
     + (dn.length ? '<hr><b>DENOMINATIONS</b>' + dn.map(([d, n]) => R('P' + d + ' x ' + n, peso(d * n))).join('') : '')
-    + (z.remarks ? `<hr>Remarks: ${esc(z.remarks)}` : '') + `<hr><div class="c">Printed ${esc(dt(new Date().toISOString()))}</div><div class="c">*** END OF SALES READING ***</div>`;
+    + (z.remarks ? `<hr>Remarks: ${esc(z.remarks)}` : '') + `<hr><div class="c">*** END OF SALES READING ***</div>`;
 }
 function printHtml(html) { document.getElementById('print').innerHTML = `<div class="paper">${html}</div>`; setTimeout(() => window.print(), 50); }
 function showReading(z) {
-  P.lastZ = z; openSheet(`<div class="paper">${readingHtml(z)}</div><div class="row" style="margin-top:12px"><button style="flex:1" data-a="printz">${ic('printer')} Print Sales Reading</button><button class="ghost" style="flex:1" data-a="closesheet">Done</button></div>`);
+  P.lastZ = z; openSheet(`<div class="paper">${readingHtml(z)}</div><button class="block" data-a="closesheet" style="margin-top:12px">Done</button>`);
 }
 
 // ---------- events ----------
@@ -870,7 +870,6 @@ document.addEventListener('click', async e => {
   if (a === 'sfgo') return sfSubmit();
   if (a === 'syncnow') { for (const x of await OFF.all()) { x.retry = true; await OFF.put(x); } await syncQueue(); return; }
   if (a === 'att') { const r = await guard(() => api('POST', '/api/attendance', { staffId: d.id, action: d.x })); if (r) toast('Saved'); return refresh(); }
-  if (a === 'printz') return printHtml(readingHtml(P.lastZ));
   if (a === 'viewz') { const z = P.zs[+d.i]; return showReading({ no: z.no, businessDate: z.businessDate, ...z.data }); }
   if (a === 'tab') { P.tab = d.t; return render(); }
   if (a === 'den') { P.denoms[d.d] = Math.max(0, (P.denoms[d.d] || 0) + +d.n); return render(); }
