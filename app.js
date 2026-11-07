@@ -11,7 +11,7 @@ const ago = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso
 let S = { shop: 'Brotherhood', me: null, branches: [], chairs: [], staff: [], categories: [], items: [], discounts: [], users: [] };
 let token = ''; try { token = localStorage.getItem('bp.token') || ''; } catch (e) { }
 let loggedIn = false, loadErr = '';
-const ui = { navQ: '', view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', reviews: [], picked: new Set(), navClosed: new Set((() => { try { return JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { return []; } })()) };
+const ui = { navQ: '', pg: {}, view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', reviews: [], picked: new Set(), navClosed: new Set((() => { try { return JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { return []; } })()) };
 const modal = document.getElementById('modal');
 const openModal = h => { modal.innerHTML = h; if (!modal.open) modal.showModal(); };
 const closeModal = () => modal.close();
@@ -113,6 +113,7 @@ function renderBase() {
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { mb.textContent = ui.notif && ui.notif.total ? '🔔 ' + ui.notif.total : '🔔'; mb.style.color = ui.notif && ui.notif.total ? '#e5384a' : ''; }
   view.innerHTML = branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
+  paginateTables();
 }
 // Branch picker shown at the top of every page (not only in the side menu), so it is one tap on phones too
 const DATE_VIEWS = ['bookings', 'chk', 'slip', 'att', 'exp', 'remit'];
@@ -123,6 +124,23 @@ function branchBar() {
   return `<div class="pagebar"><label for="branchsel2">Branch</label><select id="branchsel2"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>${date}</div>`;
 }
 
+// ---------- long tables, page by page ----------
+// Every table in the back office with more than 15 rows is shown in pages (15 / 30 / 50 / 100 per page). It works on the finished screen, so each list gets it without extra code.
+function paginateTables() {
+  document.querySelectorAll('#view .pager').forEach(p => p.remove());
+  document.querySelectorAll('#view table').forEach((tb, idx) => {
+    if (tb.hasAttribute('data-nopg')) return;
+    const rows = [...tb.querySelectorAll('tr')].filter(r => !r.querySelector('th')), key = ui.view + '#' + idx;
+    const st = ui.pg[key] ||= { p: 1, n: 15 }, total = rows.length;
+    if (total <= 15 && st.n === 15) { rows.forEach(r => { r.style.display = ''; }); return; }
+    const pages = Math.max(1, Math.ceil(total / st.n)); if (st.p > pages) st.p = pages; const from = (st.p - 1) * st.n, to = Math.min(total, from + st.n);
+    rows.forEach((r, i) => { r.style.display = i >= from && i < to ? '' : 'none'; });
+    if (total <= 15) { return; }
+    const bar = document.createElement('div'); bar.className = 'pager';
+    bar.innerHTML = `<span class="mute">Showing ${from + 1}–${to} of ${total}</span><div class="pgb"><button class="btn ghost sm" data-pgk="${key}" data-pgd="-1" ${st.p <= 1 ? 'disabled' : ''}>‹ Prev</button><span>Page ${st.p} of ${pages}</span><button class="btn ghost sm" data-pgk="${key}" data-pgd="1" ${st.p >= pages ? 'disabled' : ''}>Next ›</button></div><select data-pgn="${key}" aria-label="Rows per page">${[15, 30, 50, 100].map(n => `<option value="${n}" ${st.n === n ? 'selected' : ''}>${n} per page</option>`).join('')}</select>`;
+    tb.parentNode.insertBefore(bar, tb.nextSibling);
+  });
+}
 // ---------- report rendering ----------
 function renderCards(cards) {
   return `<div class="grid">${cards.map(c => `<div class="card stat"><span>${esc(c.label)}</span><b>${fmtVal(c.value, c.t)}</b>${c.sub ? `<small class="mute">${esc(c.sub)}</small>` : ''}</div>`).join('')}</div>`;
@@ -378,7 +396,7 @@ function vCustomers() {
     <button class="btn" data-act="edit" data-kind="customers">+ Add</button>
     <label class="btn ghost" style="margin:0;cursor:pointer;color:var(--text);text-transform:none;letter-spacing:0;font-size:14px;font-weight:700">⬆ Import CSV<input type="file" id="csvfile" accept=".csv,text/csv" hidden></label></div></div>
   <p class="mute" style="margin:-6px 0 14px;font-size:13px">Showing customers of <b>${where}</b> (change it with the branch picker on the left). Sorted by the most recent haircut, with the branch where it happened. 1 paid visit = 1 point · Member 0–4 · Bronze 5–15 · Silver 16–25 · Gold 26–50 · VIP 51+.</p>
-  <div class="card overflow"><table><tr><th>Customer</th><th>Contact</th><th>Preferred haircut</th><th>Tier</th><th>Visits / points</th><th>Total spent</th><th>Last haircut</th><th>Branch</th><th>Email promos</th><th></th></tr>
+  <div class="card overflow"><table data-nopg><tr><th>Customer</th><th>Contact</th><th>Preferred haircut</th><th>Tier</th><th>Visits / points</th><th>Total spent</th><th>Last haircut</th><th>Branch</th><th>Email promos</th><th></th></tr>
   ${c.rows.map(r => `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.phone)}${r.phone && r.email ? '<br>' : ''}<span class="mute">${esc(r.email)}</span></td><td>${esc(r.preferredCut)}</td><td>${tierBadge(r.tier)}</td><td><b>${r.visits}</b></td><td>${peso(r.spent)}</td>
     <td>${r.lastVisit ? new Date(r.lastVisit).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) + '<br><span class="mute" style="font-size:12px">' + new Date(r.lastVisit).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' }) + '</span>' : '<span class="mute">No visit yet</span>'}</td>
     <td>${esc(r.branchName) || '<span class="mute">—</span>'}</td><td>${r.consent ? '<span style="color:var(--ok);font-weight:700">✔ Subscribed</span>' : '<span class="mute">—</span>'}</td><td><button class="btn ghost sm" data-act="edit" data-kind="customers" data-id="${r.id}">Edit</button></td></tr>`).join('') || '<tr><td colspan="10" class="mute">No customers in the directory for this view.</td></tr>'}</table></div>
@@ -517,10 +535,11 @@ async function showIdPhoto(id, base = '/api/idphoto/', heading = 'Customer ID ph
 }
 document.addEventListener('click', async e => {
   if (e.target.closest('[data-act="menu"]')) { const o = document.getElementById('nav').classList.toggle('open'); document.getElementById('scrim').classList.toggle('show', o); return; }
+  const pgb = e.target.closest('[data-pgd]'); if (pgb) { const st = ui.pg[pgb.dataset.pgk]; if (st) { st.p += +pgb.dataset.pgd; paginateTables(); const nb = [...document.querySelectorAll('[data-pgk]')].find(b => b.dataset.pgk === pgb.dataset.pgk), tb = nb && nb.closest('.pager') && nb.closest('.pager').previousElementSibling; if (tb && tb.scrollIntoView) tb.scrollIntoView({ block: 'start', behavior: 'smooth' }); } return; }
   const gh = e.target.closest('[data-grp]');
   if (gh) { const g = gh.dataset.grp; if (ui.navClosed.has(g)) ui.navClosed.delete(g); else ui.navClosed.add(g); try { localStorage.setItem('navClosed', JSON.stringify([...ui.navClosed])); } catch { } return render(); }
   const nb = e.target.closest('[data-view]');
-  if (nb) { document.getElementById('nav').classList.remove('open'); document.getElementById('scrim').classList.remove('show'); ui.view = nb.dataset.view; ui.navQ = ''; ui.picked.clear(); if (ui.view === 'mgmt:customers') ui.cust.page = 1; render(); await loadView(); return render(); }
+  if (nb) { document.getElementById('nav').classList.remove('open'); document.getElementById('scrim').classList.remove('show'); ui.view = nb.dataset.view; ui.navQ = ''; ui.pg = {}; ui.picked.clear(); if (ui.view === 'mgmt:customers') ui.cust.page = 1; render(); await loadView(); return render(); }
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
@@ -707,6 +726,7 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target;
+  if (t.dataset && t.dataset.pgn) { const st = ui.pg[t.dataset.pgn]; if (st) { st.n = +t.value; st.p = 1; paginateTables(); } return; }
   if (t.id === 'lstatus') { ui.lstatus = t.value; await loadView(); return render(); }
   if (t.id === 'pstatus') { ui.pstatus = t.value; await loadView(); return render(); }
   if (t.id === 'aflag') { ui.aflag = t.checked; await loadView(); return render(); }
@@ -714,9 +734,9 @@ document.addEventListener('change', async e => {
   if (t.id === 'estatus') { ui.estatus = t.value; await loadView(); return render(); }
   if (t.id === 'ecat') { ui.ecat = t.value; await loadView(); return render(); }
   if (t.id === 'rstatus') { ui.rstatus = t.value; await loadView(); return render(); }
-  if (t.id === 'branchsel' || t.id === 'branchsel2') { ui.branch = t.value; render(); await loadView(); return render(); }
+  if (t.id === 'branchsel' || t.id === 'branchsel2') { ui.pg = {}; ui.branch = t.value; render(); await loadView(); return render(); }
   if (t.id === 'tierf') { ui.cust.tier = t.value; ui.cust.page = 1; await loadView(); return render(); }
-  if (t.id === 'dpreset') { ui.rp = t.value; if (t.value !== 'custom') [ui.from, ui.to] = presetRange(t.value); render(); await loadView(); return render(); }
+  if (t.id === 'dpreset') { ui.pg = {}; ui.rp = t.value; if (t.value !== 'custom') [ui.from, ui.to] = presetRange(t.value); render(); await loadView(); return render(); }
   if (t.dataset.bphoto) {
     const file = t.files[0]; if (!file) return; const id = t.dataset.bphoto, msg = document.getElementById('bm-' + id); msg.textContent = 'Uploading…';
     try {
