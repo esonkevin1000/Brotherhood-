@@ -287,10 +287,28 @@ function vAuth() {
   <p class="mute" style="text-align:center">${su ? 'Already a member?' : 'New here?'} <button class="link" data-authmode="${su ? 'login' : 'signup'}">${su ? 'Log in' : 'Create an account'}</button></p>
   <p class="mute sm" style="text-align:center;margin-top:24px">Barber or shop owner? <button class="link" data-go="/pro">Sign in to pro tools</button></p>`;
 }
+const memberPhotos = u => `<div class="card" style="padding:0;overflow:hidden"><div style="height:120px;background:linear-gradient(135deg,#1e2024,#0f1012);${u.cover ? `background-image:url('${esc(u.cover)}');` : ''}background-size:cover;background-position:center"></div>
+  <div style="padding:0 14px 14px"><div class="row" style="margin-top:-34px;align-items:flex-end">${pic(u.photo, u.name, 'av lg')}<span class="sp"></span><button class="btn sec sm" style="margin-bottom:4px" data-go="/member/${u.id}">View my public profile</button></div>
+  <div style="margin-top:8px"><b style="font-size:17px">${esc(u.name)}</b><div class="sm mute">${esc(u.email)}</div></div>
+  <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px"><label class="btn sec sm" style="cursor:pointer">${u.photo ? 'Change profile photo' : 'Add profile photo'}<input type="file" id="mavatar" accept="image/*" hidden></label><label class="btn sec sm" style="cursor:pointer">${u.cover ? 'Change cover photo' : 'Add cover photo'}<input type="file" id="mcoverf" accept="image/*" hidden></label>${u.cover ? '<button class="btn danger sm" data-mcovdel>Remove cover</button>' : ''}${u.photo ? '<button class="btn ghost sm" data-mphotodel>Remove photo</button>' : ''}</div>
+  <div class="sm mute" style="margin-top:8px">Your photo, cover and bio are visible to other members. Your phone number and email are never shown.</div></div></div>`;
+async function vMember(id) {
+  if (!S.mem || S.mem.member.id !== id) {
+    try { S.mem = await api('/members/' + id, {}, S.token); } catch (e) { S.mem = null; return header('', '/community') + `<div class="err">${esc(e.message)}</div>`; }
+    S.feed = { posts: S.mem.posts, more: false };   // lets like / save / comment on these cards work like in the feed
+  }
+  const j = S.mem, m = j.member;
+  return `<div class="pcover" style="background-image:linear-gradient(180deg,rgba(9,9,10,.2),rgba(9,9,10,.88))${m.cover ? `,url('${esc(m.cover)}')` : ''}"></div>
+  <div class="bar" style="margin-top:-150px;background:none"><button class="btn sec sm" data-go="/community" aria-label="Back">${ic('back')}</button><span class="sp"></span></div>
+  <div class="phead">${pic(m.photo, m.name, 'av lg')}<span class="sp"></span>${m.mine ? `<button class="btn sec sm" style="margin-bottom:6px" data-go="/me">Edit profile</button>` : S.user ? `<button class="btn ${m.following ? 'sec' : 'white'} sm" style="margin-bottom:6px;min-width:104px" data-mfollow="${m.id}" data-on="${m.following ? 1 : 0}">${m.following ? '✓ Following' : '+ Follow'}</button>` : `<button class="btn white sm" style="margin-bottom:6px;min-width:104px" data-go="/auth">+ Follow</button>`}</div>
+  <h1 style="font-size:26px;margin-top:10px">${esc(m.name)}</h1>${m.bio ? `<p class="mute" style="margin:6px 0 0;white-space:pre-wrap">${esc(m.bio)}</p>` : ''}<div class="mute sm" style="margin-top:4px">Member since ${new Date(m.joined).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' })}</div>
+  <div class="stats5" style="grid-template-columns:repeat(3,1fr)"><div><b class="num">${m.posts}</b><span>Posts</span></div><div><b class="num">${m.likes}</b><span>Likes</span></div><div><b class="num">${m.followers}</b><span>Followers</span></div></div>
+  <div class="sec-h"><h2>Posts</h2></div><div class="list">${j.posts.map(postCard).join('') || '<div class="card empty">No posts yet.</div>'}</div>`;
+}
 function vMe() {
   if (!S.user) { setTimeout(() => nav('/auth')); return ''; }
   const u = S.user, favs = S.D ? S.D.barbers.filter(b => S.favs.includes(b.id)) : [];
-  return header('Profile', '/') + `<div class="card row"><span class="av">${esc(initials(u.name))}</span><div class="sp"><b>${esc(u.name)}</b><div class="sm mute">${esc(u.email)}</div></div></div>
+  return header('Profile', '/') + `${memberPhotos(u)}
   <div class="sec-h"><h2>Barbers you follow</h2></div><div class="list">${favs.map(barberRow).join('') || '<div class="card empty">Tap Follow on a barber to keep them here.</div>'}</div>
   <div class="sec-h"><h2>Saved styles</h2><button class="link" data-go="/style">Style finder</button></div><div class="pill-row">${(u.styles || []).map(id => cutById(id)).filter(Boolean).map(c => `<span class="tag">${esc(c.name)}</span>`).join('') || '<span class="mute sm">None yet. Try the Style finder.</span>'}</div>
   <div class="sec-h"><h2>My details</h2></div><form id="mef">${S.meMsg ? `<div class="${S.meMsg.ok ? 'ok' : 'err'}">${esc(S.meMsg.t)}</div>` : ''}<label class="f">Name<input name="name" value="${esc(u.name)}" required></label><label class="f">Mobile<input name="phone" type="tel" value="${esc(u.phone)}" required></label><label class="f">City<input name="city" value="${esc(u.city)}" placeholder="e.g. San Pablo"></label><button class="btn block" style="margin-top:14px">Save</button></form>
@@ -515,7 +533,7 @@ async function loadFeed() {
 async function loadCuts() { try { S.cuts = await api('/cuts?style=' + encodeURIComponent(S.cstyle || '')); } catch { S.cuts = { items: [], styles: [] }; } }
 async function loadCommunity() { if ((S.ctab || 'feed') === 'cuts') await loadCuts(); else await loadFeed(); render(); }
 function postCard(p) {
-  return `<article class="card pop post"><div class="row"><span class="av" style="width:40px;height:40px;font-size:14px">${esc(initials(p.author))}</span><div class="sp"><b>${esc(p.author)}</b><div class="sm mute">${ago(p.createdAt)}${p.staffName ? ` · cut by <a href="#/barber/${p.staffId}" style="color:var(--text);text-decoration:underline">${esc(p.staffName)}</a>` : ''}</div></div>
+  return `<article class="card pop post"><div class="row"><a href="#/member/${p.userId}" aria-label="${esc(p.author)}">${p.authorPhoto ? `<img class="av" src="${esc(p.authorPhoto)}" alt="" style="width:40px;height:40px" loading="lazy">` : `<span class="av" style="width:40px;height:40px;font-size:14px">${esc(initials(p.author))}</span>`}</a><div class="sp"><a href="#/member/${p.userId}" style="font-weight:700">${esc(p.author)}</a><div class="sm mute">${ago(p.createdAt)}${p.staffName ? ` · cut by <a href="#/barber/${p.staffId}" style="color:var(--text);text-decoration:underline">${esc(p.staffName)}</a>` : ''}</div></div>
     ${!p.mine && S.user ? `<button class="btn sec sm" data-pfollow="${p.userId}" data-on="${p.following ? 1 : 0}">${p.following ? 'Following' : 'Follow'}</button>` : ''}
     <details style="position:relative"><summary class="btn sec sm" style="list-style:none">•••</summary><div class="card" style="position:absolute;right:0;z-index:4;width:170px;padding:6px;display:grid;gap:4px">${p.mine ? `<button class="btn ghost sm" data-pdel="${p.id}" data-ptype="post">Delete post</button>` : `<button class="btn ghost sm" data-preport="${p.id}">Report post</button><button class="btn ghost sm" data-pblock="${p.userId}">Block ${esc(p.author)}</button>`}</div></details></div>
     ${p.text ? `<p style="margin:10px 0 0;white-space:pre-wrap;word-break:break-word">${esc(p.text)}</p>` : ''}
@@ -538,7 +556,7 @@ function vCommunity() {
   } else if (tab === 'me') {
     if (!u) body = loginCard('Log in to see your profile and posts.');
     else { const st = (f && f.stats) || { posts: 0, likes: 0, following: S.favs.length };
-      body = `<div class="card row"><span class="av lg" style="width:64px;height:64px;font-size:22px;border-width:2px">${esc(initials(u.name))}</span><div class="sp"><b style="font-size:17px">${esc(u.name)}</b><div class="sm mute">${esc(u.city || 'Brotherhood member')}</div></div><button class="btn sec sm" data-go="/me">Account</button></div>
+      body = `${memberPhotos(u)}
       <div class="stats5" style="grid-template-columns:repeat(3,1fr)"><div><b class="num">${st.posts}</b><span>Posts</span></div><div><b class="num">${st.likes}</b><span>Likes</span></div><div><b class="num">${st.following}</b><span>Barbers followed</span></div></div>`; }
   }
   let list = '';
@@ -630,10 +648,10 @@ let rendering = 0;
 async function render() {
   const my = ++rendering, r = route(); let html = '';
   if (r.a === 'home') html = vHome(); else if (r.a === 'discover') html = vDiscover(); else if (r.a === 'barber') html = await vBarber(r.b);
-  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else if (r.a === 'style') html = vStyle(); else if (r.a === 'shop') html = await vShop(r.b); else if (r.a === 'map') html = vMap(); else html = vHome();
+  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else if (r.a === 'member') html = await vMember(r.b); else if (r.a === 'style') html = vStyle(); else if (r.a === 'shop') html = await vShop(r.b); else if (r.a === 'map') html = vMap(); else html = vHome();
   if (my !== rendering) return;
   const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart, sy = window.scrollY;
-  const showNav = !['barber', 'book', 'auth', 'pro', 'notifications', 'style', 'shop'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
+  const showNav = !['barber', 'book', 'auth', 'pro', 'notifications', 'style', 'shop', 'member'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
   app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'home' && r.a === 'home') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
   if (focus === 'q' || focus === 'cq') { const el = document.getElementById(focus); if (el) el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
   if (r.a === 'map') mountMap();
@@ -643,8 +661,9 @@ async function render() {
 async function onRoute() {
   const r = route(); window.scrollTo(0, 0);
   if (r.a === 'barber') { S.cur = null; S.bTab = 'cuts'; S.bStyle = ''; }
+  if (r.a === 'member') S.mem = null;
   if (r.a === 'discover') { if (!S.fresh) loadFresh().then(() => { if (route().a === 'discover') render(); }); if (discoverActive() && !S.R) loadResults().then(render); }
-  if (['discover', 'home', 'book', 'barber', 'shop', 'map', 'community'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
+  if (['discover', 'home', 'book', 'barber', 'shop', 'map', 'community', 'me', 'member'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
   if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
@@ -669,6 +688,10 @@ app.addEventListener('change', async e => {
   if (e.target.id === 'pcoverf' || e.target.id === 'pavatar') {
     const f = e.target.files[0], isCover = e.target.id === 'pcoverf'; e.target.value = ''; if (!f) return;
     try { await api(isCover ? '/pro/cover' : '/pro/photo', { method: 'POST', body: { staffId: S.proSel, data: await compress(f) } }, S.proToken); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.D = null; S.cur = null; await loadPro(); render(); } catch (x) { toast(x.message); }
+  }
+  if (e.target.id === 'mcoverf' || e.target.id === 'mavatar') {
+    const f = e.target.files[0], isCover = e.target.id === 'mcoverf'; e.target.value = ''; if (!f) return;
+    try { await api(isCover ? '/me/cover' : '/me/photo', { method: 'POST', body: { data: await compress(f) } }); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.mem = null; S.feed = null; await loadMe(); render(); } catch (x) { toast(x.message); }
   }
   if (e.target.id === 'pstyle') S.pstyle = e.target.value;
   if (e.target.id === 'pfile') {
@@ -698,7 +721,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -812,6 +835,13 @@ app.addEventListener('click', async e => {
   if (D.fresh != null) { const i = S.fresh && S.fresh[+D.fresh]; return i && openMedia(i); }
   if (D.bookany != null) return openShopPicker('book');
   if (D.covdel != null) { if (!confirm('Remove your cover photo? Your latest cut will be used instead.')) return; try { await api('/pro/cover?staffId=' + S.proSel, { method: 'DELETE' }, S.proToken); S.D = null; S.cur = null; await loadPro(); toast('Cover removed'); } catch (x) { toast(x.message); } return render(); }
+  if (D.mcovdel != null || D.mphotodel != null) {
+    const cover = D.mcovdel != null; if (!confirm(cover ? 'Remove your cover photo?' : 'Remove your profile photo?')) return;
+    try { await api(cover ? '/me/cover' : '/me/photo', { method: 'DELETE' }); S.mem = null; S.feed = null; await loadMe(); toast('Removed'); } catch (x) { toast(x.message); } return render();
+  }
+  if (D.mfollow) {
+    const on = D.on === '1'; try { await api('/follow/' + D.mfollow, { method: on ? 'DELETE' : 'PUT' }); S.mem.member.following = !on; S.mem.member.followers += on ? -1 : 1; render(); } catch (x) { toast(x.message); } return;
+  }
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
   if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); return render(); }
   if (D.drange) { S.dashRange = D.drange; render(); return loadDash(); }

@@ -30,7 +30,7 @@ create table if not exists bh_notifs(id text primary key, userId text, kind text
 create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
 create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
-  addCol('bh_portfolio', 'style', 'text'); addCol('bh_barber', 'cover', 'text'); addCol('bh_posts', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
+  addCol('bh_portfolio', 'style', 'text'); addCol('bh_users', 'photo', 'text'); addCol('bh_users', 'cover', 'text'); addCol('bh_barber', 'cover', 'text'); addCol('bh_posts', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
 
   // ---------- helpers ----------
@@ -86,9 +86,16 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   };
   const needUser = req => userOf(req) || bad(401, 'Please log in');
   const tokenOf = u => makeToken('c:' + u.id, u.passHash.slice(-8));
-  const pubUser = u => ({ id: u.id, name: u.name, email: u.email, phone: u.phone, city: u.city || '', bio: u.bio || '', styles: jp(u.styles) });
+  const pubUser = u => ({ id: u.id, name: u.name, email: u.email, phone: u.phone, city: u.city || '', bio: u.bio || '', styles: jp(u.styles), photo: u.photo || '', cover: u.cover || '' });
   const short = n => { const w = String(n || '').trim().split(/\s+/); return w.length > 1 ? `${w[0]} ${w[w.length - 1][0]}.` : w[0] || 'Customer'; };
   const clip = (s, n) => String(s ?? '').trim().slice(0, n);
+  // member photos: same rules as every other upload (JPEG/PNG/WebP, under about 700 KB), stored in the shared images table
+  const saveImg = b => {
+    const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.data || '')); if (!m) bad(400, 'Image must be JPEG, PNG or WebP');
+    const buf = Buffer.from(m[2], 'base64'); if (buf.length > 700_000) bad(413, 'Image is too large (max about 700KB)');
+    const iid = uid() + uid(); run('insert into images(id,mime,data,createdAt) values(?,?,?,?)', iid, m[1], buf, nowISO()); return '/img/' + iid;
+  };
+  const dropImg = url => { const im = /\/img\/(\w+)/.exec(url || ''); if (im) run('delete from images where id=?', im[1]); };
   const url = s => { s = clip(s, 200); return /^(https?:\/\/|@?[\w.]+$)/i.test(s) ? s : ''; };
 
   const ratingMap = () => new Map(all('select staffId, count(*) n, avg(rating) a, sum(coalesce(verified,0)) v from reviews where staffId<>\'\' group by staffId').map(r => [r.staffId, { n: r.n, a: Math.round(r.a * 10) / 10, v: r.v }]));
@@ -143,6 +150,13 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       run('update bh_users set name=?, phone=?, city=?, bio=? where id=?', name, phone, clip(b.city ?? u.city, 60), clip(b.bio ?? u.bio, 300), u.id);
       return send(res, 200, { user: pubUser(get('bh_users', u.id)) });
     }
+    for (const kind of ['photo', 'cover']) {   // a member's own profile photo and cover
+      if (sub === '/me/' + kind && method === 'POST') {
+        const u = needUser(req), b = await readBody(req, 1_500_000); if (!b.data) bad(400, 'Choose a photo');
+        const url = saveImg(b); dropImg(u[kind]); run(`update bh_users set ${kind}=? where id=?`, url, u.id); return send(res, 201, { url });
+      }
+      if (sub === '/me/' + kind && method === 'DELETE') { const u = needUser(req); dropImg(u[kind]); run(`update bh_users set ${kind}='' where id=?`, u.id); return send(res, 200, { ok: true }); }
+    }
     if (sub === '/me/styles' && method === 'PUT') {   // saved hairstyle ideas from the Style Finder (ids come from the app's catalog)
       const u = needUser(req), b = await readBody(req), ids = [...new Set((Array.isArray(b.styles) ? b.styles : []).map(x => String(x)).filter(x => /^[a-z0-9-]{2,30}$/.test(x)))].slice(0, 12);
       run('update bh_users set styles=? where id=?', JSON.stringify(ids), u.id); return send(res, 200, { styles: ids });
@@ -164,7 +178,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
       run('delete from bh_comments where postId in (select id from bh_posts where userId=?)', u.id);
       for (const r of all('select imageUrl from bh_posts where userId=?', u.id)) { const im = /\/img\/(\w+)/.exec(r.imageUrl || ''); if (im) run('delete from images where id=?', im[1]); }
-      run('delete from bh_posts where userId=?', u.id); run('delete from bh_users where id=?', u.id);
+      run('delete from bh_posts where userId=?', u.id); dropImg(u.photo); dropImg(u.cover); run('delete from bh_users where id=?', u.id);
       log({ name: 'App: ' + u.name }, 'app-delete-account', 'bh_users', u.id, ''); return send(res, 200, { ok: true });
     }
 
@@ -309,11 +323,21 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     // ----- community -----
     const blockedOf = id => id ? new Set([...all('select blockedId x from bh_blocks where userId=?', id), ...all('select userId x from bh_blocks where blockedId=?', id)].map(r => r.x)) : new Set();
     const nameMap = () => new Map(all('select id,name from bh_users').map(u => [u.id, short(u.name)]));
-    const postView = (r, me, names) => ({ id: r.id, text: r.text, image: r.imageUrl || '', style: r.style || '', createdAt: r.createdAt, userId: r.userId, author: names.get(r.userId) || 'Member', mine: !!me && me.id === r.userId,
+    const postView = (r, me, names) => ({ id: r.id, text: r.text, image: r.imageUrl || '', style: r.style || '', createdAt: r.createdAt, userId: r.userId, author: names.get(r.userId) || 'Member', authorPhoto: one('select photo from bh_users where id=?', r.userId)?.photo || '', mine: !!me && me.id === r.userId,
       staffId: r.staffId || '', staffName: r.staffId ? get('staff', r.staffId)?.name || '' : '', likes: one('select count(*) n from bh_likes where postId=?', r.id).n, comments: one('select count(*) n from bh_comments where postId=? and hidden=0', r.id).n,
       liked: !!me && !!one('select 1 x from bh_likes where postId=? and userId=?', r.id, me.id), saved: !!me && !!one('select 1 x from bh_saves where userId=? and postId=?', me.id, r.id),
       following: !!me && !!one('select 1 x from bh_follows where userId=? and targetId=?', me.id, r.userId) });
     const spammy = t => (String(t).match(/https?:\/\//gi) || []).length > 2;
+    // a member's public profile: only what they chose to show (short name, photo, cover, bio) plus their posts; never phone or email
+    const mm = sub.match(/^\/members\/(\w+)$/);
+    if (mm && method === 'GET') {
+      const me = userOf(req), t = get('bh_users', mm[1]); if (!t || (me && blockedOf(me.id).has(t.id))) bad(404, 'Member not found');
+      const names = nameMap(), live = 'userId=? and hidden=0';
+      return send(res, 200, { member: { id: t.id, name: short(t.name), photo: t.photo || '', cover: t.cover || '', bio: t.bio || '', joined: t.createdAt, mine: !!me && me.id === t.id,
+        posts: one(`select count(*) n from bh_posts where ${live}`, t.id).n, likes: one(`select count(*) n from bh_likes where postId in (select id from bh_posts where ${live})`, t.id).n,
+        followers: one('select count(*) n from bh_follows where targetId=?', t.id).n, following: !!me && !!one('select 1 x from bh_follows where userId=? and targetId=?', me.id, t.id) },
+        posts: all(`select * from bh_posts where ${live} order by createdAt desc limit 30`, t.id).map(r => postView(r, me, names)) });
+    }
     // discovery grid: barbers' portfolio cuts plus members' photo posts, filterable by style
     if (sub === '/cuts' && method === 'GET') {
       const me = userOf(req), blocked = blockedOf(me?.id), style = clip(q.style, 30), names = nameMap(), sm = new Map(all('select id,name,branchId,active from staff').map(x => [x.id, x]));
