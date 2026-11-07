@@ -33,6 +33,10 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
 .btn.sec{background:var(--s3);border:1px solid var(--line)}
 .btn.block{width:100%}.btn.sm{padding:8px 12px;font-size:13px;border-radius:10px}.btn:disabled{opacity:.45}
+.hscroll{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -16px;padding:2px 16px 8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-padding:0 16px}.hscroll::-webkit-scrollbar{display:none}
+.tile{flex:none;width:150px;scroll-snap-align:start;text-align:left;background:var(--s1);border:1px solid var(--line);border-radius:16px;padding:0;overflow:hidden;display:block}.tile:active{transform:scale(.98)}
+.tile .tp{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--s2)}.tile .tp.ph{display:grid;place-items:center;font:600 34px 'Oswald';color:var(--mute)}
+.tile .tb{padding:8px 10px 10px}.tl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tile.wide{width:240px}.tile.wide .tp{aspect-ratio:16/10}
 .btn.white{background:#fff;color:#09090a}
 .btn.danger{background:transparent;border:1px solid var(--bad);color:var(--bad)}
 .sec-h{display:flex;align-items:baseline;justify-content:space-between;margin:22px 0 10px}.sec-h h2{font-size:19px;text-transform:uppercase;letter-spacing:1px}

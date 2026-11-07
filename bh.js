@@ -52,14 +52,16 @@ const barberRow = b => `<button class="bcard" data-go="/barber/${b.id}">${pic(b.
 const shopCard = s => `<button class="shop" data-shop="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="${esc(s.name)}" loading="lazy">` : ''}<div class="in"><div class="nm">${esc(s.name)}</div>
   <div class="sm mute">${ic('pin').replace('class="i"', 'class="i" style="width:14px;height:14px;vertical-align:-2px"')} ${esc(s.address || s.name)} · ${t12(s.openTime)}–${t12(s.closeTime)}</div><div class="sm" style="margin-top:2px">${rate(s.rating, s.reviews)} <span class="mute">· ${s.barbers} barbers</span></div></div></button>`;
 
+const barberTile = b => `<button class="tile" data-go="/barber/${b.id}">${b.photo ? `<img class="tp" src="${esc(b.photo)}" alt="${esc(b.name)}" loading="lazy">` : `<span class="tp ph">${esc(initials(b.name))}</span>`}<div class="tb"><div class="nm">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</div><div class="sm mute tl">${esc(b.headline || b.specialties[0] || 'Barber')}</div><div class="sm">${rate(b.rating, b.reviews)}</div><div class="sm mute tl">${esc(b.branchName)}${b.slotsToday ? ' · ' + b.slotsToday + ' slots today' : ''}</div></div></button>`;
+const shopTile = s => `<button class="tile wide" data-shop="${s.id}">${s.photo ? `<img class="tp" src="${esc(s.photo)}" alt="${esc(s.name)}" loading="lazy">` : `<span class="tp ph">${esc(initials(s.name))}</span>`}<div class="tb"><div class="nm">${esc(s.name)}</div><div class="sm mute tl">${esc(s.address || 'Brotherhood Barbershop')}</div><div class="sm">${rate(s.rating, s.reviews)} <span class="mute">· ${s.barbers} barber${s.barbers === 1 ? '' : 's'}</span></div><div class="sm mute tl">${t12(s.openTime)}–${t12(s.closeTime)}</div></div></button>`;
 function vHome() {
   const D = S.D, up = (S.mine || []).filter(b => b.status === 'booked' && b.date >= ymd(new Date())).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
   return header() + `<div class="hero pop"><h1>More than a haircut.<br>It's a brotherhood.</h1><p>Find your barber. Book in seconds. Always free for customers.</p><button class="btn" data-go="/discover">${ic('search')} Find a barber</button></div>
   ${installCard()}${up ? `<div class="card pop" style="margin-bottom:6px"><div class="sm mute">YOUR NEXT CUT</div><div class="nm" style="margin-top:4px">${fmtDate(up.date)} · ${t12(up.time)}</div><div class="sm mute">${esc(up.items.map(i => i.name).join(' + '))} with ${esc(up.staffName)} · ${esc(up.branchName)}</div></div>` : ''}
   <button class="bcard" data-go="/style" style="margin-top:6px"><span class="av" style="background:var(--s2)">${ic('scissors')}</span><div class="sp"><div class="nm">Find your cut</div><div class="sm mute">Pick your face shape and get cut ideas to show your barber</div></div></button>
   <div class="sec-h"><h2>Top barbers</h2><button class="link" data-go="/discover">See all</button></div>
-  <div class="list">${D ? D.barbers.slice(0, 5).map(barberRow).join('') || '<div class="empty">No barbers yet.</div>' : '<div class="empty">Loading…</div>'}</div>
-  <div class="sec-h"><h2>Our shops</h2><button class="link" data-go="/map">View map</button></div><div class="list">${D ? D.shops.map(shopCard).join('') : ''}</div>`;
+  ${D ? (D.barbers.length ? `<div class="hscroll">${D.barbers.slice(0, 12).map(barberTile).join('')}</div>` : '<div class="empty">No barbers yet.</div>') : '<div class="empty">Loading…</div>'}
+  <div class="sec-h"><h2>Our shops</h2><button class="link" data-go="/map">View map</button></div>${D ? `<div class="hscroll">${D.shops.map(shopTile).join('')}</div>` : ''}`;
 }
 function vDiscover() {
   const D = S.D;
