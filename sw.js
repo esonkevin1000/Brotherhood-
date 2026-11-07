@@ -1,7 +1,7 @@
 // Brotherhood service worker. `VERSION` is injected by the server and changes on every deploy,
 // so the browser sees a new worker, the app shows an "Update app" button, and one tap loads the new version.
 // Network-first: pages and scripts are always fetched fresh; the cache is only an offline fallback. API calls are never cached.
-const CACHE = 'brotherhood-' + (typeof VERSION === 'string' ? VERSION : 'dev'), SHELL = ['/pos', '/pos.js', '/update.js', '/logo.png', '/icon-192.png', '/brotherhood', '/bh.js', '/bh.webmanifest'];
+const CACHE = 'brotherhood-' + (typeof VERSION === 'string' ? VERSION : 'dev'), SHELL = ['/pos', '/pos.js', '/update.js', '/logo.png', '/icon-192.png', '/brotherhood', '/bh.js', '/bh.webmanifest', '/bh-mark.png', '/bh-icon-192.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => { })); });   // no skipWaiting: the user decides when to update
 self.addEventListener('message', e => { if (e.data === 'SKIP_WAITING') self.skipWaiting(); });
 self.addEventListener('activate', e => {
