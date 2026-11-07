@@ -42,9 +42,9 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const cleanCode = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
   const promoUses = code => one("select count(*) n from bookings where promoCode=? and status in ('booked','arrived')", code).n;
   // checks a promo code for one customer and the services they picked; throws a clear message when it cannot be used
-  function promoCheck(code, itemIds, phone, email) {
+  function promoCheck(code, itemIds, phone, email, userId) {
     const c = cleanCode(code); if (!c) bad(400, 'Enter a promo code');
-    const p = one('select * from bh_promos where code=?', c); if (!p || !p.active) bad(404, 'That promo code is not valid');
+    const p = one('select * from bh_promos where code=?', c); if (!p || !p.active || (p.userId && p.userId !== userId)) bad(404, 'That promo code is not valid');
     if (p.expires && p.expires < todayStr()) bad(409, 'This promo code has expired');
     if (p.maxUses > 0 && promoUses(c) >= p.maxUses) bad(409, 'This promo code has reached its limit');
     const pk = normPhone(phone), ek = normEmail(email);
@@ -55,6 +55,21 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     if (!subtotal) bad(400, 'Pick a service first');
     const raw = p.kind === 'percent' ? subtotal * p.value / 100 : p.value, amt = Math.round(Math.min(subtotal, Math.max(0, raw)) * 100) / 100;
     return { promo: p, amt, subtotal, total: Math.round((subtotal - amt) * 100) / 100 };
+  }
+  // rewards: the owner sets what points can buy; redeeming gives the member a private one-use voucher (a promo code only they can use)
+  db.exec(`create table if not exists bh_rewards(id text primary key, name text, cost integer, kind text, value real, active integer, discountId text, createdAt text);`);
+  addCol('bh_promos', 'userId', 'text'); addCol('bh_promos', 'rewardId', 'text'); addCol('bh_promos', 'cost', 'integer');
+  const loyaltyCid = u => u.customerId || one("select customerId c from bookings where userId=? and customerId<>'' order by createdAt desc", u.id)?.c || '';
+  // vouchers that are used or still valid cost points; an unused expired voucher gives its points back
+  function rewardState(u) {
+    const cid = loyaltyCid(u), visits = cid ? one("select count(*) n from orders where customerId=? and status='paid'", cid).n : 0, t = todayStr();
+    const vouchers = all('select * from bh_promos where userId=? order by createdAt desc limit 50', u.id).map(p => {
+      const uses = promoUses(p.code), expired = !!(p.expires && p.expires < t), st = uses > 0 ? 'used' : expired ? 'expired' : 'active';
+      const r = p.rewardId ? get('bh_rewards', p.rewardId) : null;
+      return { code: p.code, name: r?.name || String(p.note || 'Reward').replace(/^Reward: /, ''), label: promoLabel(p), status: st, expires: p.expires || '', cost: p.cost || 0 };
+    });
+    const spent = vouchers.filter(v => v.status !== 'expired').reduce((a, v) => a + v.cost, 0);
+    return { cid, visits, balance: Math.max(0, visits - spent), vouchers, rewards: all('select * from bh_rewards where active=1 order by cost, name').map(r => ({ id: r.id, name: r.name, cost: r.cost, label: promoLabel(r) })) };
   }
   const promoLabel = p => (p.kind === 'percent' ? p.value + '% off' : '₱' + p.value + ' off') + (p.firstVisit ? ' · first visit' : '');
 
@@ -228,7 +243,20 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     if (sub === '/loyalty' && method === 'GET') {   // visits and tier come from the POS loyalty tiers (1 paid visit = 1 point) for the customer record linked to this account's bookings
       const u = needUser(req), cid = u.customerId || one("select customerId c from bookings where userId=? and customerId<>'' order by createdAt desc", u.id)?.c || '';
       const visits = cid ? one("select count(*) n from orders where customerId=? and status='paid'", cid).n : 0;
-      return send(res, 200, { linked: !!cid, visits, tier: tierOf(visits), next: nextTier(visits) });
+      const rs = rewardState(u); return send(res, 200, { linked: !!cid, visits, tier: tierOf(visits), next: nextTier(visits), balance: rs.balance, rewards: rs.rewards, vouchers: rs.vouchers });
+    }
+    const rdm = sub.match(/^\/rewards\/(\w+)\/redeem$/);
+    if (rdm && method === 'POST') {
+      const u = needUser(req); if (tooMany(ip, 'rd', 20, 3600e3)) bad(429, 'Too many tries. Please try again later.'); hit(ip, 'rd');
+      const r = get('bh_rewards', rdm[1]); if (!r || !r.active) bad(404, 'That reward is not available');
+      const st = rewardState(u); if (!st.cid) bad(409, 'Book and complete your first cut to start earning points.');
+      if (st.balance < r.cost) bad(409, `You need ${r.cost} points. You have ${st.balance}.`);
+      if (st.vouchers.filter(v => v.status === 'active').length >= 3) bad(409, 'You already have 3 unused vouchers. Use one first.');
+      let code = ''; for (let i = 0; i < 20 && !code; i++) { const c = 'RW' + Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join(''); if (!one('select 1 x from bh_promos where code=?', c)) code = c; }
+      const exp = dOf(new Date(Date.now() + 60 * 864e5));
+      run('insert into bh_promos(id,code,kind,value,firstVisit,maxUses,expires,active,note,discountId,createdAt,userId,rewardId,cost) values(?,?,?,?,0,1,?,1,?,?,?,?,?,?)', uid(), code, r.kind, r.value, exp, 'Reward: ' + r.name, r.discountId, nowISO(), u.id, r.id, r.cost);
+      log({ name: 'App: ' + u.name }, 'reward-redeemed', 'bh_rewards', r.id, `${r.name} ${code}`);
+      return send(res, 201, { ok: true, code, expires: exp, balance: rewardState(u).balance });
     }
     if (sub === '/me/styles' && method === 'PUT') {   // saved hairstyle ideas from the Style Finder (ids come from the app's catalog)
       const u = needUser(req), b = await readBody(req), ids = [...new Set((Array.isArray(b.styles) ? b.styles : []).map(x => String(x)).filter(x => /^[a-z0-9-]{2,30}$/.test(x)))].slice(0, 12);
@@ -336,7 +364,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const b = await readBody(req);
       // optional repeat: every 1, 2, 3, 4 or 6 weeks for 2 to 6 cuts in total; slots that are taken are skipped and reported
       const every = [1, 2, 3, 4, 6].includes(+b.repeatEvery) ? +b.repeatEvery : 0, count = every ? Math.max(2, Math.min(6, Math.round(+b.repeatCount) || 2)) : 1;
-      let pc = null; if (b.promo) pc = promoCheck(b.promo, b.itemIds, u.phone, u.email);   // checked first: a bad code stops the booking with a clear message
+      let pc = null; if (b.promo) pc = promoCheck(b.promo, b.itemIds, u.phone, u.email, u.id);   // checked first: a bad code stops the booking with a clear message
       const make = date => {
         const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
         run('update bookings set userId=? where id=?', u.id, x.id); if (x.customerId && !u.customerId) { run('update bh_users set customerId=? where id=?', x.customerId, u.id); u.customerId = x.customerId; }
@@ -353,7 +381,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     }
     if (sub === '/promo/check' && method === 'GET') {
       const u = needUser(req); if (tooMany(ip, 'pc', 30, 3600e3)) bad(429, 'Too many tries. Please try again later.'); hit(ip, 'pc');
-      const r = promoCheck(q.code, String(q.items || '').split(',').filter(Boolean), u.phone, u.email);
+      const r = promoCheck(q.code, String(q.items || '').split(',').filter(Boolean), u.phone, u.email, u.id);
       return send(res, 200, { code: r.promo.code, label: promoLabel(r.promo), amt: r.amt, subtotal: r.subtotal, total: r.total });
     }
     if (sub === '/bookings' && method === 'GET') {
@@ -553,10 +581,32 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         if ('bufferMins' in b) { const v = Math.round(+b.bufferMins); if (![0, 5, 10, 15, 20, 30].includes(v)) bad(400, 'Choose 0, 5, 10, 15, 20 or 30 minutes'); setSetting('bufferMins', String(v)); }
         log(me, 'booking-rules', 'settings', '', JSON.stringify(b).slice(0, 120)); return send(res, 200, { ok: true });
       }
+      // rewards (owner): what points can buy. Each reward has one matching POS discount, shared by all its vouchers.
+      if (sub === '/pro/rewards' && method === 'GET') {
+        if (!admin) bad(403, 'Owner only');
+        return send(res, 200, { rewards: all('select * from bh_rewards order by cost, name').map(r => ({ id: r.id, name: r.name, cost: r.cost, kind: r.kind, value: r.value, active: !!r.active, label: promoLabel(r), redeemed: one('select count(*) n from bh_promos where rewardId=?', r.id).n })) });
+      }
+      if (sub === '/pro/rewards' && method === 'POST') {
+        if (!admin) bad(403, 'Owner only'); const b = await readBody(req), name = clip(b.name, 60), kind = b.kind === 'amount' ? 'amount' : 'percent', value = Math.round(+b.value * 100) / 100, cost = Math.round(+b.cost);
+        if (name.length < 2) bad(400, 'Give the reward a name, like "Free haircut"');
+        if (!(cost >= 1 && cost <= 500)) bad(400, 'Points needed must be from 1 to 500');
+        if (!(value > 0) || (kind === 'percent' && value > 100) || (kind === 'amount' && value > 5000)) bad(400, kind === 'percent' ? 'Percent off must be from 1 to 100' : 'Peso off must be from 1 to 5000');
+        if (one('select count(*) n from bh_rewards').n >= 20) bad(409, 'Too many rewards. Delete old ones first.');
+        const id = uid(), did = uid(); run('insert into discounts(id,name,kind,value,active) values(?,?,?,?,1)', did, 'Reward: ' + name, kind, value);
+        run('insert into bh_rewards(id,name,cost,kind,value,active,discountId,createdAt) values(?,?,?,?,?,1,?,?)', id, name, cost, kind, value, did, nowISO());
+        log(me, 'reward-created', 'bh_rewards', id, name); return send(res, 201, { ok: true, id });
+      }
+      const rwm = sub.match(/^\/pro\/rewards\/(\w+)$/);
+      if (rwm && (method === 'PUT' || method === 'DELETE')) {
+        if (!admin) bad(403, 'Owner only'); const r = get('bh_rewards', rwm[1]); if (!r) bad(404, 'Reward not found');
+        if (method === 'PUT') { const b = await readBody(req); run('update bh_rewards set active=? where id=?', b.active ? 1 : 0, r.id); return send(res, 200, { ok: true }); }
+        if (all('select code, expires from bh_promos where rewardId=?', r.id).some(x => !promoUses(x.code) && !(x.expires && x.expires < todayStr()))) bad(409, 'Members still hold unused vouchers for this reward. Pause it instead.');
+        run('delete from bh_rewards where id=?', r.id); log(me, 'reward-deleted', 'bh_rewards', r.id, r.name); return send(res, 200, { ok: true });
+      }
       // promo codes (owner): create, pause or delete. Each code creates a matching POS discount so a booked customer's ticket gets it automatically.
       if (sub === '/pro/promos' && method === 'GET') {
         if (!admin) bad(403, 'Owner only');
-        return send(res, 200, { promos: all('select * from bh_promos order by createdAt desc limit 100').map(p => ({ id: p.id, code: p.code, kind: p.kind, value: p.value, firstVisit: !!p.firstVisit, maxUses: p.maxUses || 0, expires: p.expires || '', active: !!p.active, note: p.note || '', label: promoLabel(p), uses: promoUses(p.code), expired: !!(p.expires && p.expires < todayStr()),
+        return send(res, 200, { promos: all("select * from bh_promos where ifnull(userId,'')='' order by createdAt desc limit 100").map(p => ({ id: p.id, code: p.code, kind: p.kind, value: p.value, firstVisit: !!p.firstVisit, maxUses: p.maxUses || 0, expires: p.expires || '', active: !!p.active, note: p.note || '', label: promoLabel(p), uses: promoUses(p.code), expired: !!(p.expires && p.expires < todayStr()),
           saved: Math.round(all("select promoAmt from bookings where promoCode=? and status='arrived'", p.code).reduce((t, x) => t + (x.promoAmt || 0), 0)) })) });
       }
       if (sub === '/pro/promos' && method === 'POST') {
@@ -564,7 +614,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         if (code.length < 3) bad(400, 'The code needs 3 to 20 letters or numbers');
         if (!(value > 0) || (kind === 'percent' && value > 90) || (kind === 'amount' && value > 5000)) bad(400, kind === 'percent' ? 'Percent off must be from 1 to 90' : 'Peso off must be from 1 to 5000');
         if (one('select 1 x from bh_promos where code=?', code)) bad(409, 'That code already exists');
-        if (one('select count(*) n from bh_promos').n >= 100) bad(409, 'Too many promo codes. Delete old ones first.');
+        if (one("select count(*) n from bh_promos where ifnull(userId,'')=''").n >= 100) bad(409, 'Too many promo codes. Delete old ones first.');
         const expires = /^\d{4}-\d{2}-\d{2}$/.test(String(b.expires || '')) ? String(b.expires) : ''; if (expires && expires < todayStr()) bad(400, 'The end date is in the past');
         const maxUses = Math.max(0, Math.min(100000, Math.round(+b.maxUses) || 0)), id = uid(), did = uid();
         run('insert into discounts(id,name,kind,value,active) values(?,?,?,?,1)', did, 'Promo ' + code, kind, value);

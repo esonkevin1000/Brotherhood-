@@ -56,6 +56,15 @@ Hindi pa kasama sa Health Score: kontrol sa gastos at kondisyon ng equipment.
 
 Paalala: ang promo ay nakakabit sa booking sa app. Ang walk-in ay patuloy na gumagamit ng mga discount na pinipili ng cashier (lalabas din doon ang "Promo CODE" bilang pwedeng piliin).
 
+## 2d. Idinagdag sa phase 3: pagkuha ng reward
+
+| Feature | Saan makikita |
+|---|---|
+| **Rewards ng owner:** pangalan, puntos na kailangan, percent o peso off (100% = libre) | Owner: Insights, Rewards |
+| **Redeem ng member:** ginagastos ang puntos para sa voucher code na sa kanya lang magagamit | Customer: Profile o Home, Redeem rewards |
+| **Gamit ng voucher:** isang beses lang, 60 araw ang validity, hanggang 3 hindi pa nagagamit nang sabay. May button sa booking page. Sa cashier ay kusang nagiging discount ("Reward: ...") | Booking page at POS |
+| **Puntos:** ang balanse ay bayad na bisita minus ang nagastos. Ang tier ay batay sa kabuuang bisita kaya hindi bumababa. Ang voucher na hindi nagamit hanggang mag-expire, o ang booking na na-cancel, ay nagbabalik ng puntos | |
+
 ## 3. Susunod (inirerekomendang pagkakasunod-sunod)
 
 1. **SMS na paalala** (kailangan ng SMS provider; ang email ay tapos na).
