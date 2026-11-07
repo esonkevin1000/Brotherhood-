@@ -650,10 +650,10 @@ function receiptSheet(o) {
   openSheet(`<h2 style="margin:0 0 6px;color:var(--ok)">✔ Paid</h2><p class="mute">SI-${String(o.si).padStart(6, '0')} · #${String(o.no).padStart(3, '0')} · ${esc(o.customerName)}</p>
     ${o.items.map(i => `<div class="row between"><span>${esc(i.name)} ×${i.qty}</span><span>${peso(i.price * i.qty)}</span></div>`).join('')}<hr>
     ${o.discountAmt ? `<div class="row between"><span>${esc(o.discountName)}</span><span>−${peso(o.discountAmt)}</span></div>` : ''}<div class="row between"><b>Total</b><b>${peso(o.total)}</b></div>
-    ${o.change ? `<div class="row between"><span>Change</span><b style="color:var(--gold);font-size:20px">${peso(o.change)}</b></div>` : ''}<br><div class="row"><button style="flex:1" data-a="printsale">${ic('printer')} Print</button><button class="ghost" style="flex:1" data-a="closesheet">Done</button></div>`);
+    ${o.change ? `<div class="row between"><span>Change</span><b style="color:var(--gold);font-size:20px">${peso(o.change)}</b></div>` : ''}<br><button class="block" data-a="closesheet">Done</button>`);
 }
 
-// ---------- printable receipts ----------
+// ---------- printable sales reading (no sales receipts / invoices are printed) ----------
 const dt = iso => iso ? new Date(iso).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
 const R = (l, r, b) => `<div class="r"><span>${esc(l)}</span><span>${b ? '<b>' + esc(r) + '</b>' : esc(r)}</span></div>`;
 const head = b => `<h3>${esc((P.shop || 'Brotherhood').toUpperCase())} BARBERSHOP</h3><div class="c">${esc(b.branchName || '')}</div>${b.address ? `<div class="c">${esc(b.address)}</div>` : ''}${b.phone ? `<div class="c">${esc(b.phone)}</div>` : ''}`;
@@ -667,13 +667,6 @@ function readingHtml(z) {
     + R('Expected cash', peso(z.expected), true) + R('Declared cash', peso(z.counted)) + R('VARIANCE', peso(z.variance), true)
     + (dn.length ? '<hr><b>DENOMINATIONS</b>' + dn.map(([d, n]) => R('P' + d + ' x ' + n, peso(d * n))).join('') : '')
     + (z.remarks ? `<hr>Remarks: ${esc(z.remarks)}` : '') + `<hr><div class="c">Printed ${esc(dt(new Date().toISOString()))}</div><div class="c">*** END OF SALES READING ***</div>`;
-}
-function saleHtml(o) {
-  const b = P.boot?.branch || {};
-  return head({ branchName: b.name, address: b.address, phone: b.phone }) + `<hr><div class="c"><b>SALES INVOICE</b></div><hr>` + R('SI No.', 'SI-' + String(o.si).padStart(6, '0')) + R('Ticket', '#' + String(o.no).padStart(3, '0'))
-    + R('Date', dt(o.paidAt)) + R('Customer', o.customerName) + R('Cashier', P.me?.name || '') + '<hr>'
-    + o.items.map(i => R(i.name + ' x' + i.qty, peso(i.price * i.qty))).join('') + '<hr>' + R('Subtotal', peso(o.subtotal)) + (o.discountAmt ? R(o.discountName || 'Discount', '-' + peso(o.discountAmt)) : '')
-    + R('TOTAL', peso(o.total), true) + o.tenders.map(t => R(t.method, peso(t.amount))).join('') + (o.change ? R('Change', peso(o.change)) : '') + `<hr><div class="c">Thank you! See you again.</div>`;
 }
 function printHtml(html) { document.getElementById('print').innerHTML = `<div class="paper">${html}</div>`; setTimeout(() => window.print(), 50); }
 function showReading(z) {
@@ -878,7 +871,6 @@ document.addEventListener('click', async e => {
   if (a === 'syncnow') { for (const x of await OFF.all()) { x.retry = true; await OFF.put(x); } await syncQueue(); return; }
   if (a === 'att') { const r = await guard(() => api('POST', '/api/attendance', { staffId: d.id, action: d.x })); if (r) toast('Saved'); return refresh(); }
   if (a === 'printz') return printHtml(readingHtml(P.lastZ));
-  if (a === 'printsale') return printHtml(saleHtml(P.lastSale));
   if (a === 'viewz') { const z = P.zs[+d.i]; return showReading({ no: z.no, businessDate: z.businessDate, ...z.data }); }
   if (a === 'tab') { P.tab = d.t; return render(); }
   if (a === 'den') { P.denoms[d.d] = Math.max(0, (P.denoms[d.d] || 0) + +d.n); return render(); }

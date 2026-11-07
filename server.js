@@ -158,17 +158,19 @@ const log = (me, action, entity, id, detail) =>
   run('insert into audit(ts,who,action,entity,entityId,detail) values(?,?,?,?,?,?)', nowISO(), me?.name || '?', action, entity, id || '', String(detail || '').slice(0, 300));
 
 // ---------- first run ----------
-if (!one('select count(*) n from branches').n) for (const n of BRANCHES) insert('branches', { name: n, openTime: '09:00', graceMins: 10 });
+// FRESH_INSTALL=1 is for another shop's own copy: start empty (no Brotherhood branches, chairs, menu or discounts) so the owner builds their own in the Back office.
+const FRESH = /^(1|true|yes)$/i.test(process.env.FRESH_INSTALL || '');
+if (!FRESH && !one('select count(*) n from branches').n) for (const n of BRANCHES) insert('branches', { name: n, openTime: '09:00', graceMins: 10 });
 run("update branches set openTime='09:00' where openTime is null or openTime=''"); run('update branches set graceMins=10 where graceMins is null');
-if (!one('select count(*) n from chairs').n)
+if (!FRESH && !one('select count(*) n from chairs').n)
   for (const b of all('select id from branches order by rowid')) for (let i = 1; i <= 3; i++) insert('chairs', { branchId: b.id, name: 'Chair ' + i, sort: i, active: 1 });
-if (!one('select count(*) n from categories').n) {
+if (!FRESH && !one('select count(*) n from categories').n) {
   const hc = insert('categories', { name: 'Haircut', type: 'service' }).id, hp = insert('categories', { name: 'Hair Product', type: 'product' }).id;
   for (const [n, p, c, t, m] of [['Buddy', 150, hc, 'service', 30], ['Amigo', 200, hc, 'service', 30], ['Vip Compadre', 250, hc, 'service', 45],
     ['Texture Powder', 380, hp, 'product', 0], ['Sea Salt Spray', 380, hp, 'product', 0]])
     insert('items', { name: n, price: p, categoryId: c, type: t, mins: m, active: 1 });
 }
-if (!one('select count(*) n from discounts').n) insert('discounts', { name: 'Student', kind: 'amount', value: 50, active: 1 });
+if (!FRESH && !one('select count(*) n from discounts').n) insert('discounts', { name: 'Student', kind: 'amount', value: 50, active: 1 });
 run("update branches set closeTime='21:00' where closeTime is null or closeTime=''");
 run("update items set bookable=case when type='service' then 1 else 0 end where bookable is null");
 run("update items set commission=case when type='product' then 100 else 0 end where commission is null");   // fixed barber commission per piece sold (products); owner can change it per product
@@ -863,6 +865,7 @@ async function handle(req, res) {
   if (method === 'GET' && p === '/backend/') { res.writeHead(302, { Location: '/backend' }); return res.end(); }
   if (method === 'GET' && p === '/sw.js') { res.writeHead(200, { 'Content-Type': MIME.js, 'Cache-Control': 'no-cache' }); return res.end(`const VERSION=${JSON.stringify(APP_VERSION)};\n` + fs.readFileSync(path.join(DIR, 'sw.js'), 'utf8')); }
   if (method === 'GET' && p === '/api/version') return send(res, 200, { version: APP_VERSION });
+  if (method === 'GET' && p === '/' && /^\/[\w\-\/]*$/.test(process.env.ROOT_REDIRECT || '')) { res.writeHead(302, { Location: process.env.ROOT_REDIRECT }); return res.end(); }   // e.g. ROOT_REDIRECT=/brotherhood so a partner shop's home page is the app, not Brotherhood's promo page
   if (method === 'GET' && STATIC[p]) return serveStatic(req, res, STATIC[p]);
   const sm0 = p.match(/^\/site\/([\w-]+\.(?:jpg|png))$/);   // promo-site photos (shop, barbers, storefront)
   if (sm0 && method === 'GET') { if (!fs.existsSync(path.join(DIR, 'site', sm0[1]))) return send(res, 404, { error: 'Not found' }); return serveStatic(req, res, 'site/' + sm0[1]); }
