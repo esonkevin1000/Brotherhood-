@@ -21,7 +21,7 @@ const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url
 const rate = (a, n) => n ? `<span class="star">★</span> ${a.toFixed(1)} <span class="mute">(${n})</span>` : '<span class="mute sm">New</span>';
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { } } };
 
-const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashDays: 30, toastMsg: '' };
+const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', proPin: false, unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashDays: 30, toastMsg: '' };
 
 async function api(path, opt = {}, token = S.token) {
   const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
@@ -142,7 +142,8 @@ function vAuth() {
   <label class="f">Password${su ? ' (8+ characters)' : ''}<input name="password" type="password" autocomplete="${su ? 'new-password' : 'current-password'}" minlength="${su ? 8 : 1}" required></label>
   ${su ? '<label class="f row" style="align-items:flex-start"><input type="checkbox" name="agree" style="width:auto;margin-top:4px" required><span style="margin:0">I agree to the Terms and the Privacy Notice (Data Privacy Act of 2012). My details are used only for my bookings and account.</span></label>' : ''}
   ${a.err ? `<div class="err">${esc(a.err)}</div>` : ''}<button class="btn block" style="margin-top:16px" ${a.busy ? 'disabled' : ''}>${su ? 'Create account' : 'Log in'}</button></form>
-  <p class="mute" style="text-align:center">${su ? 'Already a member?' : 'New here?'} <button class="link" data-authmode="${su ? 'login' : 'signup'}">${su ? 'Log in' : 'Create an account'}</button></p>`;
+  <p class="mute" style="text-align:center">${su ? 'Already a member?' : 'New here?'} <button class="link" data-authmode="${su ? 'login' : 'signup'}">${su ? 'Log in' : 'Create an account'}</button></p>
+  <p class="mute sm" style="text-align:center;margin-top:24px">Barber or shop owner? <button class="link" data-go="/pro">Sign in to pro tools</button></p>`;
 }
 function vMe() {
   if (!S.user) { setTimeout(() => nav('/auth')); return ''; }
@@ -158,10 +159,10 @@ function vMe() {
 // ----- pro tools -----
 async function loadPro() { try { S.pro = await api('/pro/me', {}, S.proToken); S.proErr = ''; } catch (e) { S.pro = null; S.proErr = e.message; if (e.code === 401) { S.proToken = null; store.set('bh_pro', null); } } }
 function vPro() {
-  if (!S.proToken || !S.pro) return header('Pro tools', '/me') + `<p class="mute">Sign in with your Brotherhood staff username and password (same as the POS / back office).</p><form id="prolf"><label class="f">Username<input name="username" autocomplete="username" required></label><label class="f">Password<input name="password" type="password" autocomplete="current-password" required></label>${S.proErr ? `<div class="err">${esc(S.proErr)}</div>` : ''}<button class="btn block" style="margin-top:14px">Sign in</button></form>`;
+  if (!S.proToken || !S.pro) return header('Pro tools', '/') + `<p class="mute">Sign in with your Brotherhood staff username and password (same as the POS / back office).</p><form id="prolf">${S.proPin ? '<label class="f">6-digit PIN<input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label>' : '<label class="f">Username (owners may leave this blank)<input name="username" autocomplete="username"></label><label class="f">Password<input name="password" type="password" autocomplete="current-password" required></label>'}${S.proErr ? `<div class="err">${esc(S.proErr)}</div>` : ''}<button class="btn block" style="margin-top:14px">Sign in</button><p class="mute sm" style="text-align:center"><button type="button" class="link" data-proPin>${S.proPin ? 'Use username and password instead' : 'Barber or cashier? Sign in with your 6-digit PIN'}</button></p></form>`;
   const sel = S.pro.staff.find(s => s.id === S.proSel) || S.pro.staff[0]; S.proSel = sel?.id;
-  if (!sel) return header('Pro tools', '/me') + '<div class="empty">No barbers found.</div>';
-  return header('Pro tools', '/me') + `${S.pro.admin ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
+  if (!sel) return header('Pro tools', '/') + '<div class="empty">No barbers found.</div>';
+  return header('Pro tools', '/') + `${S.pro.admin ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
   <div class="tabs"><button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">Dashboard</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
   ${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}><div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
@@ -394,7 +395,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-ddays],[data-propin],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -483,6 +484,7 @@ app.addEventListener('click', async e => {
   if (D.ssave) return saveStyle(D.ssave);
   if (D.sbook) { const c = cutById(D.sbook); S.styleNote = `Style I want: ${c.name} (${c.top.toLowerCase()} on top, ${c.sides.toLowerCase()}). Suggested by Brotherhood Style Finder.`; toast('Pick your barber. Your style will be added to the booking notes.'); S.branch = ''; return nav('/discover'); }
   if (D.ngo) { if (D.ngo.startsWith('#/')) { S.mine = null; return nav(D.ngo.slice(1)); } return; }
+  if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
   if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); return render(); }
   if (D.ddays) { S.dashDays = +D.ddays; render(); return loadDash(); }
   if (D.prologout != null) { S.proToken = null; S.pro = null; store.set('bh_pro', null); return render(); }
