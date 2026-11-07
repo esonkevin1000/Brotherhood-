@@ -48,8 +48,16 @@ const firstView = () => Object.keys(VMAP).find(canOpen) || '';
 const br = () => isAdminRole() ? `branch=${P.branch}` : '';
 const withBr = u => { const b = br(); return b ? u + (u.includes('?') ? '&' : '?') + b : u; };
 
+// small "working" pill so a slow photo never looks like a frozen app
+let busyN = 0;
+function busy(on, msg) {
+  busyN = Math.max(0, busyN + (on ? 1 : -1));
+  let el = document.getElementById('busybar'); if (!el) { el = document.createElement('div'); el.id = 'busybar'; document.body.appendChild(el); }
+  if (busyN) { el.textContent = msg || 'Working…'; el.className = 'on'; } else el.className = '';
+}
 async function api(method, url, body) {
-  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const up = method === 'POST' && /^\/api\/(files|pos\/idphoto)/.test(url); if (up) busy(true, 'Uploading photo…');
+  let r; try { r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: body ? JSON.stringify(body) : undefined }); } finally { if (up) busy(false); }
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && url !== '/api/login') { token = ''; P.me = null; render(); throw new Error('Login required'); }
   if (!r.ok) throw new Error(j.error || 'Request failed');
@@ -144,23 +152,27 @@ async function refresh(quiet) {
   if (!P.me) return;
   if (!canOpen(P.view)) P.view = firstView() || P.view;
   try {
-    P.boot = await api('GET', withBr('/api/pos/bootstrap')); P.shift = P.boot.shift;
+    const jobs = [api('GET', withBr('/api/pos/bootstrap')).then(b => { P.boot = b; P.shift = b.shift; })];
     // barbers only need bookings on the screens that show them; cashiers keep the live new-booking alert
-    if (canOpen('appts') && (P.me.role !== 'barber' || ['appts', 'dashboard'].includes(P.view))) { P.bk = await api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)); notifyBookings(); } else if (!canOpen('appts')) P.bk = [];
-    if (P.view === 'dashboard') { P.dash = await api('GET', withBr('/api/pos/dashboard')); if (P.me.role === 'barber') { try { P.earn = await api('GET', '/api/me/earnings'); P.earnErr = ''; } catch (e) { if (isNet(e)) throw e; P.earn = null; P.earnErr = e.message; } } }
-    if (P.view === 'pos') P.queue = (await api('GET', withBr('/api/pos/queue?filter=active')));
-    if (P.view === 'customers') await loadCustomers();
-    if (P.view === 'remit') await loadRemit();
-    if (P.view === 'checklist') await loadChk();
-    if (P.view === 'myperf') await loadMp();
-    if (P.view === 'leave') P.lv = await api('GET', withBr('/api/leaves'));
-    if (P.view === 'problems') P.pr = await api('GET', withBr('/api/problems'));
-    if (canOpen('inbox') && window.Inbox) { Inbox.setOpt({ token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); try { P.inUnread = await Inbox.refreshUnread(); } catch (x) { } }
-    if (P.view === 'release') { P.adv = await api('GET', withBr('/api/advances')); if (P.advBal) P.advBal = await api('GET', '/api/advances/balance?staffId=' + P.advBal.staffId); }
-    if (P.view === 'queue') P.queue = await api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active')));
-    if (P.view === 'attendance') P.att = await api('GET', withBr('/api/pos/attendance'));
-    if (P.view === 'expenses') P.exp = await api('GET', withBr(`/api/expense-claims?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`));
-    if (P.view === 'reading') { const s = await api('GET', withBr('/api/pos/shift')); P.cur = s; P.zs = await api('GET', withBr('/api/pos/zreadings')); }
+    if (canOpen('appts') && (P.me.role !== 'barber' || ['appts', 'dashboard'].includes(P.view))) jobs.push(api('GET', withBr(`/api/bookings?from=${ymd(0)}&to=${ymd(14)}`)).then(r => { P.bk = r; notifyBookings(); })); else if (!canOpen('appts')) P.bk = [];
+    if (P.view === 'dashboard') {
+      jobs.push(api('GET', withBr('/api/pos/dashboard')).then(r => { P.dash = r; }));
+      if (P.me.role === 'barber') jobs.push(api('GET', '/api/me/earnings').then(r => { P.earn = r; P.earnErr = ''; }, e => { if (isNet(e)) throw e; P.earn = null; P.earnErr = e.message; }));
+    }
+    if (P.view === 'pos') jobs.push(api('GET', withBr('/api/pos/queue?filter=active')).then(r => { P.queue = r; }));
+    if (P.view === 'customers') jobs.push(loadCustomers());
+    if (P.view === 'remit') jobs.push(loadRemit());
+    if (P.view === 'checklist') jobs.push(loadChk());
+    if (P.view === 'myperf') jobs.push(loadMp());
+    if (P.view === 'leave') jobs.push(api('GET', withBr('/api/leaves')).then(r => { P.lv = r; }));
+    if (P.view === 'problems') jobs.push(api('GET', withBr('/api/problems')).then(r => { P.pr = r; }));
+    if (canOpen('inbox') && window.Inbox) { Inbox.setOpt({ token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); jobs.push(Inbox.refreshUnread().then(n => { P.inUnread = n; }, () => { })); }
+    if (P.view === 'release') jobs.push(api('GET', withBr('/api/advances')).then(async r => { P.adv = r; if (P.advBal) P.advBal = await api('GET', '/api/advances/balance?staffId=' + P.advBal.staffId); }));
+    if (P.view === 'queue') jobs.push(api('GET', withBr('/api/pos/queue?filter=' + (P.qf.status === 'done' ? 'done' : P.qf.status === 'all' ? 'all' : 'active'))).then(r => { P.queue = r; }));
+    if (P.view === 'attendance') jobs.push(api('GET', withBr('/api/pos/attendance')).then(r => { P.att = r; }));
+    if (P.view === 'expenses') jobs.push(api('GET', withBr(`/api/expense-claims?range=${P.expRange}&q=${encodeURIComponent(P.expQ)}`)).then(r => { P.exp = r; }));
+    if (P.view === 'reading') jobs.push(Promise.all([api('GET', withBr('/api/pos/shift')), api('GET', withBr('/api/pos/zreadings'))]).then(([s, z]) => { P.cur = s; P.zs = z; }));
+    await Promise.all(jobs);
     P.offline = false;
     if (quiet) { const sig = JSON.stringify([P.view, P.boot, P.bk, P.dash, P.queue, P.att, P.exp, P.adv, P.advBal, P.pr, P.lv, P.cust, P.rm, P.chk, P.mp, P.cur, P.zs, P.inUnread, P.earn, P.offline]); if (sig === P._sig) return; P._sig = sig; }
     cacheSave();
@@ -184,6 +196,8 @@ async function afterLogin(j) {
 
 // ---------- shell ----------
 const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 'Walk-in Queue', expenses: 'Shop Expenses', attendance: 'Barber Attendance', reading: 'Sales Reading', appts: 'Appointments', customers: 'Customer Directory', remit: 'Daily Sales Remittance', release: 'Release Pay', problems: 'Report a Problem', inbox: 'Inbox', checklist: 'Daily Checklist', leave: 'Leave Requests', myperf: 'My Performance' };
+// a screen whose data has not arrived yet shows "Loading…" instead of breaking
+const safeView = () => { try { return VIEWS[P.view](); } catch (e) { return '<p class="mute">Loading…</p>'; } };
 function render() {
   if (!P.me) {
     app._html = ""; app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
@@ -197,7 +211,7 @@ function render() {
   const nav = (isWide() ? FULLNAV : FULLNAV.slice(0, 4)).filter(([k]) => canOpen(k));
   const s = P.shift, enter = P.view !== P._rv ? 'enter' : ''; P._rv = P.view;
   setApp(`<header><button class="burger" data-a="more">${ic('menu')}</button>${P.me.role === 'barber' ? `<span class="hav" data-a="go" data-v="dashboard">${av(P.me.name, P.me.photo)}</span>` : ''}<div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.inUnread && P.view !== 'inbox' ? `<span class="shiftchip" style="color:#e5384a" data-a="go" data-v="inbox">✉ ${P.inUnread}</span>` : ''}${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
-    <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? VIEWS[P.view]() : '<p class="mute">Loading…</p>'}</main>
+    <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? safeView() : '<p class="mute">Loading…</p>'}</main>
     ${P.view === 'pos' && P.cart.mode !== 'now' && !isWide() && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
     <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`);
 }
@@ -421,10 +435,16 @@ const cartTotal = () => P.cart.items.reduce((s, i) => s + i.price * i.qty, 0);
 function discountOf() { const d = P.boot.discounts.find(x => x.id === P.cart.discountId); if (!d) return 0; const sub = cartTotal(); return Math.min(sub, d.kind === 'percent' ? sub * d.value / 100 : d.value); }
 function pushItem(it) { const c = P.cart.items.find(x => x.itemId === it.id); if (c) c.qty++; else P.cart.items.push({ itemId: it.id, name: it.name, type: it.type, price: it.price, qty: 1, ...(it.needId ? { needId: 1 } : {}) }); }
 // Items marked "requires ID" (Buddy: Senior / PWD / Student) can only be added after a photo of the customer's ID is taken.
-async function resizeToJpeg(file, max = 1100) {
-  const bmp = await createImageBitmap(file), s = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
-  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-  return c.toDataURL('image/jpeg', 0.8);
+async function resizeToJpeg(file, max = 1000) {
+  busy(true, 'Preparing photo…');
+  try {
+    // big phone photos (12 MP+) are decoded directly at a smaller size: several times faster and far less memory than decoding them in full
+    let bmp; if (file.size > 500000) { try { bmp = await createImageBitmap(file, { resizeWidth: max, resizeQuality: 'medium', imageOrientation: 'from-image' }); } catch (e) { bmp = null; } }
+    if (!bmp) bmp = await createImageBitmap(file);
+    const s = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(bmp.width * s)); c.height = Math.max(1, Math.round(bmp.height * s)); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); if (bmp.close) bmp.close();
+    return c.toDataURL('image/jpeg', 0.74);
+  } finally { busy(false); }
 }
 const idOk = () => !!(P.cart.idPhotoId || P.cart.hasId);
 const cartNeedsId = () => P.cart.items.some(i => i.needId);
@@ -681,7 +701,7 @@ document.addEventListener('click', async e => {
   if (a === 'pinclr') { P.pin = ''; return render(); }
   if (a === 'pinbk') { P.pin = P.pin.slice(0, -1); return render(); }
   if (a === 'closesheet') { closeSheet(); return render(); }
-  if (a === 'go') { P.view = d.v; await refresh(); return render(); }
+  if (a === 'go') { P.view = d.v; render(); refresh(); return; }   // show the screen at once, fresh data fills in a moment later
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
       ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Report a Problem'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Daily Checklist'], ['leave', 'calendar', 'Leave Requests'], ['myperf', 'star', 'My Performance & Payslips'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
@@ -711,7 +731,7 @@ document.addEventListener('click', async e => {
     } catch (x) { n.err = x.message; if (/no longer/.test(x.message)) return naSlots(); apptSheet(); }
     return;
   }
-  if (a === 'mode') { P.cart.mode = d.m; await refresh(); return render(); }
+  if (a === 'mode') { P.cart.mode = d.m; render(); refresh(); return; }
   if (a === 'gopl') { P.cart.mode = 'now'; P.view = 'pos'; await refresh(); return render(); }
   if (a === 'cat') { P.cat = d.c; return render(); }
   if (a === 'add') return addItem(d.id);
@@ -900,9 +920,9 @@ document.addEventListener('change', async e => {
   if (t.id === 'avinst') { P.av.inst = t.value; return; }
   if (t.id === 'avconsent') { P.av.consent = t.checked; return; }
   if (a === 'rmdate' || t.id === 'rmdate') { P.rm.date = t.value || ymd(0); P.rm.proofId = ''; P.rm.preview = ''; refresh().then(render); return; }
-  if (t.id === 'sffile') { const file = t.files[0]; if (!file || !P.sf) return; try { P.sf.data = await resizeToJpeg(file, 900); selfieSheet(); } catch (x) { toast('Could not read that photo. Please try again.', true); } return; }
+  if (t.id === 'sffile') { const file = t.files[0]; if (!file || !P.sf) return; try { P.sf.data = await resizeToJpeg(file, 720); selfieSheet(); } catch (x) { toast('Could not read that photo. Please try again.', true); } return; }
   if (a === 'ckitem') { const i = +t.dataset.i; P.ck.items[i] = { ...(P.ck.items[i] || {}), done: t.checked, doneAt: t.checked ? new Date().toISOString() : '' }; return render(); }
-  if (t.id === 'ckfile') { const file = t.files[0], i = P.ckTarget; if (!file || i === undefined) return; try { const data = await resizeToJpeg(file, 1200); const r = await api('POST', '/api/files', { data, kind: 'checklist', branchId: P.boot.branch.id }); P.ck.items[i] = { ...(P.ck.items[i] || {}), photoId: r.id, preview: data }; render(); } catch (x) { toast(x.message || 'Could not upload the photo.', true); } return; }
+  if (t.id === 'ckfile') { const file = t.files[0], i = P.ckTarget; if (!file || i === undefined) return; try { const data = await resizeToJpeg(file, 1000); const r = await api('POST', '/api/files', { data, kind: 'checklist', branchId: P.boot.branch.id }); P.ck.items[i] = { ...(P.ck.items[i] || {}), photoId: r.id, preview: data }; render(); } catch (x) { toast(x.message || 'Could not upload the photo.', true); } return; }
   if (t.id === 'lvstaff') { P.lvf.staffId = t.value; return; }
   if (t.id === 'lvtype') { P.lvf.type = t.value; return; }
   if (t.id === 'lvfrom') { P.lvf.from = t.value; return; }
@@ -910,20 +930,20 @@ document.addEventListener('change', async e => {
   if (t.id === 'pbcat') { P.pb.category = t.value; return; }
   if (t.id === 'pbfile') {
     const file = t.files[0]; if (!file || !P.pb) return;
-    try { const data = await resizeToJpeg(file, 1300); const r = await api('POST', '/api/files', { data, kind: 'problem', branchId: P.boot.branch.id }); P.pb.photos.push({ id: r.id, preview: data }); probSheet(); }
+    try { const data = await resizeToJpeg(file, 1100); const r = await api('POST', '/api/files', { data, kind: 'problem', branchId: P.boot.branch.id }); P.pb.photos.push({ id: r.id, preview: data }); probSheet(); }
     catch (x) { toast(x.message || 'Could not upload the photo.', true); }
     return;
   }
   if (t.id === 'xcat') { P.ex.category = t.value; return; }
   if (t.id === 'xfile') {
     const file = t.files[0]; if (!file || !P.ex) return;
-    try { const data = await resizeToJpeg(file, 1300); const r = await api('POST', '/api/files', { data, kind: 'receipt', branchId: P.boot.branch.id }); P.ex.receipts.push({ id: r.id, preview: data }); expSheet(); }
+    try { const data = await resizeToJpeg(file, 1100); const r = await api('POST', '/api/files', { data, kind: 'receipt', branchId: P.boot.branch.id }); P.ex.receipts.push({ id: r.id, preview: data }); expSheet(); }
     catch (x) { toast(x.message || 'Could not upload the photo. Please try again.', true); }
     return;
   }
   if (t.id === 'rmfile') {
     const file = t.files[0]; if (!file) return;
-    try { const data = await resizeToJpeg(file, 1300); const r = await api('POST', '/api/files', { data, kind: 'remit', branchId: P.boot.branch.id }); P.rm.proofId = r.id; P.rm.preview = data; render(); }
+    try { const data = await resizeToJpeg(file, 1100); const r = await api('POST', '/api/files', { data, kind: 'remit', branchId: P.boot.branch.id }); P.rm.proofId = r.id; P.rm.preview = data; render(); }
     catch (x) { toast(x.message || 'Could not upload the photo. Please try again.', true); }
     return;
   }
