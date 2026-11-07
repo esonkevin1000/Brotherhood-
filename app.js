@@ -11,7 +11,7 @@ const ago = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso
 let S = { shop: 'Brotherhood', me: null, branches: [], chairs: [], staff: [], categories: [], items: [], discounts: [], users: [] };
 let token = ''; try { token = localStorage.getItem('bp.token') || ''; } catch (e) { }
 let loggedIn = false, loadErr = '';
-const ui = { view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', reviews: [], picked: new Set(), navClosed: new Set((() => { try { return JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { return []; } })()) };
+const ui = { navQ: '', view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', reviews: [], picked: new Set(), navClosed: new Set((() => { try { return JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { return []; } })()) };
 const modal = document.getElementById('modal');
 const openModal = h => { modal.innerHTML = h; if (!modal.open) modal.showModal(); };
 const closeModal = () => modal.close();
@@ -108,8 +108,8 @@ function renderBase() {
   const on = k => ui.view === k ? 'on' : '';
   nav.innerHTML = `<div class="brand"><img src="/logo.png" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
     <button data-act="bell" style="background:${ui.notif && ui.notif.total ? '#fff1f2' : ''};color:${ui.notif && ui.notif.total ? '#e5384a' : ''};font-weight:700">🔔 Notifications${ui.notif && ui.notif.total ? ` <span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${ui.notif.total}</span>` : ''}</button>
-    <select id="branchsel"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
-    ${navGroups(on)}
+    <input id="navq" type="search" placeholder="Search pages…" autocomplete="off" value="${esc(ui.navQ || '')}">
+    <div id="navgroups">${navGroups(on)}</div>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { mb.textContent = ui.notif && ui.notif.total ? '🔔 ' + ui.notif.total : '🔔'; mb.style.color = ui.notif && ui.notif.total ? '#e5384a' : ''; }
   view.innerHTML = branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
@@ -192,12 +192,20 @@ async function pollNotif(first) {
     notifPrev = n.total; if (!modal.open && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName) && ui.view !== 'inbox') render();
   } catch (e) { }
 }
-function navGroups(on) {
-  return NAVG.map(([h, list]) => { const closed = ui.navClosed.has(h); const body = list.map(([v, l, i]) => {
-    if (!l) { const k = v.slice(v.indexOf(':') + 1), r = (v.startsWith('rep:') ? REPORTS : MGMT).find(x => x[0] === k); if (!r) return ''; l = r[1]; i = r[2]; }
-    return `<button class="${on(v)}" data-view="${v}" style="width:100%">${ic(i)}${l.replace('&', '&amp;')}${badge(v)}</button>`;
-  }).join(''); const cnt = list.reduce((a, [v]) => a + (notifCount(v) || 0), 0);
-  return `<div class="navh" data-grp="${esc(h)}"><span class="car">${closed ? '▸' : '▾'}</span>${h.replace('&', '&amp;')}${closed && cnt ? `<span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${cnt}</span>` : ''}</div>` + (closed ? '' : body); }).join('');
+function navGroups(on = k => (ui.view === k ? 'on' : '')) {
+  const q = String(ui.navQ || '').trim().toLowerCase();
+  const out = NAVG.map(([h, list]) => {
+    const items = list.map(([v, l, i]) => {
+      if (!l) { const k = v.slice(v.indexOf(':') + 1), r = (v.startsWith('rep:') ? REPORTS : MGMT).find(x => x[0] === k); if (!r) return null; l = r[1]; i = r[2]; }
+      return { v, l, i };
+    }).filter(Boolean);
+    const shown = q ? (h.toLowerCase().includes(q) ? items : items.filter(x => x.l.toLowerCase().includes(q))) : items;
+    if (q && !shown.length) return '';
+    const closed = !q && ui.navClosed.has(h), cnt = list.reduce((a, [v]) => a + (notifCount(v) || 0), 0);
+    const body = shown.map(x => `<button class="${on(x.v)}" data-view="${x.v}" style="width:100%">${ic(x.i)}${x.l.replace('&', '&amp;')}${badge(x.v)}</button>`).join('');
+    return `<div class="navh" data-grp="${esc(h)}"><span class="car">${closed ? '▸' : '▾'}</span>${h.replace('&', '&amp;')}${closed && cnt ? `<span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${cnt}</span>` : ''}</div>` + (closed ? '' : body);
+  }).join('');
+  return out || '<p class="mute" style="padding:8px 12px;font-size:13px">No page found. Try another word.</p>';
 }
 function vLeave() {
   const r = ui.leave, st = ui.lstatus || '';
@@ -509,7 +517,7 @@ document.addEventListener('click', async e => {
   const gh = e.target.closest('[data-grp]');
   if (gh) { const g = gh.dataset.grp; if (ui.navClosed.has(g)) ui.navClosed.delete(g); else ui.navClosed.add(g); try { localStorage.setItem('navClosed', JSON.stringify([...ui.navClosed])); } catch { } return render(); }
   const nb = e.target.closest('[data-view]');
-  if (nb) { document.getElementById('nav').classList.remove('open'); document.getElementById('scrim').classList.remove('show'); ui.view = nb.dataset.view; ui.picked.clear(); if (ui.view === 'mgmt:customers') ui.cust.page = 1; render(); await loadView(); return render(); }
+  if (nb) { document.getElementById('nav').classList.remove('open'); document.getElementById('scrim').classList.remove('show'); ui.view = nb.dataset.view; ui.navQ = ''; ui.picked.clear(); if (ui.view === 'mgmt:customers') ui.cust.page = 1; render(); await loadView(); return render(); }
   const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
   const d = el.dataset, act = d.act;
   if (act === 'close') return closeModal();
@@ -689,6 +697,11 @@ document.addEventListener('click', async e => {
     return openModal(`<h2 style="margin-top:0">${esc(name)} · ${ui.rp === 'all' ? 'all unpaid days' : ui.from === ui.to ? ui.from : ui.from + ' → ' + ui.to}</h2><div class="overflow"><table><tr><th>Date</th><th>Time in</th><th>Commission</th><th>Top-up</th><th>Lunch</th><th>Advance</th><th>Day pay</th><th></th></tr>${rows}</table></div><p style="margin:10px 0"><b>Unpaid total (before bonuses and deductions): ${peso(tot)}</b></p><button class="btn ghost" data-act="close">Close</button>`);
   }
 });
+document.addEventListener('keydown', e => {
+  if (e.target.id !== 'navq') return;
+  if (e.key === 'Escape') { ui.navQ = ''; e.target.value = ''; const g = document.getElementById('navgroups'); if (g) g.innerHTML = navGroups(); }
+  if (e.key === 'Enter') { const b = document.querySelector('#navgroups button[data-view]'); if (b) { ui.navQ = ''; b.click(); } }
+});
 document.addEventListener('change', async e => {
   const t = e.target;
   if (t.id === 'lstatus') { ui.lstatus = t.value; await loadView(); return render(); }
@@ -732,6 +745,7 @@ document.addEventListener('change', async e => {
 });
 let searchTimer;
 document.addEventListener('input', e => {
+  if (e.target.id === 'navq') { ui.navQ = e.target.value; const g = document.getElementById('navgroups'); if (g) g.innerHTML = navGroups(); return; }
   if (e.target.id === 'csearch') { ui.cust.q = e.target.value; ui.cust.page = 1; clearTimeout(searchTimer); searchTimer = setTimeout(async () => { await loadView(); const p = e.target.selectionStart; render(); const s = document.getElementById('csearch'); s.focus(); s.setSelectionRange(p, p); }, 300); }
 });
 document.addEventListener('submit', e => {
