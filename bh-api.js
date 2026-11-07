@@ -27,7 +27,7 @@ create table if not exists bh_notifs(id text primary key, userId text, kind text
 create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
 create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
-  addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
+  addCol('bh_portfolio', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
 
   // ---------- helpers ----------
@@ -187,9 +187,19 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const br = brs.get(s.branchId) || {};
       const reviews = all('select id,name,rating,text,createdAt,coalesce(verified,0) verified,reply,replyAt,replyBy from reviews where staffId=? order by createdAt desc limit 30', s.id);
       const u = userOf(req);
-      return send(res, 200, { barber: { ...card, bio: pr.bio || '', instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '' },
-        branch: { id: br.id, name: br.name, address: br.address || '', phone: br.phone || '', openTime: br.openTime || '09:00', closeTime: br.closeTime || '21:00', mapUrl: br.mapUrl || '' },
-        portfolio: all('select id,url,caption from bh_portfolio where staffId=? order by createdAt desc limit 60', s.id), reviews,
+      // public, aggregate-only numbers (no revenue): completed cuts, clients served, rebook rate, followers, weekly rank and level
+      const pOrders = all("select customerId, customerName from orders where status='paid' and barberId=?", s.id), byClient = new Map();
+      for (const o of pOrders) { const k = o.customerId || ('n:' + String(o.customerName || '').toLowerCase()); if (k !== 'n:') byClient.set(k, (byClient.get(k) || 0) + 1); }
+      const stats = { cuts: pOrders.length, clients: byClient.size, rebook: byClient.size ? Math.round([...byClient.values()].filter(n => n > 1).length / byClient.size * 100) : 0, followers: one('select count(*) n from bh_favorites where staffId=?', s.id).n };
+      const mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));   // weeks run Monday to Sunday
+      const activeIds = new Set(all('select id from staff where active=1').map(x => x.id)), ranked = all("select barberId, count(*) n from orders where status='paid' and date>=? and barberId<>'' group by barberId order by n desc", dOf(mon)).filter(x => activeIds.has(x.barberId));
+      const ri = ranked.findIndex(x => x.barberId === s.id), rankWeek = ri >= 0 ? { rank: ri + 1, of: ranked.length, cuts: ranked[ri].n } : null;
+      const level = stats.cuts >= 1000 ? 'Legend' : stats.cuts >= 300 ? 'Master Barber' : stats.cuts >= 50 ? 'Pro Barber' : 'Rising Barber';
+      let nextFree = null; for (let i = 0; i < 7 && !nextFree; i++) { const d = dOf(new Date(Date.now() + i * 864e5)); try { const sl = slotsFor(s.branchId, d, s.id, 30); if (sl.length) nextFree = { date: d, time: sl[0] }; } catch { } }
+      const taggedPosts = all("select p.id, p.text, p.imageUrl image, p.createdAt, (select count(*) from bh_likes l where l.postId=p.id) likes from bh_posts p where p.staffId=? and p.hidden=0 order by p.createdAt desc limit 30", s.id);
+      return send(res, 200, { stats, rankWeek, nextFree, posts: taggedPosts, barber: { ...card, level, followers: stats.followers, bio: pr.bio || '', instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '' },
+        branch: { id: br.id, name: br.name, photo: br.photo || siteCover(br.name) || '', address: br.address || '', phone: br.phone || '', openTime: br.openTime || '09:00', closeTime: br.closeTime || '21:00', mapUrl: br.mapUrl || '' },
+        portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc limit 60', s.id), reviews,
         services: servicesList(), favorite: !!(u && one('select 1 x from bh_favorites where userId=? and staffId=?', u.id, s.id)) });
     }
     const shm = sub.match(/^\/shops\/(\w+)$/);
@@ -289,7 +299,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     if (sub === '/feed' && method === 'GET') {
       const me = userOf(req), blocked = blockedOf(me?.id), names = nameMap(), before = clip(q.before, 40) || '9999';
       let rows = all('select * from bh_posts where hidden=0 and createdAt<? order by createdAt desc limit 200', before);
-      if (q.scope === 'following' && me) { const f = new Set(all('select targetId x from bh_follows where userId=?', me.id).map(r => r.x)); rows = rows.filter(r => f.has(r.userId) || r.userId === me.id); }
+      if (q.scope === 'following' && me) { const f = new Set(all('select targetId x from bh_follows where userId=?', me.id).map(r => r.x)); const fb = new Set(all('select staffId x from bh_favorites where userId=?', me.id).map(r => r.x)); rows = rows.filter(r => f.has(r.userId) || r.userId === me.id || (r.staffId && fb.has(r.staffId))); }
       rows = rows.filter(r => !blocked.has(r.userId)).slice(0, 20);
       return send(res, 200, { posts: rows.map(r => postView(r, me, names)), more: rows.length === 20 });
     }
@@ -359,7 +369,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const staff = (admin ? all('select * from staff where active=1 order by name') : [get('staff', mine)]).filter(Boolean).map(s => {
           const pr = one('select * from bh_barber where staffId=?', s.id) || {};
           return { id: s.id, name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', headline: pr.headline || '', bio: pr.bio || '', years: pr.years || 0, specialties: jp(pr.specialties),
-            instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, portfolio: all('select id,url,caption from bh_portfolio where staffId=? order by createdAt desc', s.id) };
+            instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id) };
         });
         return send(res, 200, { admin, name: me.name, staff });
       }
@@ -445,10 +455,14 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const buf = Buffer.from(m[2], 'base64'); if (buf.length > 700_000) bad(413, 'Image is too large (max about 700KB)');
         if (one('select count(*) n from bh_portfolio where staffId=?', s.id).n >= 60) bad(409, 'Portfolio is full (60 photos)');
         const iid = uid() + uid(), id = uid(); run('insert into images(id,mime,data,createdAt) values(?,?,?,?)', iid, m[1], buf, nowISO());
-        run('insert into bh_portfolio(id,staffId,url,caption,createdAt) values(?,?,?,?,?)', id, s.id, '/img/' + iid, clip(b.caption, 100), nowISO());
+        run('insert into bh_portfolio(id,staffId,url,caption,style,createdAt) values(?,?,?,?,?,?)', id, s.id, '/img/' + iid, clip(b.caption, 100), clip(b.style, 30), nowISO());
         log(me, 'portfolio-add', 'bh_portfolio', id, s.name); return send(res, 201, { id, url: '/img/' + iid });
       }
       const pm = sub.match(/^\/pro\/portfolio\/(\w+)$/);
+      if (pm && method === 'PUT') {   // edit a cut's caption and style tag
+        const row = get('bh_portfolio', pm[1]); if (!row) bad(404, 'Photo not found'); target(row.staffId); const b = await readBody(req);
+        run('update bh_portfolio set caption=?, style=? where id=?', clip(b.caption, 100), clip(b.style, 30), row.id); return send(res, 200, { ok: true });
+      }
       if (pm && method === 'DELETE') {
         const row = get('bh_portfolio', pm[1]); if (!row) bad(404, 'Photo not found'); target(row.staffId);
         run('delete from bh_portfolio where id=?', row.id); const im = /\/img\/(\w+)/.exec(row.url); if (im) run('delete from images where id=?', im[1]);

@@ -15,6 +15,7 @@ const ICON = {
   ver: '<path d="M12 2 9.5 4.5 6 4.6 5.4 8 3 10.5 4.6 13.5 4 17l3.3 1.1L9.5 21l2.5-1.4 2.5 1.4 2.2-2.9L20 17l-.6-3.5L21 10.5 18.6 8 18 4.6l-3.5-.1z"/><path d="m8.5 12 2.5 2.5 4.5-5" stroke="#fff"/>',
   scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>', plus: '<path d="M12 5v14M5 12h14"/>', bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 21a2 2 0 0 0 4 0"/>', chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>', team: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2.5.6 4 2.2 4 5.2"/>'
 };
+Object.assign(ICON, { grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>' });
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]}</svg>`;
 const stars = n => '<span class="star">' + '★'.repeat(Math.round(n)) + '</span><span style="color:var(--line)">' + '★'.repeat(5 - Math.round(n)) + '</span>';
 const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url)}" alt="${esc(name)}" loading="lazy">` : `<span class="${cls}">${esc(initials(name))}</span>`;
@@ -71,20 +72,52 @@ function vDiscover() {
   <div class="list" id="results">${!D ? '<div class="empty">Loading…</div>' : S.tab === 'barbers' ? (D.barbers.map(barberRow).join('') || '<div class="empty">No barbers match. Try different filters.</div>') : (D.shops.map(shopCard).join('') || '<div class="empty">No shops match.</div>')}</div>`;
 }
 async function vBarber(id) {
-  let j; try { j = await api('/barber' + 's/' + id, {}, S.token); } catch (e) { return header('', '/discover') + `<div class="err">${esc(e.message)}</div>`; }
-  const b = j.barber, fav = S.favs.includes(b.id) || j.favorite;
+  if (!S.cur || S.cur.barber.id !== id) {
+    try { S.cur = await api('/barbers/' + id, {}, S.token); } catch (e) { S.cur = null; return header('', '/discover') + `<div class="err">${esc(e.message)}</div>`; }
+  }
+  const j = S.cur, b = j.barber, st = j.stats, fav = !!S.token && S.favs.includes(b.id), tab = S.bTab || 'cuts', today = ymd(new Date());
+  const cover = (j.portfolio[0] && j.portfolio[0].url) || j.branch.photo || '';
   const soc = [['instagram', 'Instagram'], ['facebook', 'Facebook'], ['tiktok', 'TikTok']].filter(([k]) => b[k]).map(([k, n]) => { const v = b[k], href = /^https?:/i.test(v) ? v : (k === 'instagram' ? 'https://instagram.com/' : k === 'tiktok' ? 'https://tiktok.com/@' : 'https://facebook.com/') + v.replace(/^@/, ''); return `<a class="tag" href="${esc(href)}" target="_blank" rel="noopener">${n}</a>`; }).join('');
-  S.cur = j;
-  return `<div class="cover"></div><div class="bar" style="margin-top:-110px;background:none"><button class="btn sec sm" data-go="/discover">${ic('back')}</button><span class="sp"></span><button class="btn sec sm heart ${fav ? 'on' : ''}" data-fav="${b.id}" aria-label="Favorite">${ic('heart')}</button></div>
-  <div style="margin-top:20px;display:flex;gap:14px;align-items:flex-end">${pic(b.photo, b.name, 'av lg')}<div><h1 style="font-size:26px" class="row">${esc(b.name)}${b.verified ? `<span class="ver">${ic('ver')}</span>` : ''}</h1><div class="mute sm">${esc(b.headline || 'Barber')} · ${esc(b.branchName)}</div><div style="margin-top:4px">${rate(b.rating, b.reviews)}${b.verifiedReviews ? ` <span class="tag ok">${b.verifiedReviews} verified</span>` : ''}</div></div></div>
-  <div class="pill-row" style="margin:14px 0">${b.years ? `<span class="tag">${b.years} yrs experience</span>` : ''}${b.specialties.map(s => `<span class="tag">${esc(s)}</span>`).join('')}${soc}</div>
-  ${b.bio ? `<p class="mute" style="margin:0 0 6px">${esc(b.bio)}</p>` : ''}
-  <div class="card row" style="margin-top:10px">${ic('pin')}<div class="sp sm"><b>${esc(j.branch.name)}</b><br><span class="mute">${esc(j.branch.address || '')} · ${t12(j.branch.openTime)}–${t12(j.branch.closeTime)}</span></div>${/^https?:\/\//i.test(j.branch.mapUrl) ? `<a class="btn sec sm" href="${esc(j.branch.mapUrl)}" target="_blank" rel="noopener">Map</a>` : ''}</div>
-  <div class="sec-h"><h2>Portfolio</h2><span class="mute sm">${j.portfolio.length} photos</span></div>
-  ${j.portfolio.length ? `<div class="grid3">${j.portfolio.map(p => `<img src="${esc(p.url)}" alt="${esc(p.caption || 'Haircut by ' + b.name)}" data-lb="${esc(p.url)}" loading="lazy">`).join('')}</div>` : '<div class="card empty">This barber has not added portfolio photos yet.</div>'}
-  <div class="sec-h"><h2>Services</h2></div><div class="list">${j.services.map(s => `<div class="card row">${s.photo ? `<img src="${esc(s.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(s.price)}</b></div>`).join('')}</div>
-  <div class="sec-h"><h2>Reviews</h2></div><div class="list">${j.reviews.length ? j.reviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? `<span class="tag ok">Verified visit</span>` : ''}<span class="sp"></span><span class="sm mute">${new Date(r.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div><div>${stars(r.rating)}</div>${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}${replyBox(r)}</div>`).join('') : '<div class="card empty">No reviews yet. Be the first after your cut.</div>'}</div>
-  <div class="foot"><div><div class="sp"><div class="sm mute">Book with</div><b>${esc(b.name)}</b></div><button class="btn" data-book="${b.id}" style="min-width:150px">${ic('cal')} Book now</button></div></div>`;
+  const stat = (v, l) => `<div><b class="num">${v}</b><span>${l}</span></div>`;
+  const nf = j.nextFree, nfTxt = nf ? `${nf.date === today ? 'Today' : nf.date === ymd(new Date(Date.now() + 864e5)) ? 'Tomorrow' : fmtDate(nf.date)} · ${t12(nf.time)}` : '';
+  const tabs = [['cuts', 'Cuts', 'grid', j.portfolio.length], ['posts', 'Posts', 'chat', j.posts.length], ['reviews', 'Reviews', 'star', b.reviews], ['about', 'About', 'info', 0]];
+  let body = '';
+  if (tab === 'cuts') {
+    const styles = [...new Set(j.portfolio.map(p => p.style).filter(Boolean))], shown = S.bStyle ? j.portfolio.filter(p => p.style === S.bStyle) : j.portfolio;
+    body = (styles.length ? `<div class="chips"><button class="chip ${S.bStyle ? '' : 'on'}" data-bstyle="">All ${j.portfolio.length}</button>${styles.map(x => `<button class="chip ${S.bStyle === x ? 'on' : ''}" data-bstyle="${esc(x)}">${esc(x)} ${j.portfolio.filter(p => p.style === x).length}</button>`).join('')}</div>` : '')
+      + (shown.length ? `<div class="pgrid">${shown.map(p => `<button class="pcard" data-cut="${p.id}"><span class="ptag">CUT</span><img src="${esc(p.url)}" alt="${esc(p.caption || 'Haircut by ' + b.name)}" loading="lazy"><div class="pt">${esc(p.caption || p.style || 'Fresh cut')}</div><div class="ps">${esc(p.style || b.name)}</div></button>`).join('')}</div>` : '<div class="card empty">This barber has not added cuts yet.</div>');
+  } else if (tab === 'posts') {
+    body = (j.posts.length ? `<div class="pgrid">${j.posts.map(p => `<div class="pcard"><span class="ptag">POST</span>${p.image ? `<img src="${esc(p.image)}" alt="" data-lb="${esc(p.image)}" loading="lazy" style="cursor:zoom-in">` : `<div class="ptxt">${esc(String(p.text || '').slice(0, 90))}</div>`}<div class="pt">${esc(String(p.text || 'Photo post').slice(0, 28))}</div><div class="ps">${p.likes} like${p.likes === 1 ? '' : 's'}</div></div>`).join('')}</div>` : `<div class="card empty">No posts yet. Members who tag ${esc(b.name)} in the Community will show up here.</div>`)
+      + `<div style="text-align:center;margin-top:12px"><button class="link" data-go="/community">Open Community</button></div>`;
+  } else if (tab === 'reviews') {
+    body = `<div class="list">${j.reviews.length ? j.reviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? `<span class="tag ok">Verified visit</span>` : ''}<span class="sp"></span><span class="sm mute">${new Date(r.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div><div>${stars(r.rating)}</div>${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}${replyBox(r)}</div>`).join('') : '<div class="card empty">No reviews yet. Be the first after your cut.</div>'}</div>`;
+  } else {
+    body = `${b.bio ? `<p style="margin:0 0 10px">${esc(b.bio)}</p>` : ''}<div class="pill-row" style="margin-bottom:12px">${b.years ? `<span class="tag">${b.years} yrs experience</span>` : ''}${b.specialties.map(x => `<span class="tag">${esc(x)}</span>`).join('')}${soc}</div>
+    <div class="card row">${ic('pin')}<div class="sp sm"><b>${esc(j.branch.name)}</b><br><span class="mute">${esc(j.branch.address || '')} · ${t12(j.branch.openTime)}–${t12(j.branch.closeTime)}</span></div><button class="btn sec sm" data-go="/shop/${j.branch.id}">Shop</button></div>
+    <div class="sec-h"><h2>Services</h2></div><div class="list">${j.services.map(s => `<div class="card row">${s.photo ? `<img src="${esc(s.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(s.price)}</b></div>`).join('')}</div>`;
+  }
+  return `<div class="pcover" style="background-image:linear-gradient(180deg,rgba(11,20,36,.2),rgba(11,20,36,.85)),url('${esc(cover)}')"></div>
+  <div class="bar" style="margin-top:-150px;background:none"><button class="btn sec sm" data-go="/discover" aria-label="Back">${ic('back')}</button><span class="sp"></span></div>
+  <div class="phead">${pic(b.photo, b.name, 'av lg')}<span class="sp"></span><button class="btn ${fav ? 'sec' : ''} sm" style="margin-bottom:6px;min-width:104px" data-fav="${b.id}">${fav ? '✓ Following' : '+ Follow'}</button></div>
+  <h1 style="font-size:26px;margin-top:10px" class="row">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</h1>
+  <div class="pill-row" style="margin:6px 0"><span class="gold">${esc(b.level)}</span>${j.rankWeek ? `<span class="rankc">🏆 Top #${j.rankWeek.rank} this week · ${j.rankWeek.cuts} cut${j.rankWeek.cuts === 1 ? '' : 's'}</span>` : ''}</div>
+  <div class="mute sm">${esc(b.headline || 'Barber')} · ${esc(b.branchName)}</div>
+  <div class="stats5">${stat(st.cuts, 'Cuts')}${stat(st.followers, 'Followers')}${stat(b.reviews ? b.rating.toFixed(1) + '★' : '—', 'Rating')}${stat(st.clients, 'Clients')}${stat(st.cuts ? st.rebook + '%' : '—', 'Rebook')}</div>
+  <div class="card row" style="margin-top:12px"><span class="dot ${nf ? '' : 'off'}"></span><div class="sp sm">${nf ? `<b>Next free:</b> ${nfTxt}` : '<b>Fully booked</b> for the next 7 days'}<div class="mute">${t12(j.branch.openTime)}–${t12(j.branch.closeTime)} · ${esc(j.branch.name)}</div></div></div>
+  <div class="ptabs">${tabs.map(([k, n, i, c]) => `<button class="${tab === k ? 'on' : ''}" data-btab="${k}">${ic(i)}<span>${n}${c ? ' ' + c : ''}</span></button>`).join('')}</div>
+  ${body}
+  <div class="foot"><div><div class="sp"><div class="sm mute">${nf ? 'Next free · ' + nfTxt : 'Book with'}</div><b>${esc(b.name)}</b></div><button class="btn" data-book="${b.id}" style="min-width:150px">${ic('cal')} Book now</button></div></div>`;
+}
+function openCut(p) {
+  const j = S.cur, b = j.barber, o = document.createElement('div'); o.className = 'lb'; o.style.alignItems = 'end';
+  o.innerHTML = `<div class="card pop" style="width:100%;max-width:720px;border-radius:22px 22px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto"><img src="${esc(p.url)}" alt="" style="width:100%;max-height:55vh;object-fit:contain;border-radius:12px;background:#000;display:block">
+    <div style="margin:10px 0 2px"><b>${esc(p.caption || 'Fresh cut')}</b> ${p.style ? `<span class="tag">${esc(p.style)}</span>` : ''}</div><div class="sm mute">by ${esc(b.name)} · ${esc(j.branch.name)}</div>
+    <div class="row" style="margin-top:12px"><button class="btn ghost sp" data-x>Close</button><button class="btn sp" data-bookcut>Book this cut</button></div></div>`;
+  o.addEventListener('click', e => {
+    if (e.target === o || e.target.dataset.x != null) return o.remove();
+    if (e.target.closest('[data-bookcut]')) { S.styleNote = `Style I want: ${p.style || 'same as the photo'}${p.caption ? ' (' + p.caption + ')' : ''}. Reference photo by ${b.name}.`; o.remove(); startBooking(b.branchId, b.id); if (!S.token) nav('/auth'); }
+  });
+  document.body.appendChild(o);
 }
 
 // ----- booking -----
@@ -149,7 +182,7 @@ function vMe() {
   if (!S.user) { setTimeout(() => nav('/auth')); return ''; }
   const u = S.user, favs = S.D ? S.D.barbers.filter(b => S.favs.includes(b.id)) : [];
   return header('Profile', '/') + `<div class="card row"><span class="av">${esc(initials(u.name))}</span><div class="sp"><b>${esc(u.name)}</b><div class="sm mute">${esc(u.email)}</div></div></div>
-  <div class="sec-h"><h2>Favorite barbers</h2></div><div class="list">${favs.map(barberRow).join('') || '<div class="card empty">Tap the heart on a barber to save them.</div>'}</div>
+  <div class="sec-h"><h2>Barbers you follow</h2></div><div class="list">${favs.map(barberRow).join('') || '<div class="card empty">Tap Follow on a barber to keep them here.</div>'}</div>
   <div class="sec-h"><h2>Saved styles</h2><button class="link" data-go="/style">Style finder</button></div><div class="pill-row">${(u.styles || []).map(id => cutById(id)).filter(Boolean).map(c => `<span class="tag">${esc(c.name)}</span>`).join('') || '<span class="mute sm">None yet. Try the Style finder.</span>'}</div>
   <div class="sec-h"><h2>My details</h2></div><form id="mef">${S.meMsg ? `<div class="${S.meMsg.ok ? 'ok' : 'err'}">${esc(S.meMsg.t)}</div>` : ''}<label class="f">Name<input name="name" value="${esc(u.name)}" required></label><label class="f">Mobile<input name="phone" type="tel" value="${esc(u.phone)}" required></label><label class="f">City<input name="city" value="${esc(u.city)}" placeholder="e.g. San Pablo"></label><button class="btn block" style="margin-top:14px">Save</button></form>
   <div class="sec-h"><h2>For barbers & owners</h2></div><div class="card"><p class="mute sm" style="margin-top:0">Manage your professional profile and portfolio with your Brotherhood staff login.</p><button class="btn sec block" data-go="/pro">Open pro tools</button></div>
@@ -170,7 +203,8 @@ function vPro() {
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
   ${S.pro.admin ? `<label class="f row"><input type="checkbox" name="verified" style="width:auto" ${sel.verified ? 'checked' : ''}><span style="margin:0">Verified professional (owner only)</span></label>` : ''}<button class="btn block" style="margin-top:14px">Save profile</button></form></div>
   <div ${S.proTab === 'port' ? '' : 'hidden'}><div class="sec-h"><h2>Portfolio</h2><label class="btn sm" style="cursor:pointer">${ic('plus')} Add photos<input type="file" id="pfile" accept="image/*" multiple hidden></label></div>
-  <div class="grid3">${sel.portfolio.map(p => `<div style="position:relative"><img src="${esc(p.url)}" alt="" data-lb="${esc(p.url)}"><button class="btn sm danger" style="position:absolute;right:4px;top:4px;padding:2px 8px;background:var(--bg)" data-pdel="${p.id}">✕</button></div>`).join('')}</div>${sel.portfolio.length ? '' : '<div class="card empty">Add your best cuts. Customers choose barbers by their work.</div>'}</div>
+  <label class="f" style="margin-top:0">Style tag for the photos you add (optional)<select id="pstyle"><option value="">No tag</option>${CUTS.map(c => `<option value="${esc(c.name)}" ${S.pstyle === c.name ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+  <div class="pgrid" style="margin-top:10px">${sel.portfolio.map(p => `<div class="pcard"><img src="${esc(p.url)}" alt="" data-lb="${esc(p.url)}"><button class="btn sm danger" style="position:absolute;right:4px;top:4px;padding:2px 8px;background:var(--bg)" data-pdel="${p.id}" aria-label="Delete photo">✕</button><button class="btn sm sec" style="position:absolute;left:4px;top:4px;padding:2px 8px" data-pedit="${p.id}" data-cap="${esc(p.caption || '')}" data-style="${esc(p.style || '')}" aria-label="Edit caption and style">✎</button><div class="pt">${esc(p.caption || p.style || 'No caption')}</div><div class="ps">${esc(p.style || 'No style tag')}</div></div>`).join('')}</div>${sel.portfolio.length ? '' : '<div class="card empty">Add your best cuts. Customers choose barbers by their work.</div>'}</div>
   <button class="btn ghost block" style="margin-top:22px" data-prologout>Sign out of pro tools</button>`;
 }
 
@@ -414,6 +448,7 @@ async function render() {
 }
 async function onRoute() {
   const r = route(); window.scrollTo(0, 0);
+  if (r.a === 'barber') { S.cur = null; S.bTab = 'cuts'; S.bStyle = ''; }
   if (['discover', 'home', 'book', 'barber', 'shop', 'map'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
@@ -436,9 +471,10 @@ app.addEventListener('change', async e => {
   if (e.target.id === 'sort') { S.sort = e.target.value; await loadDiscover(); render(); }
   if (e.target.id === 'prosel') { S.proSel = e.target.value; S.proMsg = null; render(); loadDash(); }
   if (e.target.id === 'cfile') { const f = e.target.files[0]; e.target.value = ''; if (f) { try { S.comp.img = await compress(f); S.comp.err = ''; } catch (x) { S.comp.err = x.message; } render(); } }
+  if (e.target.id === 'pstyle') S.pstyle = e.target.value;
   if (e.target.id === 'pfile') {
     const files = [...e.target.files]; let n = 0; e.target.value = '';
-    for (const f of files.slice(0, 10)) { try { await api('/pro/portfolio', { method: 'POST', body: { staffId: S.proSel, data: await compress(f) } }, S.proToken); n++; } catch (x) { toast(x.message); } }
+    for (const f of files.slice(0, 10)) { try { await api('/pro/portfolio', { method: 'POST', body: { staffId: S.proSel, data: await compress(f), style: S.pstyle || '' } }, S.proToken); n++; } catch (x) { toast(x.message); } }
     if (n) { toast(n + ' photo' + (n > 1 ? 's' : '') + ' added'); await loadPro(); render(); }
   }
 });
@@ -459,7 +495,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -479,9 +515,17 @@ app.addEventListener('click', async e => {
   if (D.branchf != null) { S.branch = D.branchf; await loadDiscover(); return render(); }
   if (D.spec) { S.specialty = S.specialty === D.spec ? '' : D.spec; await loadDiscover(); return render(); }
   if (D.tab) { S.tab = D.tab; return render(); }
+  if (D.btab) { S.bTab = D.btab; return render(); }
+  if (D.bstyle != null) { S.bStyle = D.bstyle; return render(); }
+  if (D.cut) { const p = S.cur?.portfolio.find(x => x.id === D.cut); if (p) openCut(p); return; }
+  if (D.pedit) {
+    const cap = prompt('Caption for this cut:', D.cap || ''); if (cap === null) return;
+    const sty = prompt('Style tag (for example Skin Fade, Taper, Pompadour):', D.style || ''); if (sty === null) return;
+    try { await api('/pro/portfolio/' + D.pedit, { method: 'PUT', body: { caption: cap, style: sty } }, S.proToken); await loadPro(); toast('Saved'); } catch (x) { toast(x.message); } return render();
+  }
   if (D.fav) {
     if (!S.token) return nav('/auth'); const on = S.favs.includes(D.fav);
-    try { await api('/favorites/' + D.fav, { method: on ? 'DELETE' : 'PUT' }); S.favs = on ? S.favs.filter(x => x !== D.fav) : [...S.favs, D.fav]; render(); } catch (x) { toast(x.message); } return;
+    try { await api('/favorites/' + D.fav, { method: on ? 'DELETE' : 'PUT' }); S.favs = on ? S.favs.filter(x => x !== D.fav) : [...S.favs, D.fav]; if (S.cur?.barber?.id === D.fav) S.cur.stats.followers += on ? -1 : 1; render(); } catch (x) { toast(x.message); } return;
   }
   if (D.book) { const b = S.cur?.barber; startBooking(b.branchId, b.id); if (!S.token) nav('/auth'); return; }
   if (D.bstaff) { S.bk.staffId = D.bstaff; return loadSlots(); }
