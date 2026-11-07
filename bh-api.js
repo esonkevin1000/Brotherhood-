@@ -15,6 +15,7 @@ create table if not exists bh_favorites(userId text, staffId text, createdAt tex
 create table if not exists bh_certs(id text primary key, staffId text, title text, org text, date text, imageUrl text, verified integer default 0, createdAt text);
 create index if not exists bh_certs_staff on bh_certs(staffId);
 create table if not exists bh_saves(userId text, postId text, createdAt text, primary key(userId, postId));
+create table if not exists bh_offers(staffId text, pkg text, price real, primary key(staffId, pkg));
 create table if not exists bh_posts(id text primary key, userId text, staffId text, text text, imageUrl text, createdAt text, hidden integer default 0);
 create index if not exists bh_posts_time on bh_posts(createdAt);
 create table if not exists bh_likes(postId text, userId text, primary key(postId, userId));
@@ -102,15 +103,17 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const branchRatings = () => new Map(all('select branchId, count(*) n, avg(rating) a from reviews group by branchId').map(r => [r.branchId, { n: r.n, a: Math.round(r.a * 10) / 10 }]));
   const portCount = () => new Map(all('select staffId, count(*) n from bh_portfolio group by staffId').map(r => [r.staffId, r.n]));
 
+  const PKG_IDS = ['cut', 'blow', 'full'];   // Haircut only / Haircut + blower, shampoo & styling / Full package
   const levelOf = n => n >= 1000 ? 'Legend' : n >= 300 ? 'Master Barber' : n >= 50 ? 'Pro Barber' : 'Rising Barber';
   function barberCard(s, rm, pc, br, ex) {
     const p = one('select * from bh_barber where staffId=?', s.id) || {}, r = rm.get(s.id) || { n: 0, a: 0, v: 0 }, spec = jp(p.specialties), photos = pc.get(s.id) || 0;
     let sl = []; try { sl = slotsFor(s.branchId, todayStr(), s.id, 30); } catch { } const slots = sl.length;
+    const offers = all('select pkg,price from bh_offers where staffId=?', s.id).filter(o => PKG_IDS.includes(o.pkg)).sort((a, b) => PKG_IDS.indexOf(a.pkg) - PKG_IDS.indexOf(b.pkg));
     const complete = [p.headline, p.bio, s.photo, p.years, spec.length, photos >= 3].filter(Boolean).length / 6;
     // ranking: verified-review quality (Bayesian), same-day availability, profile completeness, verification — never raw popularity
     const bayes = (r.a * r.n + 4.2 * 5) / (r.n + 5), score = bayes / 5 * 50 + Math.min(slots, 6) / 6 * 20 + complete * 20 + (p.verified ? 10 : 0);
     return { id: s.id, name: s.name, photo: s.photo || '', branchId: s.branchId, branchName: br.get(s.branchId)?.name || '', headline: p.headline || '', years: p.years || 0, specialties: spec,
-      rating: r.a, reviews: r.n, verifiedReviews: r.v, verified: !!p.verified, portfolio: photos, slotsToday: slots, nextSlot: sl[0] || '', score: Math.round(score * 10) / 10,
+      rating: r.a, reviews: r.n, verifiedReviews: r.v, verified: !!p.verified, portfolio: photos, slotsToday: slots, nextSlot: sl[0] || '', offers, fromPrice: offers.length ? Math.min(...offers.map(o => o.price)) : 0, score: Math.round(score * 10) / 10,
       ...(ex ? { cover: ex.cover.get(s.id) || '', weekCuts: ex.week.get(s.id) || 0, level: levelOf(ex.cuts.get(s.id) || 0), styles: [...(ex.styles.get(s.id) || [])] } : {}) };
   }
   const servicesList = () => all("select id,name,price,mins,photo,apptOnly from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) }));
@@ -199,17 +202,21 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const style = clip(q.style, 30).toLowerCase();
       if (style) barbers = barbers.filter(b => b.styles.some(x => x.toLowerCase() === style) || b.specialties.some(x => x.toLowerCase() === style));
       if (q.verified === '1') barbers = barbers.filter(b => b.verified);
+      const pkg = PKG_IDS.includes(q.pkg) ? q.pkg : '', priceOf = b => pkg ? (b.offers.find(o => o.pkg === pkg)?.price ?? 1e9) : (b.fromPrice || 1e9);
+      if (pkg) barbers = barbers.filter(b => b.offers.some(o => o.pkg === pkg));
       if (spec) barbers = barbers.filter(b => b.specialties.some(x => x.toLowerCase() === spec));
       if (q.available === '1') barbers = barbers.filter(b => b.slotsToday > 0);
       if (+q.minRating > 0) barbers = barbers.filter(b => b.rating >= +q.minRating);
       barbers.sort(q.sort === 'rating' ? (a, b) => b.rating - a.rating || b.reviews - a.reviews : q.sort === 'experience' ? (a, b) => b.years - a.years : q.sort === 'name' ? (a, b) => a.name.localeCompare(b.name)
-        : q.sort === 'trending' ? (a, b) => b.weekCuts - a.weekCuts || b.score - a.score : q.sort === 'soonest' ? (a, b) => (a.nextSlot || '99:99').localeCompare(b.nextSlot || '99:99') || b.score - a.score : (a, b) => b.score - a.score);
+        : q.sort === 'trending' ? (a, b) => b.weekCuts - a.weekCuts || b.score - a.score : q.sort === 'soonest' ? (a, b) => (a.nextSlot || '99:99').localeCompare(b.nextSlot || '99:99') || b.score - a.score
+        : q.sort === 'cheapest' ? (a, b) => priceOf(a) - priceOf(b) || b.score - a.score : (a, b) => b.score - a.score);
       const shops = brs.filter(b => !bid || b.id === bid).map(b => ({ id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '',
         photo: b.photo || siteCover(b.name) || '', lat: b.lat ?? null, lng: b.lng ?? null, rating: brr.get(b.id)?.a || 0, reviews: brr.get(b.id)?.n || 0, barbers: all('select count(*) n from staff where branchId=? and active=1', b.id)[0].n }))
         .filter(s => !term || (s.name + ' ' + s.address).toLowerCase().includes(term) || barbers.some(x => x.branchId === s.id));
       const specialties = [...new Set(all('select specialties from bh_barber').flatMap(r => jp(r.specialties)))].sort();
       const styleTiles = all("select p.style name, count(*) n, (select p2.url from bh_portfolio p2 where p2.style=p.style order by p2.createdAt desc limit 1) image from bh_portfolio p join staff s on s.id=p.staffId and s.active=1 where p.style<>'' group by p.style order by n desc");
-      return send(res, 200, { shops, barbers, specialties, styleTiles, services: servicesList() });
+      const pkgTiles = PKG_IDS.map(k => { const rows = all('select o.price from bh_offers o join staff s on s.id=o.staffId and s.active=1 where o.pkg=?', k); return { pkg: k, n: rows.length, from: rows.length ? Math.min(...rows.map(r => r.price)) : 0 }; });
+      return send(res, 200, { shops, barbers, specialties, styleTiles, pkgTiles, services: servicesList() });
     }
     const bm = sub.match(/^\/barbers\/(\w+)$/);
     if (bm && method === 'GET') {
@@ -437,7 +444,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const staff = (admin ? all('select * from staff where active=1 order by name') : [get('staff', mine)]).filter(Boolean).map(s => {
           const pr = one('select * from bh_barber where staffId=?', s.id) || {};
           return { id: s.id, name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', headline: pr.headline || '', bio: pr.bio || '', years: pr.years || 0, specialties: jp(pr.specialties),
-            instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, cover: pr.cover || '', portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id), certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc', s.id) };
+            instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, cover: pr.cover || '', offers: all('select pkg,price from bh_offers where staffId=?', s.id), portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id), certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc', s.id) };
         });
         return send(res, 200, { admin, name: me.name, staff });
       }
@@ -544,6 +551,17 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       if (ctm && method === 'DELETE') {
         const row = get('bh_certs', ctm[1]); if (!row) bad(404, 'Not found'); target(row.staffId); dropImage(row.imageUrl);
         run('delete from bh_certs where id=?', row.id); log(me, 'cert-delete', 'bh_certs', row.id, ''); return send(res, 200, { ok: true });
+      }
+      // service packages a barber offers, with his own price for each (shown in the marketplace; the POS stays the source of truth for what is charged)
+      if (sub === '/pro/offers' && method === 'PUT') {
+        const b = await readBody(req), s = target(b.staffId), rows = Array.isArray(b.offers) ? b.offers : [], seen = new Set();
+        for (const o of rows) {
+          if (!PKG_IDS.includes(o.pkg)) bad(400, 'Unknown service'); if (seen.has(o.pkg)) bad(400, 'Each service can be listed once'); seen.add(o.pkg);
+          const price = Math.round(+o.price); if (!(price >= 1 && price <= 99999)) bad(400, 'Enter a price between ₱1 and ₱99,999 for each service you offer');
+        }
+        run('delete from bh_offers where staffId=?', s.id);
+        for (const o of rows) run('insert into bh_offers(staffId,pkg,price) values(?,?,?)', s.id, o.pkg, Math.round(+o.price));
+        log(me, 'barber-offers', 'bh_offers', s.id, s.name + ': ' + rows.map(o => o.pkg + '=' + o.price).join(', ')); return send(res, 200, { ok: true });
       }
       // cover photo and profile photo (barbers manage their own; the owner can manage anyone's)
       if (sub === '/pro/cover' && method === 'POST') {

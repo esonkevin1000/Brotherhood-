@@ -22,7 +22,7 @@ const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url
 const rate = (a, n) => n ? `<span class="star">★</span> ${a.toFixed(1)} <span class="mute">(${n})</span>` : '<span class="mute sm">New</span>';
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { } } };
 
-const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', style: '', verified: false, minRating: 0, R: null, fresh: null, ctab: 'feed', cstyle: '', cq: '', spot: null, cuts: null, proPin: false, unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashRange: 'week', toastMsg: '' };
+const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', pkg: '', style: '', verified: false, minRating: 0, R: null, fresh: null, ctab: 'feed', cstyle: '', cq: '', spot: null, cuts: null, proPin: false, unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashRange: 'week', toastMsg: '' };
 
 async function api(path, opt = {}, token = S.token) {
   const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
@@ -64,11 +64,11 @@ function vHome() {
 }
 // ----- Discover: a marketplace of barbers and haircuts -----
 Object.assign(ICON, { filter: '<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>' });
-const SORTS = [['best', 'Best match'], ['soonest', 'Soonest available'], ['trending', 'Trending this week'], ['rating', 'Top rated'], ['nearest', 'Nearest to me'], ['experience', 'Most experienced'], ['name', 'A to Z']];
-const discoverActive = () => !!(S.q || S.branch || S.style || S.avail || S.minRating || S.verified || S.sort !== 'best' || S.tab === 'shops');
+const SORTS = [['best', 'Best match'], ['cheapest', 'Lowest price'], ['soonest', 'Soonest available'], ['trending', 'Trending this week'], ['rating', 'Top rated'], ['nearest', 'Nearest to me'], ['experience', 'Most experienced'], ['name', 'A to Z']];
+const discoverActive = () => !!(S.q || S.branch || S.style || S.pkg || S.avail || S.minRating || S.verified || S.sort !== 'best' || S.tab === 'shops');
 async function loadResults() {
   if (!discoverActive()) { S.R = null; return; }
-  const qs = new URLSearchParams({ q: S.q, branch: S.branch, specialty: S.specialty, style: S.style, available: S.avail ? '1' : '', verified: S.verified ? '1' : '', minRating: S.minRating || '', sort: S.sort === 'nearest' ? 'best' : S.sort });
+  const qs = new URLSearchParams({ q: S.q, branch: S.branch, specialty: S.specialty, style: S.style, pkg: S.pkg, available: S.avail ? '1' : '', verified: S.verified ? '1' : '', minRating: S.minRating || '', sort: S.sort === 'nearest' ? 'best' : S.sort });
   try { S.R = await api('/discover?' + qs); } catch { S.R = { barbers: [], shops: [] }; }
 }
 async function loadFresh() { try { S.fresh = (await api('/cuts')).items.filter(i => i.image).slice(0, 14); } catch { S.fresh = []; } }
@@ -76,11 +76,12 @@ const shopOf = id => (S.D?.shops || []).find(s => s.id === id);
 const withKm = list => list.map(b => { const sh = shopOf(b.branchId); return { ...b, km: S.geo && sh && sh.lat != null ? kmBetween(S.geo.lat, S.geo.lng, sh.lat, sh.lng) : null }; });
 const secRow = (title, attr, inner = '') => `<div class="sec-h"><h2>${title}</h2>${attr ? `<button class="link" ${attr}>See all ›</button>` : ''}</div>${inner}`;
 const barberBig = b => {
+  const sel = S.pkg ? b.offers.find(o => o.pkg === S.pkg) : null, priceTxt = sel ? `${PK[S.pkg].short} ${peso(sel.price)}` : b.fromPrice ? `From ${peso(b.fromPrice)}` : '';
   const img = b.cover || b.photo, fav = !!S.token && S.favs.includes(b.id), tags = [b.verified ? '✓ Verified' : '', b.weekCuts ? `🔥 ${b.weekCuts} this week` : '', !b.reviews && !b.weekCuts && !b.verified ? 'New' : ''].filter(Boolean);
   return `<article class="bigc"><div class="bigimg" data-go="/barber/${b.id}" role="link" aria-label="${esc(b.name)}" style="${img ? `background-image:url('${esc(img)}')` : ''}">${img ? '' : `<span class="ph">${esc(initials(b.name))}</span>`}<div class="tagrow">${tags.map(t => `<span class="mtag">${t}</span>`).join('')}</div><button class="hbtn ${fav ? 'on' : ''}" data-fav="${b.id}" aria-label="${fav ? 'Unfollow' : 'Follow'}">${ic('heart')}</button></div>
   <div class="bigb" data-go="/barber/${b.id}"><div class="row"><b class="nm">${esc(b.name)}</b>${b.verified ? `<span class="ver">${ic('ver')}</span>` : ''}<span class="sp"></span><span class="sm">${rate(b.rating, b.reviews)}</span></div>
-  <div class="sm mute">${b.nextSlot ? `Next free ${t12(b.nextSlot)}` : 'Fully booked today'} · ${esc(b.branchName)}${b.km != null ? ' · ' + kmText(b.km) : ''}</div>
-  <div class="chiprow">${b.level ? `<span class="gold" style="font-size:11px;padding:3px 9px">${esc(b.level)}</span>` : ''}${(b.styles && b.styles.length ? b.styles : b.specialties).slice(0, 3).map(x => `<span>${esc(x)}</span>`).join('')}</div></div></article>`;
+  <div class="sm mute">${priceTxt ? `<b style="color:var(--text)">${priceTxt}</b> · ` : ''}${b.nextSlot ? `Next free ${t12(b.nextSlot)}` : 'Fully booked today'} · ${esc(b.branchName)}${b.km != null ? ' · ' + kmText(b.km) : ''}</div>
+  <div class="chiprow">${b.offers.map(o => `<span style="color:var(--text)">${esc(PK[o.pkg].short)} ${peso(o.price)}</span>`).join('')}${b.level ? `<span class="gold" style="font-size:11px;padding:3px 9px">${esc(b.level)}</span>` : ''}${(b.styles && b.styles.length ? b.styles : b.specialties).slice(0, 2).map(x => `<span>${esc(x)}</span>`).join('')}</div></div></article>`;
 };
 const BANNERS = [
   { t: 'Your next cut, booked in seconds', p: 'Free for customers. Pick a shop, a barber and a time.', cta: 'Book now', a: 'data-bookany', e: '💈' },
@@ -89,7 +90,7 @@ const BANNERS = [
 ];
 function filterBar() {
   const D = S.D, label = Object.fromEntries(SORTS), shopName = S.branch ? (shopOf(S.branch)?.name || 'Shop') : 'All shops';
-  return `<div class="fbar"><div class="chips"><button class="chip" data-fsheet aria-label="All filters">${ic('filter').replace('class="i"', 'class="i" style="width:16px;height:16px;vertical-align:-3px"')}</button><button class="chip ${S.sort !== 'best' ? 'on' : ''}" data-fsort>${esc(label[S.sort])} ▾</button><button class="chip ${S.avail ? 'on' : ''}" data-avail>Available today</button><button class="chip ${S.minRating ? 'on' : ''}" data-frate>★ 4.0+</button><button class="chip ${S.verified ? 'on' : ''}" data-fver>✓ Verified</button><button class="chip ${S.branch ? 'on' : ''}" data-floc>${esc(shopName)} ▾</button><button class="chip ${S.style ? 'on' : ''}" data-fstyle>${S.style ? esc(S.style) : 'Style'} ▾</button></div></div>`;
+  return `<div class="fbar"><div class="chips"><button class="chip" data-fsheet aria-label="All filters">${ic('filter').replace('class="i"', 'class="i" style="width:16px;height:16px;vertical-align:-3px"')}</button><button class="chip ${S.sort !== 'best' ? 'on' : ''}" data-fsort>${esc(label[S.sort])} ▾</button><button class="chip ${S.avail ? 'on' : ''}" data-avail>Available today</button><button class="chip ${S.minRating ? 'on' : ''}" data-frate>★ 4.0+</button><button class="chip ${S.verified ? 'on' : ''}" data-fver>✓ Verified</button><button class="chip ${S.branch ? 'on' : ''}" data-floc>${esc(shopName)} ▾</button><button class="chip ${S.pkg ? 'on' : ''}" data-fpkg>${S.pkg ? esc(PK[S.pkg].short) : 'Service'} ▾</button><button class="chip ${S.style ? 'on' : ''}" data-fstyle>${S.style ? esc(S.style) : 'Style'} ▾</button></div></div>`;
 }
 function vDiscover() {
   const D = S.D, active = discoverActive(), locLabel = S.branch ? (shopOf(S.branch)?.name || 'Shop') : S.geo ? 'Near you' : 'All shops';
@@ -102,8 +103,7 @@ function vDiscover() {
     const soon = all_.filter(b => b.nextSlot).sort((x, y) => x.nextSlot.localeCompare(y.nextSlot)).slice(0, 10), hot = all_.filter(b => b.weekCuts > 0).sort((x, y) => y.weekCuts - x.weekCuts).slice(0, 10);
     body = `<div class="banners" id="banners">${BANNERS.map(n => `<div class="banner"><div class="sp"><h3>${esc(n.t)}</h3><p>${esc(n.p)}</p><button class="btn white sm" ${n.a}>${esc(n.cta)} ›</button></div><span class="big" aria-hidden="true">${n.e}</span></div>`).join('')}</div>
     <div class="dots" id="bdots">${BANNERS.map((_, i) => `<span class="${i ? '' : 'on'}"></span>`).join('')}</div>
-    ${secRow('Pick a style', '')}<div class="stiles">${tiles.map(t => `<button class="stile ${S.style === t.name ? 'on' : ''}" data-dstyle="${esc(t.name)}">${t.image ? `<img src="${esc(t.image)}" alt="" loading="lazy">` : `<span class="g">${styleArt(t.name)}</span>`}<span>${esc(t.name)}</span>${t.n ? `<em>${t.n}</em>` : ''}</button>`).join('')}</div>
-    ${D.services.length ? secRow('Pick a haircut', '') + `<div class="hscroll">${D.services.map(v => `<button class="tile wide" style="width:190px" data-svc="${v.id}">${v.photo ? `<img class="tp" style="aspect-ratio:16/10" src="${esc(v.photo)}" alt="" loading="lazy">` : ''}<div class="tb"><div class="nm">${esc(v.name)}</div><div class="sm mute">${v.mins || 30} min</div><div class="sm"><b>${peso(v.price)}</b> · Choose a shop ›</div></div></button>`).join('')}</div>` : ''}
+    ${secRow('Pick a service')}<div class="pkgs">${PKGS.map(([k, name, desc]) => { const t = (D.pkgTiles || []).find(x => x.pkg === k) || { n: 0, from: 0 }; return `<button class="pkg" data-dpkg="${k}"><div class="pa">${pkgArt(k)}</div><div class="pb"><b>${esc(name)}</b><span class="sm mute">${esc(desc)}</span><span class="sm">${t.n ? `${t.n} barber${t.n === 1 ? '' : 's'} · from <b>${peso(t.from)}</b>` : 'Barbers are adding their prices'}</span></div></button>`; }).join('')}</div>
     ${soon.length ? secRow('Free today', 'data-dsee="soonest"') + `<div class="hscroll">${soon.map(b => barberTile(b, 'Next ' + t12(b.nextSlot))).join('')}</div>` : ''}
     ${hot.length ? secRow('Trending this week', 'data-dsee="trending"') + `<div class="hscroll">${hot.map(b => barberTile(b, '🔥 ' + b.weekCuts + ' cut' + (b.weekCuts === 1 ? '' : 's'))).join('')}</div>` : ''}
     ${S.fresh && S.fresh.length ? secRow('Fresh cuts', '') + `<div class="hscroll">${S.fresh.map((i, k) => `<button class="tile sq" data-fresh="${k}"><div class="tw"><img class="tp" src="${esc(i.image)}" alt="${esc(i.title)}" loading="lazy">${i.style ? `<span class="tbadge">${esc(i.style)}</span>` : ''}</div><div class="tb"><div class="sm tl"><b>${esc(i.title)}</b></div><div class="sm mute tl">${esc(i.barberName || i.author || '')}</div></div></button>`).join('')}</div>` : ''}
@@ -144,20 +144,21 @@ function openFilters() {
     o.querySelector('.sheet').innerHTML = `<h3>Filters</h3>
       <div class="sm mute" style="margin:8px 0 4px">Sort by</div><div class="chips" style="flex-wrap:wrap">${SORTS.map(([v, l]) => chip('data-xs', v, l, S.sort === v)).join('')}</div>
       <div class="sm mute" style="margin:8px 0 4px">Shop</div><div class="chips" style="flex-wrap:wrap">${chip('data-xb', '', 'All shops', !S.branch)}${(S.D?.shops || []).map(s => chip('data-xb', s.id, s.name, S.branch === s.id)).join('')}</div>
+      <div class="sm mute" style="margin:8px 0 4px">Service</div><div class="chips" style="flex-wrap:wrap">${chip('data-xp', '', 'Any service', !S.pkg)}${PKGS.map(([k, n]) => chip('data-xp', k, n, S.pkg === k)).join('')}</div>
       <div class="sm mute" style="margin:8px 0 4px">Style</div><div class="chips" style="flex-wrap:wrap">${chip('data-xy', '', 'Any style', !S.style)}${CUTS.map(c => chip('data-xy', c.name, c.name, S.style === c.name)).join('')}</div>
       <div class="sm mute" style="margin:8px 0 4px">More</div><div class="chips" style="flex-wrap:wrap">${chip('data-xa', '1', 'Available today', S.avail)}${chip('data-xr', '1', '★ 4.0+', S.minRating)}${chip('data-xv', '1', '✓ Verified', S.verified)}</div>
       <div class="row" style="margin-top:16px"><button class="btn ghost sp" data-xreset>Clear all</button><button class="btn sp" data-x>Show results</button></div>`;
   };
   draw();
   o.addEventListener('click', async e => {
-    const t = e.target.closest('[data-xs],[data-xb],[data-xy],[data-xa],[data-xr],[data-xv],[data-xreset]'); if (!t) { if (e.target === o || e.target.closest('[data-x]')) refreshResults(); return; }
+    const t = e.target.closest('[data-xs],[data-xb],[data-xp],[data-xy],[data-xa],[data-xr],[data-xv],[data-xreset]'); if (!t) { if (e.target === o || e.target.closest('[data-x]')) refreshResults(); return; }
     const d = t.dataset;
-    if ('xs' in d) { if (d.xs === 'nearest' && !S.geo && !(await nearMe())) return; S.sort = d.xs; } else if ('xb' in d) S.branch = d.xb; else if ('xy' in d) S.style = d.xy; else if ('xa' in d) S.avail = !S.avail; else if ('xr' in d) S.minRating = S.minRating ? 0 : 4; else if ('xv' in d) S.verified = !S.verified;
+    if ('xs' in d) { if (d.xs === 'nearest' && !S.geo && !(await nearMe())) return; S.sort = d.xs; } else if ('xb' in d) S.branch = d.xb; else if ('xp' in d) S.pkg = d.xp; else if ('xy' in d) S.style = d.xy; else if ('xa' in d) S.avail = !S.avail; else if ('xr' in d) S.minRating = S.minRating ? 0 : 4; else if ('xv' in d) S.verified = !S.verified;
     else if ('xreset' in d) resetDiscover();
     draw(); loadResults();
   });
 }
-function resetDiscover() { S.q = ''; S.branch = ''; S.specialty = ''; S.style = ''; S.avail = false; S.minRating = 0; S.verified = false; S.sort = 'best'; S.tab = 'barbers'; S.R = null; }
+function resetDiscover() { S.q = ''; S.branch = ''; S.specialty = ''; S.style = ''; S.pkg = ''; S.avail = false; S.minRating = 0; S.verified = false; S.sort = 'best'; S.tab = 'barbers'; S.R = null; }
 let bannerTimer = null;
 function afterDiscover() {
   const dh = document.getElementById('dhead'); if (dh) document.documentElement.style.setProperty('--dh', dh.offsetHeight - 1 + 'px');
@@ -203,7 +204,7 @@ async function vBarber(id) {
     body = `${b.bio ? `<p style="margin:0 0 10px">${esc(b.bio)}</p>` : ''}<div class="pill-row" style="margin-bottom:12px">${b.years ? `<span class="tag">${b.years} yrs experience</span>` : ''}${b.specialties.map(x => `<span class="tag">${esc(x)}</span>`).join('')}${soc}</div>
     ${j.certs.length ? `<div class="sec-h" style="margin-top:6px"><h2>Seminars & certificates</h2><span class="mute sm">${j.certs.length}</span></div><div class="list" style="margin-bottom:12px">${j.certs.map(certRow).join('')}</div>` : ''}
     <div class="card row">${ic('pin')}<div class="sp sm"><b>${esc(j.branch.name)}</b><br><span class="mute">${esc(j.branch.address || '')} · ${t12(j.branch.openTime)}–${t12(j.branch.closeTime)}</span></div><button class="btn sec sm" data-go="/shop/${j.branch.id}">Shop</button></div>
-    <div class="sec-h"><h2>Services</h2></div><div class="list">${j.services.map(s => `<div class="card row">${s.photo ? `<img src="${esc(s.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(s.price)}</b></div>`).join('')}</div>`;
+    <div class="sec-h"><h2>Shop menu</h2></div><div class="list">${j.services.map(s => `<div class="card row">${s.photo ? `<img src="${esc(s.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(s.price)}</b></div>`).join('')}</div>`;
   }
   return `<div class="pcover" style="background-image:linear-gradient(180deg,rgba(9,9,10,.2),rgba(9,9,10,.88)),url('${esc(cover)}')"></div>
   <div class="bar" style="margin-top:-150px;background:none"><button class="btn sec sm" data-go="/discover" aria-label="Back">${ic('back')}</button><span class="sp"></span></div>
@@ -213,6 +214,7 @@ async function vBarber(id) {
   <div class="mute sm">${esc(b.headline || 'Barber')} · ${esc(b.branchName)}</div>
   <div class="stats5">${stat(st.cuts, 'Cuts')}${stat(st.followers, 'Followers')}${stat(b.reviews ? b.rating.toFixed(1) + '★' : '—', 'Rating')}${stat(st.clients, 'Clients')}${stat(st.cuts ? st.rebook + '%' : '—', 'Rebook')}</div>
   <div class="card row" style="margin-top:12px"><span class="dot ${nf ? '' : 'off'}"></span><div class="sp sm">${nf ? `<b>Next free:</b> ${nfTxt}` : '<b>Fully booked</b> for the next 7 days'}<div class="mute">${t12(j.branch.openTime)}–${t12(j.branch.closeTime)} · ${esc(j.branch.name)}</div></div></div>
+  ${offersBlock(b)}
   <div class="ptabs">${tabs.map(([k, n, i, c]) => `<button class="${tab === k ? 'on' : ''}" data-btab="${k}">${ic(i)}<span>${n}${c ? ' ' + c : ''}</span></button>`).join('')}</div>
   ${body}
   <div class="foot"><div><div class="sp"><div class="sm mute">${nf ? 'Next free · ' + nfTxt : 'Book with'}</div><b>${esc(b.name)}</b></div><button class="btn" data-book="${b.id}" style="min-width:150px">${ic('cal')} Book now</button></div></div>`;
@@ -246,18 +248,18 @@ function vBook() {
   if (k.done) return header('Booked!') + `<div class="ok pop"><b>You're booked, ${esc(S.user.name.split(' ')[0])}!</b><br>${fmtDate(k.done.date)} at ${t12(k.done.time)} · ${esc(k.done.branch)}<br>${esc(k.done.items.map(i => i.name).join(' + '))} with ${esc(k.done.staff)} · ${peso(k.done.total)}<br><span class="sm">Pay at the shop. Cancel up to 1 hour before.</span></div><button class="btn block" data-go="/bookings">View my bookings</button>`;
   const total = D.services.filter(s => k.items.includes(s.id)).reduce((t, s) => t + s.price, 0);
   return header('Book a cut', k.staffId !== 'any' ? '/barber/' + k.staffId : '/discover') + `<div class="card row">${ic('pin')}<div class="sp"><b>${esc(br?.name || '')}</b><div class="sm mute">${esc(br?.address || '')}</div></div></div>
-  <div class="sec-h"><h2>1 · Barber</h2></div><div class="chips"><button class="chip ${k.staffId === 'any' ? 'on' : ''}" data-bstaff="any">Any available</button>${team.map(b => `<button class="chip ${k.staffId === b.id ? 'on' : ''}" data-bstaff="${b.id}">${esc(b.name)}</button>`).join('')}</div>
-  <div class="sec-h"><h2>2 · Service</h2></div><div class="list">${D.services.map(s => `<button class="svc ${k.items.includes(s.id) ? 'on' : ''}" data-bsvc="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="">` : ''}<div class="sp" style="text-align:left"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num">${peso(s.price)}</b><span class="chk">${k.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('')}</div>
+  ${k.pkg ? `<div class="card row" style="margin-top:10px"><div class="pa s">${pkgArt(k.pkg.key)}</div><div class="sp"><b>${esc(k.pkg.name)}</b><div class="sm mute">${peso(k.pkg.price)} · the barber's price, pay at the shop</div></div><button class="link" data-rmpkg>Remove</button></div>` : ''}<div class="sec-h"><h2>1 · Barber</h2></div><div class="chips"><button class="chip ${k.staffId === 'any' ? 'on' : ''}" data-bstaff="any">Any available</button>${team.map(b => `<button class="chip ${k.staffId === b.id ? 'on' : ''}" data-bstaff="${b.id}">${esc(b.name)}</button>`).join('')}</div>
+  <div class="sec-h"><h2>${k.pkg ? '2 · Time needed' : '2 · Service'}</h2></div>${k.pkg ? '<div class="sm mute" style="margin:-4px 0 8px">Pick the shop service closest to your package so enough time is booked. Your package price applies.</div>' : ''}<div class="list">${D.services.map(s => `<button class="svc ${k.items.includes(s.id) ? 'on' : ''}" data-bsvc="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="">` : ''}<div class="sp" style="text-align:left"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num">${peso(s.price)}</b><span class="chk">${k.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('')}</div>
   <div class="sec-h"><h2>3 · Date</h2></div><div class="days">${days.map(d => `<button class="day ${k.date === ymd(d) ? 'on' : ''}" data-bday="${ymd(d)}"><span class="sm">${d.toLocaleDateString('en-PH', { weekday: 'short' })}</span><b>${d.getDate()}</b><span class="sm">${d.toLocaleDateString('en-PH', { month: 'short' })}</span></button>`).join('')}</div>
   <div class="sec-h"><h2>4 · Time</h2></div>${!k.items.length ? '<div class="mute sm">Pick a service first.</div>' : k.slots === null ? '<div class="mute sm">Checking availability…</div>' : k.slots.length ? `<div class="slots">${k.slots.map(t => `<button class="slot ${k.time === t ? 'on' : ''}" data-btime="${t}">${t12(t)}</button>`).join('')}</div>` : `<div class="card empty">No open slots that day. Try another date or barber.<div style="margin-top:10px"><button class="btn sec sm" data-wl>Notify me if a slot opens</button></div></div>`}
   ${(S.user?.styles || []).length ? `<div class="sm mute" style="margin-top:14px">Add a saved style to your notes</div><div class="chips">${S.user.styles.map(cutById).filter(Boolean).map(c => `<button class="chip" data-snote="${c.id}">${esc(c.name)}</button>`).join('')}</div>` : ''}
   <label class="f">Notes for your barber (optional)<textarea id="bnotes" rows="2" maxlength="300" placeholder="Reference cut, allergies, anything we should know">${esc(k.notes)}</textarea></label>
   ${k.err ? `<div class="err">${esc(k.err)}</div>` : ''}
-  <div class="foot"><div><div class="sp"><div class="sm mute">Total · pay at the shop</div><b class="num" style="font-size:22px">${peso(total)}</b></div><button class="btn" data-confirm style="min-width:160px" ${k.items.length && k.time && !k.busy ? '' : 'disabled'}>${k.busy ? 'Booking…' : 'Confirm booking'}</button></div></div>`;
+  <div class="foot"><div><div class="sp"><div class="sm mute">${k.pkg ? 'Package · pay at the shop' : 'Total · pay at the shop'}</div><b class="num" style="font-size:22px">${peso(k.pkg ? k.pkg.price : total)}</b></div><button class="btn" data-confirm style="min-width:160px" ${k.items.length && k.time && !k.busy ? '' : 'disabled'}>${k.busy ? 'Booking…' : 'Confirm booking'}</button></div></div>`;
 }
 async function confirmBooking() {
   const k = S.bk; k.busy = true; k.err = ''; render();
-  try { const j = await api('/book', { method: 'POST', body: { branchId: k.branchId, staffId: k.staffId, itemIds: k.items, date: k.date, time: k.time, notes: k.notes } }); k.done = j.booking; S.mine = null; S.styleNote = ''; }
+  try { const j = await api('/book', { method: 'POST', body: { branchId: k.branchId, staffId: k.staffId, itemIds: k.items, date: k.date, time: k.time, notes: (k.pkg ? `Package: ${k.pkg.name} (${peso(k.pkg.price)}). ` : '') + k.notes } }); k.done = j.booking; S.mine = null; S.styleNote = ''; }
   catch (e) { k.err = e.message; if (/no longer available/i.test(e.message)) loadSlots(); }
   k.busy = false; render();
 }
@@ -324,7 +326,7 @@ function vPro() {
   if (!sel) return header('Pro tools', '/') + '<div class="empty">No barbers found.</div>';
   return header('Pro tools', '/') + `${S.pro.admin && !['shop', 'mod'].includes(S.proTab) ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
   <div class="tabs">${S.pro.admin ? `<button class="${S.proTab === 'shop' ? 'on' : ''}" data-ptab="shop">Shop</button>` : ''}<button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">${S.pro.admin ? 'Barber' : 'Dashboard'}</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
-  ${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
+  ${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}${offersEditor(sel)}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
   <label class="f">Years of experience<input name="years" type="number" min="0" max="60" value="${sel.years || ''}"></label><label class="f">Specialties (comma separated)<input name="specialties" value="${esc(sel.specialties.join(', '))}" placeholder="Skin Fade, Taper, Pompadour"></label>
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
@@ -434,6 +436,29 @@ function styleArt(name) {
     ${side}${hasSideHair}<path d="${ART_TOP[id]}" fill="${hair}" fill-opacity="${op}" stroke="${edge}" stroke-width=".8" stroke-linejoin="round"/>${ART_LINES[id] ? `<path d="${ART_LINES[id]}" fill="none" stroke="${edge}" stroke-width="1" stroke-linecap="round"/>` : ''}
     <circle cx="41" cy="51" r="1.5" fill="#1b1210"/><circle cx="59" cy="51" r="1.5" fill="#1b1210"/><path d="M50 53 L48.5 60 L51.5 60" fill="none" stroke="${shade}" stroke-width="1.2" stroke-linecap="round"/><path d="M44.5 67 Q50 70 55.5 67" fill="none" stroke="#6b3f2e" stroke-width="1.3" stroke-linecap="round"/></svg>`;
 }
+// ----- service packages: what a barber can offer -----
+const PKGS = [['cut', 'Haircut only', 'Quick and clean. In and out.', 'Haircut'], ['blow', 'Haircut + blower, shampoo & styling', 'Cut, shampoo, blow dry and styling.', 'Blower pkg'], ['full', 'Full package', 'The pamper day: the works, start to finish.', 'Full package']];
+const PK = Object.fromEntries(PKGS.map(([k, name, desc, short]) => [k, { name, desc, short }]));
+function pkgArt(k) {
+  const n = ++artN, w = '#e8ebf1', dim = '#98a0ad', gold = '#f3c969', blue = '#4f9bff', bg = { cut: ['#2b3039', '#16181d'], blow: ['#26303f', '#14181f'], full: ['#352f27', '#1a1713'] }[k] || ['#2b3039', '#16181d'];
+  const scissors = `<g fill="none" stroke="${w}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"><path d="M33 20 L60 66"/><path d="M63 20 L36 66"/><circle cx="33" cy="77" r="9.5"/><circle cx="63" cy="77" r="9.5"/></g><circle cx="48" cy="43" r="3.2" fill="${gold}"/>`;
+  const comb = `<rect x="58" y="12" width="36" height="10" rx="3" fill="${w}"/><path d="M62 22v9M67 22v9M72 22v9M77 22v9M82 22v9M87 22v9" stroke="${w}" stroke-width="2" stroke-linecap="round"/>`;
+  const dryer = `<rect x="18" y="26" width="48" height="26" rx="13" fill="${w}"/><rect x="64" y="31" width="16" height="16" rx="3" fill="${dim}"/><path d="M36 50 L31 80 Q31 85 36 85 L45 85 Q50 85 50 80 L46 50Z" fill="${w}"/><circle cx="34" cy="39" r="3" fill="${dim}"/>`;
+  const air = `<g fill="none" stroke="${blue}" stroke-width="3" stroke-linecap="round"><path d="M86 30 q8 -2 10 -9"/><path d="M88 39 q9 0 12 -3"/><path d="M86 48 q8 3 10 10"/></g>`;
+  const bottle = `<rect x="8" y="44" width="24" height="40" rx="7" fill="${w}"/><rect x="14" y="35" width="12" height="10" rx="2.5" fill="${dim}"/><rect x="13" y="58" width="14" height="15" rx="3.5" fill="${blue}"/>`;
+  const drops = `<g fill="none" stroke="${blue}" stroke-width="2.2"><circle cx="40" cy="22" r="4"/><circle cx="52" cy="14" r="2.6"/><circle cx="26" cy="20" r="2.2"/></g>`;
+  const crown = `<path d="M28 44 L33 18 L50 34 L67 18 L72 44Z" fill="${gold}"/><rect x="28" y="44" width="44" height="7" rx="2.5" fill="${gold}"/><circle cx="33" cy="16" r="3.2" fill="${gold}"/><circle cx="50" cy="31" r="3" fill="${gold}"/><circle cx="67" cy="16" r="3.2" fill="${gold}"/>`;
+  const spark = `<path d="M16 22 l2 5 5 2 -5 2 -2 5 -2 -5 -5 -2 5 -2z M84 56 l1.6 4 4 1.6 -4 1.6 -1.6 4 -1.6 -4 -4 -1.6 4 -1.6z" fill="${gold}"/>`;
+  const body = k === 'blow' ? `<g transform="translate(2 2)">${dryer}${air}${drops}</g><g transform="translate(-2 6) scale(.92)">${bottle}</g>`
+    : k === 'full' ? `<g transform="translate(14 -2) scale(.72)">${crown}</g><g transform="translate(6 50) scale(.5)">${scissors}</g><g transform="translate(34 48) scale(.5)">${dryer}</g><g transform="translate(66 50) scale(.52)">${bottle}</g>${spark}`
+    : `<g transform="translate(-4 0)">${scissors}${comb}</g>`;
+  return `<svg class="sa" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${esc((PK[k] || {}).name || k)}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="pg${n}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${bg[0]}"/><stop offset="1" stop-color="${bg[1]}"/></linearGradient></defs><rect width="100" height="100" fill="url(#pg${n})"/>${body}</svg>`;
+}
+function offersBlock(b) {
+  const o = b.offers || [];
+  return `<div class="sec-h" style="margin-top:14px"><h2>Services & prices</h2></div><div class="list">${o.length ? o.map(x => `<div class="card row"><div class="pa s">${pkgArt(x.pkg)}</div><div class="sp"><div class="nm">${esc(PK[x.pkg].name)}</div><div class="sm mute">${esc(PK[x.pkg].desc)}</div></div><div style="text-align:right"><b class="num" style="font-size:20px">${peso(x.price)}</b><div><button class="btn white sm" style="margin-top:4px" data-bookpkg="${x.pkg}">Book</button></div></div></div>`).join('') : '<div class="card empty sm">This barber has not listed services and prices yet. The shop menu in About applies.</div>'}</div>`;
+}
+const offersEditor = sel => `<div class="sec-h"><h2>Services I offer</h2></div><div class="card"><div class="sm mute" style="margin-bottom:6px">Turn on what you cater to and set your price. Customers can find you by these. Your price is shown to customers; the shop still charges at the POS.</div>${PKGS.map(([k, name, desc]) => { const o = (sel.offers || []).find(x => x.pkg === k); return `<div class="row" style="padding:10px 0;border-top:1px solid var(--line);gap:10px;align-items:center"><label class="row sp" style="gap:10px;cursor:pointer;min-width:0"><input type="checkbox" data-opk="${k}" ${o ? 'checked' : ''} style="width:20px;height:20px;flex:none"><span class="pa s">${pkgArt(k)}</span><span style="min-width:0"><b>${esc(name)}</b><span class="sm mute" style="display:block">${esc(desc)}</span></span></label><span class="row" style="gap:4px;flex:none"><span class="mute">₱</span><input type="number" min="1" max="99999" inputmode="numeric" data-opp="${k}" value="${o ? o.price : ''}" placeholder="Price" style="width:88px" ${o ? '' : 'disabled'}></span></div>`; }).join('')}<button class="btn block" style="margin-top:12px" data-offsave>Save services</button></div>`;
 function recommend() {
   return CUTS.map(c => { let sc = (c.face.includes(SF.face) ? 50 : 0) + (c.hair.includes(SF.hair) ? 30 : 0); sc += 20 - Math.abs(c.care - (SF.care || 2)) * 10; return { c, sc }; }).filter(x => x.sc >= 50).sort((a, b) => b.sc - a.sc).slice(0, 3);
 }
@@ -728,6 +753,7 @@ app.addEventListener('change', async e => {
     const f = e.target.files[0], isCover = e.target.id === 'mcoverf'; e.target.value = ''; if (!f) return;
     try { await api(isCover ? '/me/cover' : '/me/photo', { method: 'POST', body: { data: await compress(f) } }); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.mem = null; S.feed = null; await loadMe(); render(); } catch (x) { toast(x.message); }
   }
+  if (e.target.dataset && e.target.dataset.opk) { const inp = document.querySelector(`[data-opp="${e.target.dataset.opk}"]`); inp.disabled = !e.target.checked; if (e.target.checked) inp.focus(); }
   if (e.target.id === 'pstyle') S.pstyle = e.target.value;
   if (e.target.id === 'pfile') {
     const files = [...e.target.files]; let n = 0; e.target.value = '';
@@ -756,7 +782,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -876,6 +902,15 @@ app.addEventListener('click', async e => {
   }
   if (D.mfollow) {
     const on = D.on === '1'; try { await api('/follow/' + D.mfollow, { method: on ? 'DELETE' : 'PUT' }); S.mem.member.following = !on; S.mem.member.followers += on ? -1 : 1; render(); } catch (x) { toast(x.message); } return;
+  }
+  if (D.dpkg) { S.pkg = D.dpkg; window.scrollTo(0, 0); return refreshResults(); }
+  if (D.fpkg != null) return pickSheet('Service', [['', 'Any service', ''], ...PKGS.map(([k, n, d]) => [k, n, d])], S.pkg, v => { S.pkg = v; refreshResults(); });
+  if (D.bookpkg) { const b = S.cur?.barber; if (!b) return; const o = (b.offers || []).find(x => x.pkg === D.bookpkg); startBooking(b.branchId, b.id); if (o) S.bk.pkg = { key: o.pkg, name: PK[o.pkg].name, price: o.price }; if (!S.token) nav('/auth'); return; }
+  if (D.rmpkg != null) { if (S.bk) S.bk.pkg = null; return render(); }
+  if (D.offsave != null) {
+    const rows = PKGS.map(([k]) => ({ k, on: document.querySelector(`[data-opk="${k}"]`).checked, v: document.querySelector(`[data-opp="${k}"]`).value })).filter(r => r.on);
+    if (rows.some(r => !(+r.v >= 1))) return toast('Enter a price for each service you offer');
+    try { await api('/pro/offers', { method: 'PUT', body: { staffId: S.proSel, offers: rows.map(r => ({ pkg: r.k, price: +r.v })) } }, S.proToken); toast('Services saved'); S.D = null; S.cur = null; await loadPro(); } catch (x) { toast(x.message); } return render();
   }
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
   if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); return render(); }
