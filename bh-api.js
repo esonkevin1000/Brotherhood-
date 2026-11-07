@@ -2,7 +2,7 @@
 // Mounted from server.js under /api/bh/*. Shares the same database, staff, branches, bookings and reviews as the POS.
 export function mountBH(c) {
   const { db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor,
-    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
+    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName, getSetting, setSetting, queueEmail, emailReady, baseUrl, esc: escHtml, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
 
   // ---------- schema ----------
   db.exec(`
@@ -16,6 +16,9 @@ create table if not exists bh_certs(id text primary key, staffId text, title tex
 create index if not exists bh_certs_staff on bh_certs(staffId);
 create table if not exists bh_saves(userId text, postId text, createdAt text, primary key(userId, postId));
 create table if not exists bh_offers(staffId text, pkg text, price real, primary key(staffId, pkg));
+create table if not exists bh_blocked(id text primary key, staffId text, date text, fromMin integer, toMin integer, reason text, createdAt text);
+create index if not exists bh_blocked_day on bh_blocked(staffId, date);
+create table if not exists bh_client_notes(staffId text, ckey text, note text, pref text, vip integer, birthday text, updatedAt text, primary key(staffId, ckey));
 create table if not exists bh_posts(id text primary key, userId text, staffId text, text text, imageUrl text, createdAt text, hidden integer default 0);
 create index if not exists bh_posts_time on bh_posts(createdAt);
 create table if not exists bh_likes(postId text, userId text, primary key(postId, userId));
@@ -31,7 +34,7 @@ create table if not exists bh_notifs(id text primary key, userId text, kind text
 create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
 create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
-  addCol('bh_portfolio', 'style', 'text'); addCol('bh_users', 'photo', 'text'); addCol('bh_users', 'cover', 'text'); addCol('bh_barber', 'cover', 'text'); addCol('bh_posts', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
+  addCol('bookings', 'reminderAt', 'text'); addCol('bookings', 'reviewReqAt', 'text'); addCol('bh_portfolio', 'style', 'text'); addCol('bh_users', 'photo', 'text'); addCol('bh_users', 'cover', 'text'); addCol('bh_barber', 'cover', 'text'); addCol('bh_posts', 'style', 'text'); addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
 
   // ---------- helpers ----------
@@ -78,6 +81,46 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       }
     } catch { }
   };
+  // smart rebooking: when a member is due for another cut (their own average gap, or 21 days), nudge once per cycle
+  const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 864e5);
+  const syncDue = userId => {
+    const paid = all("select b.id, b.date, b.staffId from bookings b join orders o on o.id=b.orderId where b.userId=? and b.status='arrived' and o.status='paid' order by b.date", userId);
+    if (!paid.length) return;
+    const last = paid[paid.length - 1], gaps = paid.slice(1).map((x, i) => daysBetween(paid[i].date, x.date)).filter(g => g > 0);
+    const cadence = Math.max(10, Math.min(60, gaps.length >= 2 ? Math.round(gaps.reduce((a, g) => a + g, 0) / gaps.length) : 21)), since = daysBetween(last.date, todayStr());
+    if (since < cadence || one("select 1 x from bookings where userId=? and status='booked' and date>=?", userId, todayStr())) return;
+    const who = get('staff', last.staffId)?.name;
+    notify(userId, 'due', `It has been ${since} days since your last cut${who ? ' with ' + who : ''}. Time for a fresh one?`, last.staffId ? '#/barber/' + last.staffId : '#/discover', 'due-' + last.id);
+  };
+  // ---------- email jobs: booking reminders and review requests (only when the email service is connected) ----------
+  const dayWord = d => d === todayStr() ? 'today' : d === dOf(new Date(Date.now() + 864e5)) ? 'tomorrow' : new Date(d + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'long', month: 'short', day: 'numeric' });
+  const t12s = t => { const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
+  const mailShell = (title, body, cta) => `<!doctype html><html><body style="margin:0;background:#f5f5f6;font-family:Arial,Helvetica,sans-serif;color:#111"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px"><table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#fff;border-radius:16px;overflow:hidden"><tr><td style="background:#09090a;color:#fff;text-align:center;padding:22px;font-size:22px;letter-spacing:3px;font-weight:700">${escHtml(String(shopName || 'Brotherhood').toUpperCase())}</td></tr><tr><td style="padding:26px"><h1 style="margin:0 0 12px;font-size:21px">${title}</h1>${body}${cta ? `<p style="margin:22px 0 0"><a href="${cta.href}" style="background:#3c8dff;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;display:inline-block">${cta.label}</a></p>` : ''}</td></tr><tr><td style="padding:14px 26px 22px;color:#888;font-size:12px;border-top:1px solid #eee">${escHtml(shopName || 'Brotherhood')} · <a href="{{UNSUB}}" style="color:#888">Unsubscribe</a></td></tr></table></td></tr></table></body></html>`;
+  // members get the mail at their account email; other customers only if they agreed to receive mail
+  const mailTo = b => { if (b.userId) { const u = get('bh_users', b.userId); return u ? { to: u.email, name: u.name } : null; } const c = b.customerId ? get('customers', b.customerId) : null; return c && c.email && c.consent ? { to: c.email, name: c.name } : null; };
+  function runJobs() {
+    if (!emailReady()) return;
+    const now = Date.now(), link = `${baseUrl()}/brotherhood#/bookings`;
+    for (const b of all("select * from bookings where status='booked' and reminderAt is null and date>=? and date<=?", todayStr(), dOf(new Date(now + 2 * 864e5)))) {
+      const start = new Date(`${b.date}T${b.time}:00`).getTime(), hrs = (start - now) / 36e5;
+      if (hrs > 24 || hrs < 2) continue;
+      if (now - new Date(b.createdAt).getTime() < 3 * 36e5) continue;   // booked less than 3 hours ago: the confirmation is still fresh, so wait (the reminder can still go out later)
+      run('update bookings set reminderAt=? where id=?', nowISO(), b.id);   // marked before sending, so a booking is never reminded twice
+      const m = mailTo(b); if (!m) continue;
+      const v = bookingView(b), br = get('branches', b.branchId) || {}, first = String(m.name || 'there').split(/\s+/)[0], when = `${dayWord(b.date)} at ${t12s(b.time)}`;
+      const body = `<p style="line-height:1.55;margin:0 0 14px">Hi ${escHtml(first)}, a quick reminder of your appointment.</p><table role="presentation" cellpadding="0" cellspacing="0" style="border:1px solid #eee;border-radius:10px;border-collapse:separate;width:100%;font-size:15px"><tr><td style="padding:10px 14px;color:#666;width:90px">When</td><td style="padding:10px 14px"><b>${escHtml(when)}</b></td></tr><tr><td style="padding:10px 14px;color:#666;border-top:1px solid #eee">Barber</td><td style="padding:10px 14px;border-top:1px solid #eee">${escHtml(v.staffName || 'Any available barber')}</td></tr><tr><td style="padding:10px 14px;color:#666;border-top:1px solid #eee">Service</td><td style="padding:10px 14px;border-top:1px solid #eee">${escHtml(v.items.map(i => i.name).join(', '))}</td></tr><tr><td style="padding:10px 14px;color:#666;border-top:1px solid #eee">Where</td><td style="padding:10px 14px;border-top:1px solid #eee">${escHtml([br.name, br.address].filter(Boolean).join(', '))}</td></tr></table><p style="line-height:1.55;margin:14px 0 0;color:#555">${b.userId ? 'Plans changed? You can cancel up to 1 hour before.' : `Plans changed? Please call the shop${br.phone ? ' at ' + escHtml(br.phone) : ''}.`}</p>`;
+      queueEmail({ customerId: b.customerId || '', to: m.to, kind: 'reminder', subject: `Reminder: your cut ${when}`, html: mailShell(`See you ${escHtml(when)}`, body, b.userId ? { href: link, label: 'Manage my booking' } : null), text: `Hi ${first}, reminder: your appointment is ${when} with ${v.staffName || 'any available barber'} at ${br.name || 'the shop'}. ${b.userId ? 'Manage it: ' + link : ''}` });
+    }
+    const lo = new Date(now - 72 * 36e5).toISOString(), hi = new Date(now - 2 * 36e5).toISOString();
+    for (const b of all("select b.* from bookings b join orders o on o.id=b.orderId where b.userId<>'' and b.status='arrived' and o.status='paid' and b.reviewReqAt is null and o.paidAt>=? and o.paidAt<=?", lo, hi)) {
+      run('update bookings set reviewReqAt=? where id=?', nowISO(), b.id);
+      if (one('select 1 x from reviews where orderId=?', b.orderId)) continue;   // already reviewed
+      const m = mailTo(b); if (!m) continue; const first = String(m.name || 'there').split(/\s+/)[0], who = get('staff', b.staffId)?.name || 'your barber';
+      queueEmail({ customerId: b.customerId || '', to: m.to, kind: 'review', subject: `How was your cut with ${who}?`, html: mailShell(`How was your cut, ${escHtml(first)}?`, `<p style="line-height:1.55;margin:0">Thanks for visiting. Your review helps ${escHtml(who)} and the next customer choose well. It takes ten seconds.</p>`, { href: link, label: 'Rate my cut' }), text: `Hi ${first}, how was your cut with ${who}? Rate it: ${link}` });
+    }
+  }
+  const JOB_MS = +process.env.BH_JOB_MS || 600000;
+  setInterval(() => { try { runJobs(); } catch (e) { console.error('bh jobs:', e.message); } }, JOB_MS).unref(); setTimeout(() => { try { runJobs(); } catch { } }, Math.min(20000, JOB_MS)).unref();
   const unreadOf = id => one('select count(*) n from bh_notifs where userId=? and readAt is null', id).n;
   const userOf = req => {
     const o = readToken((req.headers.authorization || '').replace(/^Bearer /, ''));
@@ -122,6 +165,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const handleBH = async function (req, res, p, method, q, ip) {
     const sub = p.slice('/api/bh'.length);
 
+    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood' });
     // ----- accounts -----
     if (sub === '/signup' && method === 'POST') {
       if (tooMany(ip, 'su', 5, 3600e3)) bad(429, 'Too many sign-ups from this device. Try again later.');
@@ -146,7 +190,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       if (!good) { hit(ip, 'li'); log({ name: 'App: ' + clip(b.email, 60) }, 'app-login-failed', 'bh_users', '', u ? 'wrong password' : 'no account with that email'); bad(401, 'Wrong email or password'); }
       return send(res, 200, { token: tokenOf(u), user: pubUser(u) });
     }
-    if (sub === '/me' && method === 'GET') { const u = needUser(req); syncRate(u.id); return send(res, 200, { user: pubUser(u), favorites: all('select staffId from bh_favorites where userId=?', u.id).map(r => r.staffId), unread: unreadOf(u.id) }); }
+    if (sub === '/me' && method === 'GET') { const u = needUser(req); syncRate(u.id); syncDue(u.id); return send(res, 200, { user: pubUser(u), favorites: all('select staffId from bh_favorites where userId=?', u.id).map(r => r.staffId), unread: unreadOf(u.id) }); }
     if (sub === '/me' && method === 'PUT') {
       const u = needUser(req), b = await readBody(req), name = clip(b.name ?? u.name, 80), phone = clip(b.phone ?? u.phone, 30);
       if (!name) bad(400, 'Please enter your name'); if (normPhone(phone).length < 10) bad(400, 'Enter a valid mobile number');
@@ -159,6 +203,11 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const url = saveImg(b); dropImg(u[kind]); run(`update bh_users set ${kind}=? where id=?`, url, u.id); return send(res, 201, { url });
       }
       if (sub === '/me/' + kind && method === 'DELETE') { const u = needUser(req); dropImg(u[kind]); run(`update bh_users set ${kind}='' where id=?`, u.id); return send(res, 200, { ok: true }); }
+    }
+    if (sub === '/loyalty' && method === 'GET') {   // visits and tier come from the POS loyalty tiers (1 paid visit = 1 point) for the customer record linked to this account's bookings
+      const u = needUser(req), cid = u.customerId || one("select customerId c from bookings where userId=? and customerId<>'' order by createdAt desc", u.id)?.c || '';
+      const visits = cid ? one("select count(*) n from orders where customerId=? and status='paid'", cid).n : 0;
+      return send(res, 200, { linked: !!cid, visits, tier: tierOf(visits), next: nextTier(visits) });
     }
     if (sub === '/me/styles' && method === 'PUT') {   // saved hairstyle ideas from the Style Finder (ids come from the app's catalog)
       const u = needUser(req), b = await readBody(req), ids = [...new Set((Array.isArray(b.styles) ? b.styles : []).map(x => String(x)).filter(x => /^[a-z0-9-]{2,30}$/.test(x)))].slice(0, 12);
@@ -264,12 +313,20 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     if (sub === '/book' && method === 'POST') {
       const u = needUser(req); if (tooMany(ip, 'bk', 10, 3600e3)) bad(429, 'Too many bookings from this device. Please try again later.');
       const b = await readBody(req);
-      const bk = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date: b.date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
-      hit(ip, 'bk'); run('update bookings set userId=? where id=?', u.id, bk.id);
-      notify(u.id, 'booking', `Booked: ${bk.date} ${bk.time} with ${bk.staffName || 'any barber'} at ${bk.branchName}`, '#/bookings', 'bk-' + bk.id);
-      if (bk.customerId && !u.customerId) run('update bh_users set customerId=? where id=?', bk.customerId, u.id);
-      log({ name: 'App: ' + u.name }, 'booking', 'bookings', bk.id, `${bk.date} ${bk.time} ${bk.branchName}`);
-      return send(res, 201, { ok: true, booking: { id: bk.id, date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, items: bk.items, total: bk.total } });
+      // optional repeat: every 1, 2, 3, 4 or 6 weeks for 2 to 6 cuts in total; slots that are taken are skipped and reported
+      const every = [1, 2, 3, 4, 6].includes(+b.repeatEvery) ? +b.repeatEvery : 0, count = every ? Math.max(2, Math.min(6, Math.round(+b.repeatCount) || 2)) : 1;
+      const make = date => {
+        const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
+        run('update bookings set userId=? where id=?', u.id, x.id); if (x.customerId && !u.customerId) { run('update bh_users set customerId=? where id=?', x.customerId, u.id); u.customerId = x.customerId; }
+        notify(u.id, 'booking', `Booked: ${x.date} ${x.time} with ${x.staffName || 'any barber'} at ${x.branchName}`, '#/bookings', 'bk-' + x.id);
+        log({ name: 'App: ' + u.name }, 'booking', 'bookings', x.id, `${x.date} ${x.time} ${x.branchName}`); return x;
+      };
+      const bk = make(String(b.date || '')); hit(ip, 'bk'); const series = [];
+      for (let i = 1; i < count; i++) {
+        const d = dOf(new Date(new Date(bk.date + 'T00:00:00').getTime() + i * every * 7 * 864e5));
+        try { const x = make(d); series.push({ date: x.date, time: x.time, ok: true, staff: x.staffName }); } catch (er) { series.push({ date: d, time: String(b.time), ok: false, reason: er.message }); }
+      }
+      return send(res, 201, { ok: true, booking: { id: bk.id, date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, items: bk.items, total: bk.total }, series });
     }
     if (sub === '/bookings' && method === 'GET') {
       const u = needUser(req), now = Date.now();
@@ -322,7 +379,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 
     // ----- notifications -----
     if (sub === '/notifications' && method === 'GET') {
-      const u = needUser(req); syncRate(u.id);
+      const u = needUser(req); syncRate(u.id); syncDue(u.id);
       return send(res, 200, { unread: unreadOf(u.id), items: all('select id,kind,text,link,createdAt,readAt from bh_notifs where userId=? order by createdAt desc limit 50', u.id) });
     }
     if (sub === '/notifications/read' && method === 'POST') { const u = needUser(req); run('update bh_notifs set readAt=? where userId=? and readAt is null', nowISO(), u.id); return send(res, 200, { ok: true }); }
@@ -460,6 +517,101 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         run('update branches set lat=?, lng=? where id=?', Math.round(pos.lat * 1e6) / 1e6, Math.round(pos.lng * 1e6) / 1e6, br.id);
         log(me, 'branch-location', 'branches', br.id, br.name); return send(res, 200, { ok: true, lat: pos.lat, lng: pos.lng });
       }
+      // booking rules (owner): no-show limit and the buffer between cuts
+      if (sub === '/pro/rules' && method === 'GET') { if (!admin) bad(403, 'Owner only'); return send(res, 200, { noshowMax: +getSetting('noshowMax') || 0, bufferMins: +getSetting('bufferMins') || 0, emailReady: emailReady() }); }
+      if (sub === '/pro/rules' && method === 'PUT') {
+        if (!admin) bad(403, 'Owner only'); const b = await readBody(req);
+        if ('noshowMax' in b) { const v = Math.round(+b.noshowMax); if (![0, 1, 2, 3, 4, 5].includes(v)) bad(400, 'Choose 0 (off) to 5'); setSetting('noshowMax', String(v)); }
+        if ('bufferMins' in b) { const v = Math.round(+b.bufferMins); if (![0, 5, 10, 15, 20, 30].includes(v)) bad(400, 'Choose 0, 5, 10, 15, 20 or 30 minutes'); setSetting('bufferMins', String(v)); }
+        log(me, 'booking-rules', 'settings', '', JSON.stringify(b).slice(0, 120)); return send(res, 200, { ok: true });
+      }
+      // no-show watch (owner): customers who missed appointments in the last 90 days, and who is paused from online booking
+      if (sub === '/pro/noshows' && method === 'GET') {
+        if (!admin) bad(403, 'Owner only'); const since = dOf(new Date(Date.now() - 90 * 864e5)), max = +getSetting('noshowMax') || 0, by = new Map();
+        for (const x of all("select * from bookings where status='noshow' and date>=? order by date desc", since)) {
+          const k = x.customerId || ('p:' + normPhone(x.phone)), r = by.get(k) || { customerId: x.customerId || '', name: x.customerName, phone: x.phone, count: 0, last: x.date }; r.count++; by.set(k, r);
+        }
+        const rows = [...by.values()].map(r => { const c = r.customerId ? get('customers', r.customerId) : null, allowed = !!(c && c.noshowOk); return { ...r, allowed, blocked: max > 0 && r.count >= max && !allowed }; }).sort((a, b) => b.count - a.count || b.last.localeCompare(a.last)).slice(0, 100);
+        return send(res, 200, { max, rows });
+      }
+      if (sub === '/pro/noshow-allow' && method === 'POST') {
+        if (!admin) bad(403, 'Owner only'); const b = await readBody(req), c = get('customers', String(b.customerId || '')); if (!c) bad(404, 'Customer not found');
+        run('update customers set noshowOk=? where id=?', b.allow ? 1 : 0, c.id); log(me, b.allow ? 'noshow-allow' : 'noshow-restrict', 'customers', c.id, c.name); return send(res, 200, { ok: true });
+      }
+      // blocked time: a barber (or the owner) closes a break, training or day off so nobody can book it
+      const hm = v => { const m = /^(\d{2}):(\d{2})$/.exec(String(v || '')); return m && +m[1] <= 24 && +m[2] <= 59 ? +m[1] * 60 + +m[2] : null; }, hmText = n => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+      if (sub === '/pro/block' && method === 'POST') {
+        const b = await readBody(req), s = target(b.staffId), date = String(b.date || '');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < todayStr() || date > dOf(new Date(Date.now() + 180 * 864e5))) bad(400, 'Pick a date within the next 6 months');
+        const f = b.allDay ? 0 : hm(b.from), t = b.allDay ? 1440 : hm(b.to); if (f == null || t == null || f >= t) bad(400, 'Choose a start time that is before the end time');
+        if (one('select count(*) n from bh_blocked where staffId=? and date>=?', s.id, todayStr()).n >= 60) bad(409, 'Too many blocks. Remove old ones first.');
+        const id = uid(); run('insert into bh_blocked(id,staffId,date,fromMin,toMin,reason,createdAt) values(?,?,?,?,?,?,?)', id, s.id, date, f, t, clip(b.reason, 60), nowISO());
+        const conflicts = all("select * from bookings where staffId=? and date=? and status='booked'", s.id, date).filter(x => toMin(x.time) < t && f < toMin(x.time) + x.mins).map(x => ({ time: x.time, customer: x.customerName, phone: x.phone }));
+        log(me, 'time-block', 'bh_blocked', id, `${s.name} ${date} ${hmText(f)}-${hmText(t)}`); return send(res, 201, { id, conflicts });
+      }
+      if (sub === '/pro/blocks' && method === 'GET') {
+        const s = target(q.staffId); return send(res, 200, { blocks: all('select * from bh_blocked where staffId=? and date>=? order by date, fromMin limit 100', s.id, todayStr()).map(r => ({ id: r.id, date: r.date, from: hmText(r.fromMin), to: hmText(Math.min(r.toMin, 1439)), allDay: r.fromMin === 0 && r.toMin >= 1440, reason: r.reason || '' })) });
+      }
+      const blm = sub.match(/^\/pro\/blocks\/(\w+)$/);
+      if (blm && method === 'DELETE') { const r = get('bh_blocked', blm[1]); if (!r) bad(404, 'Not found'); target(r.staffId); run('delete from bh_blocked where id=?', r.id); return send(res, 200, { ok: true }); }
+      // a barber's private notes about a client (only that barber and the owner can read them)
+      const clientKey = v => { v = String(v || ''); if (!/^(n:.{1,100}|\w{1,20})$/.test(v)) bad(400, 'Bad client'); return v; };
+      if (sub === '/pro/client' && method === 'GET') {
+        const s = target(q.staffId), key = clientKey(q.key), mine_ = all("select * from orders where status='paid' and barberId=? order by date desc, createdAt desc", s.id).map(parseOrder).filter(o => (o.customerId || ('n:' + String(o.customerName || '').toLowerCase())) === key);
+        const n = one('select * from bh_client_notes where staffId=? and ckey=?', s.id, key) || {}, cust = key.startsWith('n:') ? null : get('customers', key);
+        return send(res, 200, { key, name: cust?.name || mine_[0]?.customerName || key.slice(2), phone: cust?.phone || '', note: n.note || '', pref: n.pref || cust?.preferredCut || '', vip: !!n.vip, birthday: n.birthday || '',
+          visits: mine_.length, first: mine_.length ? mine_[mine_.length - 1].date : '', last: mine_[0]?.date || '', history: mine_.slice(0, 20).map(o => ({ date: o.date, items: o.items.map(i => i.name + (i.qty > 1 ? ' x' + i.qty : '')), total: o.total })) });
+      }
+      if (sub === '/pro/client' && method === 'PUT') {
+        const b = await readBody(req), s = target(b.staffId), key = clientKey(b.key), cur = one('select * from bh_client_notes where staffId=? and ckey=?', s.id, key) || {};   // fields that are not sent keep their saved value
+        let bd = 'birthday' in b ? String(b.birthday || '').trim() : cur.birthday || ''; const m = /^(?:\d{4}-)?(\d{2})-(\d{2})$/.exec(bd);
+        bd = m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31 ? m[1] + '-' + m[2] : '';   // only month and day are kept
+        run('insert or replace into bh_client_notes(staffId,ckey,note,pref,vip,birthday,updatedAt) values(?,?,?,?,?,?,?)', s.id, key, 'note' in b ? clip(b.note, 500) : cur.note || '', 'pref' in b ? clip(b.pref, 120) : cur.pref || '', 'vip' in b ? (b.vip ? 1 : 0) : cur.vip || 0, bd, nowISO());
+        return send(res, 200, { ok: true });
+      }
+      // Branch health score (owner): sales trend, retention, attendance, ratings, remittance accuracy, checklists and open problems, each 0-100, weighted
+      if (sub === '/pro/health' && method === 'GET') {
+        if (!admin) bad(403, 'Owner only');
+        const days = [7, 30, 90].includes(+q.days) ? +q.days : 30, day = n => dOf(new Date(Date.now() - n * 864e5)), from = day(days - 1), to = todayStr(), pFrom = day(2 * days - 1), pTo = day(days);
+        const clamp = v => Math.max(0, Math.min(100, Math.round(v))), W = { sales: 25, retention: 20, attendance: 15, rating: 15, remittance: 10, checklist: 10, problems: 5 };
+        const out = all('select * from branches order by rowid').map(b => {
+          const cur = one("select ifnull(sum(total),0) s, count(*) n from orders where status='paid' and branchId=? and date>=? and date<=?", b.id, from, to), prev = one("select ifnull(sum(total),0) s from orders where status='paid' and branchId=? and date>=? and date<=?", b.id, pFrom, pTo);
+          const change = prev.s > 0 ? Math.round((cur.s / prev.s - 1) * 100) : null, C = {};
+          C.sales = { label: 'Sales trend', score: prev.s > 0 ? clamp(60 + (cur.s / prev.s - 1) * 200) : cur.s > 0 ? 70 : null, detail: prev.s > 0 ? `${change >= 0 ? '+' : ''}${change}% vs the previous ${days} days` : cur.s > 0 ? 'No earlier period to compare yet' : 'No sales in this period' };
+          const served = all("select distinct customerId c from orders where status='paid' and customerId<>'' and branchId=? and date>=? and date<=?", b.id, from, to).map(r => r.c), allVisits = new Map(all("select customerId c, count(*) n from orders where status='paid' and customerId<>'' and branchId=? group by customerId", b.id).map(r => [r.c, r.n]));
+          const ret = served.length ? served.filter(c => (allVisits.get(c) || 0) > 1).length / served.length : null;
+          C.retention = { label: 'Customers coming back', score: ret == null ? null : clamp(ret / 0.6 * 100), detail: ret == null ? 'No identified customers in this period' : `${Math.round(ret * 100)}% of ${served.length} customers have visited more than once` };
+          const att = one("select count(*) n, sum(case when lateMins>0 then 1 else 0 end) late from attendance where branchId=? and date>=? and date<=? and (status is null or status<>'off')", b.id, from, to), lateRate = att.n ? (att.late || 0) / att.n : null;
+          C.attendance = { label: 'Barber punctuality', score: lateRate == null ? null : clamp(100 - lateRate * 150), detail: lateRate == null ? 'No attendance records' : `${Math.round(lateRate * 100)}% of ${att.n} shifts started late` };
+          const rv = one('select count(*) n, avg(rating) a from reviews where branchId=? and createdAt>=?', b.id, from) , rvAll = one('select count(*) n, avg(rating) a from reviews where branchId=?', b.id), rr = rv.n ? rv : rvAll;
+          C.rating = { label: 'Customer ratings', score: rr.n ? clamp((rr.a - 3) / 2 * 100) : null, detail: rr.n ? `${(Math.round(rr.a * 10) / 10).toFixed(1)} average from ${rr.n} review${rr.n === 1 ? '' : 's'}${rv.n ? '' : ' (all time)'}` : 'No reviews yet' };
+          const rm = one("select count(*) n, sum(case when abs(ifnull(variance,0))<=1 then 1 else 0 end) ok from remittances where branchId=? and date>=? and date<=?", b.id, from, to);
+          C.remittance = { label: 'Remittance accuracy', score: rm.n ? clamp((rm.ok || 0) / rm.n * 100) : null, detail: rm.n ? `${rm.ok || 0} of ${rm.n} remittances matched the expected cash` : 'No remittances submitted' };
+          const active = one("select count(distinct date) n from orders where status='paid' and branchId=? and date>=? and date<=?", b.id, from, to).n, done = one('select count(*) n from (select distinct date, kind from checklist_runs where branchId=? and date>=? and date<=?)', b.id, from, to).n;
+          C.checklist = { label: 'Opening and closing checklists', score: active ? clamp(done / (active * 2) * 100) : null, detail: active ? `${done} of ${active * 2} checklists done on ${active} trading days` : 'No trading days in this period' };
+          const open = one("select count(*) n from problems where branchId=? and status not in ('RESOLVED','CLOSED')", b.id).n;
+          C.problems = { label: 'Open problem reports', score: clamp(100 - open * 20), detail: open ? `${open} unresolved problem${open === 1 ? '' : 's'}` : 'No open problems' };
+          const comps = Object.entries(C).map(([key, c]) => ({ key, weight: W[key], ...c })), have = comps.filter(c => c.score != null), cov = have.reduce((a, c) => a + c.weight, 0);
+          const score = cov >= 30 ? Math.round(have.reduce((a, c) => a + c.score * c.weight, 0) / cov) : null, focus = have.slice().sort((x, y) => x.score - y.score)[0];
+          return { id: b.id, name: b.name, score, label: score == null ? 'Not enough data' : score >= 80 ? 'Excellent' : score >= 65 ? 'Good' : score >= 50 ? 'Needs attention' : 'At risk', coverage: cov, sales: { cur: cur.s, prev: prev.s, change }, transactions: cur.n, focus: focus && focus.score < 80 ? focus.label : '', components: comps };
+        }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+        return send(res, 200, { days, from, to, branches: out });
+      }
+      // Retention and win-back (owner): regulars who stopped coming, and which barbers keep their clients
+      if (sub === '/pro/retention' && method === 'GET') {
+        if (!admin) bad(403, 'Owner only');
+        const days = [30, 45, 60, 90].includes(+q.days) ? +q.days : 45, cutoff = dOf(new Date(Date.now() - days * 864e5)), bid = q.branch && get('branches', String(q.branch)) ? String(q.branch) : '', bw = bid ? ' and branchId=?' : '', ba = bid ? [bid] : [];
+        const regs = all(`select customerId c, count(*) visits, ifnull(sum(total),0) spent, max(date) last from orders where status='paid' and customerId<>''${bw} group by customerId having count(*)>=2`, ...ba);
+        const lapsed = regs.filter(r => r.last < cutoff).sort((a, b) => b.spent - a.spent).slice(0, 50).map(r => {
+          const lo = one(`select barberId, branchId from orders where customerId=? and status='paid'${bw} order by date desc, createdAt desc`, r.c, ...ba), c = get('customers', r.c);
+          return { name: c?.name || 'Customer', phone: c?.phone || '', visits: r.visits, spent: Math.round(r.spent), last: r.last, daysAgo: Math.round((Date.now() - new Date(r.last + 'T00:00:00')) / 864e5), barber: lo ? get('staff', lo.barberId)?.name || '' : '', branch: lo ? get('branches', lo.branchId)?.name || '' : '' };
+        });
+        const since = dOf(new Date(Date.now() - 89 * 864e5)), barbers = all(`select * from staff where active=1${bid ? ' and branchId=?' : ''} order by name`, ...ba).map(s => {
+          const per = all("select customerId c, count(*) n, max(date) last from orders where status='paid' and customerId<>'' and barberId=? group by customerId", s.id), recent = per.filter(p => p.last >= since);
+          return { id: s.id, name: s.name, branch: get('branches', s.branchId)?.name || '', clients: recent.length, returning: recent.filter(p => p.n > 1).length, rate: recent.length ? Math.round(recent.filter(p => p.n > 1).length / recent.length * 100) : null };
+        }).sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
+        return send(res, 200, { days, summary: { regulars: regs.length, lapsed: regs.filter(r => r.last < cutoff).length, retention: regs.length ? Math.round(regs.filter(r => r.last >= cutoff).length / regs.length * 100) : null }, lapsed, barbers });
+      }
       if (sub === '/pro/shop' && method === 'GET') {   // owner / admin: the shop's own POS numbers across all branches
         if (!admin) bad(403, 'Owner only');
         const t = todayStr(), w = dOf(new Date(Date.now() - 6 * 864e5)), by = (sql, ...a) => new Map(all(sql, ...a).map(r => [r.branchId, r]));
@@ -480,14 +632,15 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const orders = all("select * from orders where status='paid' and barberId=? order by date", s.id).map(parseOrder), by = new Map();
         for (const o of orders) {
           const key = o.customerId || ('n:' + String(o.customerName || '').toLowerCase()); if (key === 'n:') continue;
-          const r = by.get(key) || { name: o.customerName || 'Walk-in', customerId: o.customerId || '', visits: 0, spent: 0, first: o.date, last: o.date };
+          const r = by.get(key) || { key, name: o.customerName || 'Walk-in', customerId: o.customerId || '', visits: 0, spent: 0, first: o.date, last: o.date };
           r.visits++; r.spent += serviceNet(o); r.last = o.date; if (o.customerName) r.name = o.customerName; by.set(key, r);
         }
         const phones = new Map(all('select id,phone from customers').map(x => [x.id, x.phone || '']));
-        const clients = [...by.values()].map(r => ({ ...r, spent: Math.round(r.spent * 100) / 100, phone: phones.get(r.customerId) || '' })).sort((a, b) => b.last.localeCompare(a.last)).slice(0, 200);
+        const cn = new Map(all('select * from bh_client_notes where staffId=?', s.id).map(r => [r.ckey, r]));
+        const clients = [...by.values()].map(r => ({ ...r, spent: Math.round(r.spent * 100) / 100, phone: phones.get(r.customerId) || '', vip: !!cn.get(r.key)?.vip, birthday: cn.get(r.key)?.birthday || '', hasNote: !!(cn.get(r.key)?.note || cn.get(r.key)?.pref) })).sort((a, b) => b.last.localeCompare(a.last)).slice(0, 200);
         const rebook = clients.length ? Math.round(clients.filter(x => x.visits > 1).length / clients.length * 100) : 0;
         const appts = all("select * from bookings where staffId=? and date>=? and date<=? and status in ('booked','arrived') order by date, time", s.id, to, dOf(new Date(Date.now() + 7 * 864e5))).map(b => {
-          const v = bookingView(b); return { id: v.id, date: v.date, time: v.time, mins: v.mins, status: v.status, customer: v.customerName, phone: v.phone, items: v.items.map(i => i.name), total: v.total, notes: v.notes || '' };
+          const v = bookingView(b); return { id: v.id, date: v.date, time: v.time, mins: v.mins, status: v.status, customer: v.customerName, phone: v.phone, items: v.items.map(i => i.name), total: v.total, notes: v.notes || '', noShows: one("select count(*) n from bookings where status='noshow' and phone=?", v.phone).n };
         });
         const recent = all('select id,name,rating,text,createdAt,coalesce(verified,0) verified,reply from reviews where staffId=? order by createdAt desc limit 10', s.id);
         return send(res, 200, { staff: { id: s.id, name: s.name }, from, to, days, metrics: { haircuts: m.n, revenue: m.sales, avgService: Math.round(m.avg * 100) / 100, commission: m.comm, rating: m.rating ? Math.round(m.rating * 10) / 10 : 0, reviews: m.rc,

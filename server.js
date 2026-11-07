@@ -60,7 +60,7 @@ create index if not exists bookings_date on bookings(date, branchId);
 create table if not exists email_log(id text primary key, customerId text, toAddr text, kind text, subject text, html text, text text, status text, attempts integer, error text, createdAt text, sentAt text);
 create index if not exists orders_cust on orders(customerId);
 `);
-addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'integer'); addCol('customers', 'consentAt', 'text'); addCol('customers', 'welcomedAt', 'text');
+addCol('customers', 'noshowOk', 'integer'); addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'integer'); addCol('customers', 'consentAt', 'text'); addCol('customers', 'welcomedAt', 'text');
 addCol('customers', 'phoneKey', 'text'); addCol('customers', 'emailKey', 'text'); addCol('customers', 'source', 'text'); addCol('bookings', 'customerId', 'text');
 db.exec('create index if not exists cust_phone on customers(phoneKey); create index if not exists cust_email on customers(emailKey);');
 addCol('branches', 'googlePlaceId', 'text'); addCol('branches', 'googleUrl', 'text'); addCol('branches', 'photo', 'text'); addCol('branches', 'mapUrl', 'text'); addCol('branches', 'defaultPct', 'real'); addCol('customers', 'branchId', 'text'); addCol('orders', 'discountId', 'text');
@@ -457,6 +457,11 @@ function welcomeEmail(c) {
   run('update customers set welcomedAt=? where id=?', nowISO(), c.id);
   setTimeout(() => processEmails().catch(() => { }), 50);
 }
+function queueEmail({ customerId = '', to, kind, subject, html, text }) {   // transactional mail from the app (reminders, review requests); only queued when the email service is connected
+  if (!EMAIL.key || !validEmail(to)) return false;
+  run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt) values(?,?,?,?,?,?,?,'pending',0,'',?)", uid(), customerId, to, kind, subject, html, text, nowISO());
+  setTimeout(() => processEmails().catch(() => { }), 50); return true;
+}
 async function sendEmail({ to, subject, html, text }) {
   if (!EMAIL.key) return { ok: false, error: 'Email service not configured' };
   try {
@@ -518,8 +523,9 @@ function bookingMins(ids) {
   for (const id of ids) { const it = get('items', id); if (!it || !it.active || it.type !== 'service') bad(400, 'Unknown service'); m += it.mins || 30; }
   return Math.max(30, m);
 }
-const bookedOverlap = (sid, date, start, mins) => all("select * from bookings where staffId=? and date=? and status in ('booked','arrived')", sid, date)
-  .some(b => start < toMin(b.time) + b.mins && toMin(b.time) < start + mins);
+// a barber's blocked time (breaks, training, day off) and the owner's buffer between cuts both close slots
+const timeBlocked = (sid, date, start, mins) => { try { return all('select fromMin, toMin from bh_blocked where staffId=? and date=?', sid, date).some(r => start < r.toMin && r.fromMin < start + mins); } catch { return false; } };
+const bookedOverlap = (sid, date, start, mins) => { const buf = +getSetting('bufferMins') || 0; return all("select * from bookings where staffId=? and date=? and status in ('booked','arrived')", sid, date).some(b => start < toMin(b.time) + b.mins + buf && toMin(b.time) < start + mins + buf) || timeBlocked(sid, date, start, mins); };
 const staffFree = (s, date, start, mins) => s.active && !(date === todayStr() && staffState(s.id, date).state === 'off') && !bookedOverlap(s.id, date, start, mins);
 function slotsFor(branchId, date, staffId, mins) {
   const br = get('branches', branchId); if (!br) bad(400, 'Pick a branch');
@@ -532,6 +538,14 @@ function slotsFor(branchId, date, staffId, mins) {
   }
   return out;
 }
+// owner's rule: after N missed appointments in 90 days a number can no longer book online (the owner can allow a customer again)
+function noShowGate(phone, email) {
+  const max = +getSetting('noshowMax') || 0; if (!max) return;
+  const c = findCustomer(phone, email); if (c && c.noshowOk) return;
+  const since = dOf(new Date(Date.now() - 90 * 864e5)), pk = normPhone(phone);
+  const n = all("select phone, customerId from bookings where status='noshow' and date>=?", since).filter(x => (c && x.customerId === c.id) || (pk.length >= 10 && normPhone(x.phone) === pk)).length;
+  if (n >= max) bad(403, 'Online booking is paused for this number because of missed appointments. Please call the shop to book.');
+}
 function createBooking(b, source) {
   const branchId = String(b.branchId || ''); if (!get('branches', branchId)) bad(400, 'Pick a branch');
   const date = String(b.date || ''), time = String(b.time || '');
@@ -543,6 +557,7 @@ function createBooking(b, source) {
   const name = String(b.name || '').trim().slice(0, 100), phone = String(b.phone || '').trim().slice(0, 30);
   if (!name) bad(400, 'Name required');
   if (phone.replace(/\D/g, '').length < 10) bad(400, 'Enter a valid mobile number');
+  if (source === 'online') noShowGate(phone, b.email);
   const mins = bookingMins(itemIds), start = toMin(time);
   let sid = String(b.staffId || 'any');
   if (!slotsFor(branchId, date, sid, mins).includes(time)) bad(409, 'That time is no longer available. Please pick another.');
@@ -855,7 +870,7 @@ async function handle(req, res) {
   if (SITE_HOST || APP_HOST) {
     const host = normHost(req.headers['x-forwarded-host'] || req.headers.host), go = (h, to) => { res.writeHead(302, { Location: 'https://' + h + (to ?? req.url) }); return res.end(); };
     if (SITE_HOST && host === SITE_HOST) {
-      const ok = PUBLIC_PATHS.has(p) || p.startsWith('/api/public/') || p.startsWith('/api/bh/') || /^\/img\/\w+$/.test(p) || p.startsWith('/site/');
+      const ok = PUBLIC_PATHS.has(p) || p.startsWith('/api/public/') || p.startsWith('/api/bh/') || p.startsWith('/b/') || /^\/img\/\w+$/.test(p) || p.startsWith('/site/');
       if (!ok) { if (APP_HOST && method === 'GET' && !p.startsWith('/api/')) return go(APP_HOST); return send(res, 404, { error: 'Not found' }); }
     } else if (APP_HOST && host === APP_HOST) {
       if (method === 'GET' && p === '/') { res.writeHead(302, { Location: '/backend' }); return res.end(); }
@@ -865,6 +880,7 @@ async function handle(req, res) {
   if (method === 'GET' && p === '/backend/') { res.writeHead(302, { Location: '/backend' }); return res.end(); }
   if (method === 'GET' && p === '/sw.js') { res.writeHead(200, { 'Content-Type': MIME.js, 'Cache-Control': 'no-cache' }); return res.end(`const VERSION=${JSON.stringify(APP_VERSION)};\n` + fs.readFileSync(path.join(DIR, 'sw.js'), 'utf8')); }
   if (method === 'GET' && p === '/api/version') return send(res, 200, { version: APP_VERSION });
+  { const bm = p.match(/^\/b\/(\w{1,30})$/); if (method === 'GET' && bm) { res.writeHead(302, { Location: '/brotherhood#/barber/' + bm[1] }); return res.end(); } }   // a barber's personal booking link
   if (method === 'GET' && p === '/' && /^\/[\w\-\/]*$/.test(process.env.ROOT_REDIRECT || '')) { res.writeHead(302, { Location: process.env.ROOT_REDIRECT }); return res.end(); }   // e.g. ROOT_REDIRECT=/brotherhood so a partner shop's home page is the app, not Brotherhood's promo page
   if (method === 'GET' && STATIC[p]) return serveStatic(req, res, STATIC[p]);
   const sm0 = p.match(/^\/site\/([\w-]+\.(?:jpg|png))$/);   // promo-site photos (shop, barbers, storefront)
@@ -1860,7 +1876,7 @@ async function handle(req, res) {
   bad(405, 'Method not allowed');
 }
 
-const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
+const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 
 http.createServer(async (req, res) => {
   if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);
