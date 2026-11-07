@@ -27,12 +27,28 @@ create table if not exists bh_notifs(id text primary key, userId text, kind text
 create unique index if not exists bh_notifs_ref on bh_notifs(userId, kind, ref);
 create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 `);
-  addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
+  addCol('branches', 'lat', 'real'); addCol('branches', 'lng', 'real'); addCol('bh_users', 'styles', 'text'); addCol('reviews', 'reply', 'text'); addCol('reviews', 'replyAt', 'text'); addCol('reviews', 'replyBy', 'text'); addCol('bookings', 'userId', 'text'); addCol('reviews', 'userId', 'text'); addCol('reviews', 'orderId', 'text'); addCol('reviews', 'verified', 'integer');
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
 
   // ---------- helpers ----------
   const hits = new Map();
   const tooMany = (ip, kind, max, windowMs) => { const k = kind + ip, now = Date.now(), a = (hits.get(k) || []).filter(t => now - t < windowMs); return a.length >= max; };
+  // coordinates from a Google Maps link (full links directly; short maps.app.goo.gl links are followed once)
+  const parseLatLng = u => {
+    const s = decodeURIComponent(String(u || '')); let m;
+    for (const re of [/@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/, /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/, /[?&](?:q|ll|query|center)=(-?\d{1,2}\.\d+)[, ](-?\d{1,3}\.\d+)/, /place\/(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/])
+      if ((m = re.exec(s))) { const lat = +m[1], lng = +m[2]; if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng }; }
+    return null;
+  };
+  const resolveMapUrl = async u => {
+    let url; try { url = new URL(String(u).trim()); } catch { return null; }
+    const direct = parseLatLng(url.href); if (direct) return direct;
+    if (!/^(maps\.app\.goo\.gl|goo\.gl|(www\.)?google\.[a-z.]+|maps\.google\.[a-z.]+)$/i.test(url.hostname) || url.protocol !== 'https:') return null;   // only follow Google Maps links
+    try {
+      const r = await fetch(url.href, { redirect: 'follow', signal: AbortSignal.timeout(7000), headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Brotherhood)' } });
+      return parseLatLng(r.url) || parseLatLng((await r.text()).slice(0, 400000));
+    } catch { return null; }
+  };
   const hit = (ip, kind) => { const k = kind + ip; hits.set(k, [...(hits.get(k) || []), Date.now()]); };
   setInterval(() => hits.clear(), 3600e3).unref();
 
@@ -158,7 +174,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       if (+q.minRating > 0) barbers = barbers.filter(b => b.rating >= +q.minRating);
       barbers.sort(q.sort === 'rating' ? (a, b) => b.rating - a.rating || b.reviews - a.reviews : q.sort === 'experience' ? (a, b) => b.years - a.years : q.sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.score - a.score);
       const shops = brs.filter(b => !bid || b.id === bid).map(b => ({ id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '',
-        photo: b.photo || siteCover(b.name) || '', rating: brr.get(b.id)?.a || 0, reviews: brr.get(b.id)?.n || 0, barbers: all('select count(*) n from staff where branchId=? and active=1', b.id)[0].n }))
+        photo: b.photo || siteCover(b.name) || '', lat: b.lat ?? null, lng: b.lng ?? null, rating: brr.get(b.id)?.a || 0, reviews: brr.get(b.id)?.n || 0, barbers: all('select count(*) n from staff where branchId=? and active=1', b.id)[0].n }))
         .filter(s => !term || (s.name + ' ' + s.address).toLowerCase().includes(term) || barbers.some(x => x.branchId === s.id));
       const specialties = [...new Set(all('select specialties from bh_barber').flatMap(r => jp(r.specialties)))].sort();
       return send(res, 200, { shops, barbers, specialties, services: servicesList() });
@@ -185,7 +201,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const onDuty = all('select id from staff where branchId=? and active=1', b.id).filter(x => ['present', 'late'].includes(staffState(x.id, t).state)).length;
       const nowM = new Date().getHours() * 60 + new Date().getMinutes(), isOpen = nowM >= toMin(b.openTime || '09:00') && nowM < toMin(b.closeTime || '21:00');
       const live = { open: isOpen, waiting, cutting, onDuty, estWait: isOpen && onDuty ? Math.ceil(waiting / onDuty) * 30 : null };
-      return send(res, 200, { live, shop: { id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '', photo: b.photo || siteCover(b.name) || '',
+      return send(res, 200, { live, shop: { id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '', lat: b.lat ?? null, lng: b.lng ?? null, photo: b.photo || siteCover(b.name) || '',
         rating: rv.n ? Math.round(rv.a * 10) / 10 : 0, reviews: rv.n }, gallery: b.photo ? [b.photo, ...gallery.filter(g => g !== b.photo)] : gallery, barbers, reviews, services: servicesList() });
     }
     const fm = sub.match(/^\/favorites\/(\w+)$/);
@@ -346,12 +362,24 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         });
         return send(res, 200, { admin, name: me.name, staff });
       }
+      if (sub === '/pro/branch-location' && method === 'PUT') {   // owner: set a branch's map pin by coordinates, or detect it from the branch's Google Maps link
+        if (!admin) bad(403, 'Owner only'); const b = await readBody(req), br = get('branches', String(b.branchId || '')); if (!br) bad(404, 'Branch not found');
+        let pos;
+        if (b.fromMapUrl) {
+          const link = clip(b.mapUrl || br.mapUrl, 500); if (!link) bad(400, 'This branch has no Google Maps link yet. Paste one first.');
+          if (!/^https:\/\//i.test(link)) bad(400, 'The link must start with https://');
+          pos = await resolveMapUrl(link); if (!pos) bad(422, 'Could not read the location from that link. Open the place in Google Maps, copy the full link from the address bar, or type the coordinates.');
+          if (b.mapUrl) run('update branches set mapUrl=? where id=?', link, br.id);
+        } else { pos = { lat: +b.lat, lng: +b.lng }; if (!Number.isFinite(pos.lat) || !Number.isFinite(pos.lng) || Math.abs(pos.lat) > 90 || Math.abs(pos.lng) > 180 || (pos.lat === 0 && pos.lng === 0)) bad(400, 'Enter a valid latitude and longitude'); }
+        run('update branches set lat=?, lng=? where id=?', Math.round(pos.lat * 1e6) / 1e6, Math.round(pos.lng * 1e6) / 1e6, br.id);
+        log(me, 'branch-location', 'branches', br.id, br.name); return send(res, 200, { ok: true, lat: pos.lat, lng: pos.lng });
+      }
       if (sub === '/pro/shop' && method === 'GET') {   // owner / admin: the shop's own POS numbers across all branches
         if (!admin) bad(403, 'Owner only');
         const t = todayStr(), w = dOf(new Date(Date.now() - 6 * 864e5)), by = (sql, ...a) => new Map(all(sql, ...a).map(r => [r.branchId, r]));
         const today = by("select branchId, ifnull(sum(total),0) s, count(*) n from orders where status='paid' and date=? group by branchId", t), week = by("select branchId, ifnull(sum(total),0) s, count(*) n from orders where status='paid' and date>=? and date<=? group by branchId", w, t);
         const queue = by("select branchId, sum(status='waiting') waiting, sum(status='in_chair') cutting from orders where date=? and status in ('waiting','in_chair') group by branchId", t), appts = by("select branchId, count(*) n from bookings where date=? and status in ('booked','arrived') group by branchId", t);
-        const branches = all('select * from branches order by rowid').map(b => ({ id: b.id, name: b.name, today: today.get(b.id)?.s || 0, todayCount: today.get(b.id)?.n || 0, week: week.get(b.id)?.s || 0, waiting: queue.get(b.id)?.waiting || 0, cutting: queue.get(b.id)?.cutting || 0,
+        const branches = all('select * from branches order by rowid').map(b => ({ id: b.id, name: b.name, lat: b.lat ?? null, lng: b.lng ?? null, mapUrl: b.mapUrl || '', today: today.get(b.id)?.s || 0, todayCount: today.get(b.id)?.n || 0, week: week.get(b.id)?.s || 0, waiting: queue.get(b.id)?.waiting || 0, cutting: queue.get(b.id)?.cutting || 0,
           bookings: appts.get(b.id)?.n || 0, onDuty: all('select id from staff where branchId=? and active=1', b.id).filter(x => ['present', 'late'].includes(staffState(x.id, t).state)).length }));
         const sm = k => branches.reduce((a, b) => a + b[k], 0);
         return send(res, 200, { date: t, totals: { today: sm('today'), week: sm('week'), transactions: sm('todayCount'), bookings: sm('bookings'), waiting: sm('waiting'), cutting: sm('cutting'), onDuty: sm('onDuty') }, branches,
@@ -428,6 +456,6 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     }
     bad(404, 'Not found');
   };
-  handleBH.notify = notify; handleBH.freed = freed;
+  handleBH.parseLatLng = parseLatLng; handleBH.notify = notify; handleBH.freed = freed;
   return handleBH;
 }

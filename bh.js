@@ -58,7 +58,7 @@ function vHome() {
   <button class="bcard" data-go="/style" style="margin-top:6px"><span class="av" style="background:var(--s2)">${ic('scissors')}</span><div class="sp"><div class="nm">Find your cut</div><div class="sm mute">Pick your face shape and get cut ideas to show your barber</div></div></button>
   <div class="sec-h"><h2>Top barbers</h2><button class="link" data-go="/discover">See all</button></div>
   <div class="list">${D ? D.barbers.slice(0, 5).map(barberRow).join('') || '<div class="empty">No barbers yet.</div>' : '<div class="empty">Loading…</div>'}</div>
-  <div class="sec-h"><h2>Our shops</h2></div><div class="list">${D ? D.shops.map(shopCard).join('') : ''}</div>`;
+  <div class="sec-h"><h2>Our shops</h2><button class="link" data-go="/map">View map</button></div><div class="list">${D ? D.shops.map(shopCard).join('') : ''}</div>`;
 }
 function vDiscover() {
   const D = S.D;
@@ -66,7 +66,7 @@ function vDiscover() {
   return header('Discover') + `<div class="search">${ic('search')}<input id="q" placeholder="Search barber, shop or style" value="${esc(S.q)}" autocomplete="off"></div>
   <div class="chips" style="margin-top:10px"><button class="chip ${S.avail ? 'on' : ''}" data-avail>Available today</button>${brChips.map(([id, n]) => `<button class="chip ${S.branch === id ? 'on' : ''}" data-branchf="${id}">${esc(n)}</button>`).join('')}</div>
   ${D && D.specialties.length ? `<div class="chips">${D.specialties.map(s => `<button class="chip ${S.specialty === s ? 'on' : ''}" data-spec="${esc(s)}">${esc(s)}</button>`).join('')}</div>` : ''}
-  <div class="row"><div class="tabs sp"><button class="${S.tab === 'barbers' ? 'on' : ''}" data-tab="barbers">Barbers</button><button class="${S.tab === 'shops' ? 'on' : ''}" data-tab="shops">Shops</button></div>
+  <div class="row"><div class="tabs sp"><button class="${S.tab === 'barbers' ? 'on' : ''}" data-tab="barbers">Barbers</button><button class="${S.tab === 'shops' ? 'on' : ''}" data-tab="shops">Shops</button><button data-go="/map">Map</button></div>
   ${S.tab === 'barbers' ? `<select id="sort" style="width:auto"><option value="best" ${S.sort === 'best' ? 'selected' : ''}>Best match</option><option value="rating" ${S.sort === 'rating' ? 'selected' : ''}>Top rated</option><option value="experience" ${S.sort === 'experience' ? 'selected' : ''}>Experience</option><option value="name" ${S.sort === 'name' ? 'selected' : ''}>Name</option></select>` : ''}</div>
   <div class="list" id="results">${!D ? '<div class="empty">Loading…</div>' : S.tab === 'barbers' ? (D.barbers.map(barberRow).join('') || '<div class="empty">No barbers match. Try different filters.</div>') : (D.shops.map(shopCard).join('') || '<div class="empty">No shops match.</div>')}</div>`;
 }
@@ -79,7 +79,7 @@ async function vBarber(id) {
   <div style="margin-top:20px;display:flex;gap:14px;align-items:flex-end">${pic(b.photo, b.name, 'av lg')}<div><h1 style="font-size:26px" class="row">${esc(b.name)}${b.verified ? `<span class="ver">${ic('ver')}</span>` : ''}</h1><div class="mute sm">${esc(b.headline || 'Barber')} · ${esc(b.branchName)}</div><div style="margin-top:4px">${rate(b.rating, b.reviews)}${b.verifiedReviews ? ` <span class="tag ok">${b.verifiedReviews} verified</span>` : ''}</div></div></div>
   <div class="pill-row" style="margin:14px 0">${b.years ? `<span class="tag">${b.years} yrs experience</span>` : ''}${b.specialties.map(s => `<span class="tag">${esc(s)}</span>`).join('')}${soc}</div>
   ${b.bio ? `<p class="mute" style="margin:0 0 6px">${esc(b.bio)}</p>` : ''}
-  <div class="card row" style="margin-top:10px">${ic('pin')}<div class="sp sm"><b>${esc(j.branch.name)}</b><br><span class="mute">${esc(j.branch.address || '')} · ${t12(j.branch.openTime)}–${t12(j.branch.closeTime)}</span></div>${j.branch.mapUrl ? `<a class="btn sec sm" href="${esc(j.branch.mapUrl)}" target="_blank" rel="noopener">Map</a>` : ''}</div>
+  <div class="card row" style="margin-top:10px">${ic('pin')}<div class="sp sm"><b>${esc(j.branch.name)}</b><br><span class="mute">${esc(j.branch.address || '')} · ${t12(j.branch.openTime)}–${t12(j.branch.closeTime)}</span></div>${/^https?:\/\//i.test(j.branch.mapUrl) ? `<a class="btn sec sm" href="${esc(j.branch.mapUrl)}" target="_blank" rel="noopener">Map</a>` : ''}</div>
   <div class="sec-h"><h2>Portfolio</h2><span class="mute sm">${j.portfolio.length} photos</span></div>
   ${j.portfolio.length ? `<div class="grid3">${j.portfolio.map(p => `<img src="${esc(p.url)}" alt="${esc(p.caption || 'Haircut by ' + b.name)}" data-lb="${esc(p.url)}" loading="lazy">`).join('')}</div>` : '<div class="card empty">This barber has not added portfolio photos yet.</div>'}
   <div class="sec-h"><h2>Services</h2></div><div class="list">${j.services.map(s => `<div class="card row">${s.photo ? `<img src="${esc(s.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(s.price)}</b></div>`).join('')}</div>
@@ -192,7 +192,17 @@ function vOwner() {
   return `<div class="row" style="margin-bottom:12px;gap:10px"><a class="btn block" href="/pos" style="flex:1">${ic('scissors')} Open POS</a><a class="btn sec block" href="/backend" style="flex:1">Back office</a></div>
   <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${kpi('Sales today', peso(t.today), `${t.transactions} transactions`)}${kpi('Sales · 7 days', peso(t.week))}${kpi('Bookings today', t.bookings)}${kpi('Queue now', t.waiting + t.cutting, `${t.waiting} waiting · ${t.cutting} cutting`)}</div>
   <div class="sec-h"><h2>Branches</h2><span class="mute sm">${t.onDuty} barbers on duty</span></div><div class="list">${d.branches.map(b => `<div class="card"><div class="row"><b>${esc(b.name)}</b><span class="sp"></span><b class="num" style="font-size:20px">${peso(b.today)}</b></div><div class="sm mute">${b.todayCount} transactions today · 7 days ${peso(b.week)}</div><div class="sm" style="margin-top:4px"><span class="tag">${b.onDuty} on duty</span> <span class="tag">${b.waiting} waiting</span> <span class="tag">${b.cutting} cutting</span> <span class="tag">${b.bookings} bookings</span></div></div>`).join('')}</div>
+  <div class="sec-h"><h2>Map pins</h2><span class="mute sm">${d.branches.filter(b => b.lat != null).length}/${d.branches.length} set</span></div><div>${d.branches.map(locEditor).join('')}</div>
   <div class="sec-h"><h2>Brotherhood app</h2></div><div class="card sm"><b>${d.members}</b> app members${d.openReports ? ` · <button class="link" data-ptab="mod">${d.openReports} reported item${d.openReports === 1 ? '' : 's'} to review</button>` : ' · nothing to review'}</div>`;
+}
+
+const locEditor = b => `<details class="card" style="margin-top:6px;padding:10px"><summary class="sm">${b.lat != null ? '📍 Pin set' : '⚠ No map pin yet'} · ${esc(b.name)}</summary><div style="margin-top:8px">
+  <label class="f" style="margin-top:0">Google Maps link<input id="lu-${b.id}" value="${esc(b.mapUrl || '')}" placeholder="Paste the shop's Google Maps link" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+  <button class="btn sec sm block" style="margin-top:8px" data-locurl="${b.id}">Detect location from link</button>
+  <div class="row" style="margin-top:10px"><input id="la-${b.id}" inputmode="decimal" placeholder="Latitude" value="${b.lat ?? ''}"><input id="ln-${b.id}" inputmode="decimal" placeholder="Longitude" value="${b.lng ?? ''}"></div>
+  <div class="row" style="margin-top:8px"><button class="btn sec sm sp" data-locgps="${b.id}">◎ Use my current location</button><button class="btn sm sp" data-locsave="${b.id}">Save pin</button></div></div></details>`;
+async function saveLoc(id, body) {
+  try { const j = await api('/pro/branch-location', { method: 'PUT', body: { branchId: id, ...body } }, S.proToken); toast('Map pin saved'); S.D = null; await loadShopOwner(); return j; } catch (x) { toast(x.message); }
 }
 async function loadShopOwner() { try { S.shopData = await api('/pro/shop', {}, S.proToken); } catch (e) { S.shopData = null; toast(e.message); } render(); }
 async function loadDash() {
@@ -265,7 +275,7 @@ async function vShop(id) {
   <div style="margin:6px 0 12px">${rate(s.rating, s.reviews)} <span class="tag">${t12(s.openTime)}–${t12(s.closeTime)}</span></div>
   ${j.live ? `<div class="card row" style="margin:0 0 12px"><span class="tag ${j.live.open ? 'ok' : 'bad'}">${j.live.open ? 'Open now' : 'Closed'}</span><div class="sp sm">${j.live.open ? `<b>${j.live.waiting}</b> waiting · <b>${j.live.cutting}</b> in the chair · <b>${j.live.onDuty}</b> barber${j.live.onDuty === 1 ? '' : 's'} on duty` : 'Opens ' + t12(s.openTime)}${j.live.estWait != null && j.live.waiting ? `<div class="mute">Walk-in wait is about ${j.live.estWait} min (estimate)</div>` : j.live.open && j.live.onDuty ? '<div class="mute">No wait right now</div>' : ''}</div></div>` : ''}
   ${j.gallery.length ? `<div class="chips" style="margin:0 -16px;padding:0 16px">${j.gallery.map(g => `<img src="${esc(g)}" alt="${esc(s.name)} shop photo" data-lb="${esc(g)}" loading="lazy" style="height:170px;width:auto;border-radius:14px;flex:none;cursor:zoom-in;background:var(--s2)">`).join('')}</div>` : ''}
-  <div class="row" style="margin:12px 0;flex-wrap:wrap">${s.phone ? `<a class="btn sec sm" href="tel:${esc(s.phone)}">Call</a>` : ''}${s.mapUrl ? `<a class="btn sec sm" href="${esc(s.mapUrl)}" target="_blank" rel="noopener">${ic('pin')} Directions</a>` : ''}</div>
+  <div class="row" style="margin:12px 0;flex-wrap:wrap">${s.phone ? `<a class="btn sec sm" href="tel:${esc(s.phone)}">Call</a>` : ''}${/^https?:\/\//i.test(s.mapUrl) ? `<a class="btn sec sm" href="${esc(s.mapUrl)}" target="_blank" rel="noopener">${ic('pin')} Directions</a>` : ''}</div>
   <div class="sec-h"><h2>Barbers · ${j.barbers.length}</h2></div><div class="list">${j.barbers.map(barberRow).join('') || '<div class="card empty">Barber profiles are coming soon. You can still book any available barber.</div>'}</div>
   <div class="sec-h"><h2>Prices</h2></div><div class="list">${j.services.map(x => `<div class="card row">${x.photo ? `<img src="${esc(x.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(x.name)}</div><div class="sm mute">${x.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(x.price)}</b></div>`).join('')}</div>
   <div class="sec-h"><h2>Reviews</h2></div><div class="list">${j.reviews.map(r => `<div class="card"><div class="row"><b>${esc(r.name)}</b>${r.verified ? '<span class="tag ok">Verified visit</span>' : ''}<span class="sp"></span>${stars(r.rating)}</div>${r.staffName ? `<div class="sm mute">Haircut by ${esc(r.staffName)}</div>` : ''}${r.text ? `<p style="margin:6px 0 0">${esc(r.text)}</p>` : ''}${replyBox(r)}</div>`).join('') || '<div class="card empty">No reviews for this shop yet.</div>'}</div>
@@ -291,6 +301,48 @@ if ('serviceWorker' in navigator) {
   }).catch(() => { });
   let reloaded = false; const hadController = !!navigator.serviceWorker.controller;   // first install must not reload the page
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloaded || !hadController) return; reloaded = true; location.reload(); });
+}
+
+
+// ----- map (OpenStreetMap via Leaflet, loaded only when the map is opened) -----
+let LMap = null;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  return new Promise((ok, no) => {
+    const c = document.createElement('link'); c.rel = 'stylesheet'; c.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(c);
+    const s = document.createElement('script'); s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'; s.onload = ok; s.onerror = () => no(new Error('Map failed to load')); document.head.appendChild(s);
+  });
+}
+const kmBetween = (a, b, c, d) => { const r = x => x * Math.PI / 180, h = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2; return 12742 * Math.asin(Math.sqrt(h)); };
+const kmText = k => k < 1 ? Math.round(k * 1000 / 10) * 10 + ' m' : k.toFixed(k < 10 ? 1 : 0) + ' km';
+const withPos = () => (S.D?.shops || []).filter(s => s.lat != null && s.lng != null).map(s => ({ ...s, km: S.geo ? kmBetween(S.geo.lat, S.geo.lng, s.lat, s.lng) : null })).sort((a, b) => S.geo ? a.km - b.km : 0);
+function vMap() {
+  const list = withPos(), missing = (S.D?.shops || []).length - list.length;
+  return header('Shops near you', '/discover') + `<div id="map" aria-label="Map of Brotherhood barbershops"></div>
+  <div class="row" style="margin:10px 0"><button class="btn sec sm" data-locate>${S.geoBusy ? 'Locating…' : S.geo ? '◎ Update my location' : '◎ Near me'}</button><span class="sp"></span><span class="mute sm">${list.length} shop${list.length === 1 ? '' : 's'} on the map</span></div>
+  ${S.geoErr ? `<div class="err">${esc(S.geoErr)}</div>` : ''}
+  <div class="list">${!S.D ? '<div class="empty">Loading…</div>' : list.map(s => `<button class="bcard" data-shop="${s.id}">${s.photo ? `<img class="av" src="${esc(s.photo)}" alt="" loading="lazy" style="border-radius:12px">` : `<span class="av">${esc(initials(s.name))}</span>`}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${esc(s.address || 'Brotherhood Barbershop')} · ${t12(s.openTime)}–${t12(s.closeTime)}</div></div>${s.km != null ? `<b class="num">${kmText(s.km)}</b>` : ''}</button>`).join('') || '<div class="card empty">Shop locations are being added. Check back soon.</div>'}${missing > 0 && list.length ? `<div class="sm mute" style="text-align:center">${missing} more shop${missing === 1 ? ' is' : 's are'} not on the map yet.</div>` : ''}</div>`;
+}
+async function mountMap() {
+  const el = document.getElementById('map'); if (!el) return; const list = withPos();
+  try { await loadLeaflet(); } catch { el.innerHTML = '<div class="empty">The map could not load. Check your connection and try again.</div>'; return; }
+  if (!document.getElementById('map')) return; if (LMap) { LMap.remove(); LMap = null; }
+  LMap = L.map(el, { zoomControl: true }).setView([14.1, 121.3], 9);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(LMap);
+  const pts = [];
+  for (const s of list) {
+    const m = L.marker([s.lat, s.lng], { icon: L.divIcon({ className: '', html: '<div class="pin"></div>', iconSize: [26, 26], iconAnchor: [13, 26], popupAnchor: [0, -26] }), title: s.name }).addTo(LMap);
+    const d = document.createElement('div'); d.innerHTML = `<b>${esc(s.name)}</b><br><span style="color:#555">${t12(s.openTime)}–${t12(s.closeTime)}${s.km != null ? ' · ' + kmText(s.km) : ''}</span><br><button class="btn sm" style="margin-top:6px;padding:6px 12px">View shop</button>`;
+    d.querySelector('button').onclick = () => nav('/shop/' + s.id); m.bindPopup(d); pts.push([s.lat, s.lng]);   // Leaflet stops clicks inside popups from bubbling, so the handler is attached directly
+  }
+  if (S.geo) { L.marker([S.geo.lat, S.geo.lng], { icon: L.divIcon({ className: '', html: '<div class="pin me"></div>', iconSize: [20, 20], iconAnchor: [10, 10] }), title: 'You are here' }).addTo(LMap); pts.push([S.geo.lat, S.geo.lng]); }
+  if (pts.length > 1) LMap.fitBounds(pts, { padding: [30, 30], maxZoom: 14 }); else if (pts.length) LMap.setView(pts[0], 15);
+}
+function locate() {
+  if (!navigator.geolocation) { S.geoErr = 'Your browser cannot share its location.'; return render(); }
+  S.geoBusy = true; S.geoErr = ''; render();
+  navigator.geolocation.getCurrentPosition(p => { S.geo = { lat: p.coords.latitude, lng: p.coords.longitude }; S.geoBusy = false; render(); },
+    e => { S.geoBusy = false; S.geoErr = e.code === 1 ? 'Location permission was denied. You can allow it in your browser settings.' : 'Could not get your location. Try again outdoors or check your signal.'; render(); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
 }
 
 // ----- notifications -----
@@ -350,17 +402,18 @@ let rendering = 0;
 async function render() {
   const my = ++rendering, r = route(); let html = '';
   if (r.a === 'home') html = vHome(); else if (r.a === 'discover') html = vDiscover(); else if (r.a === 'barber') html = await vBarber(r.b);
-  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else if (r.a === 'style') html = vStyle(); else if (r.a === 'shop') html = await vShop(r.b); else html = vHome();
+  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else if (r.a === 'style') html = vStyle(); else if (r.a === 'shop') html = await vShop(r.b); else if (r.a === 'map') html = vMap(); else html = vHome();
   if (my !== rendering) return;
   const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart, sy = window.scrollY;
   const showNav = !['barber', 'book', 'auth', 'pro', 'notifications', 'style', 'shop'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
   app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'home' && r.a === 'home') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
   if (focus === 'q') { const el = document.getElementById('q'); el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
+  if (r.a === 'map') mountMap();
   if (r.a === 'barber' || r.a === 'book' || r.a === 'shop') window.scrollTo(0, r.a === 'book' ? sy : 0);
 }
 async function onRoute() {
   const r = route(); window.scrollTo(0, 0);
-  if (['discover', 'home', 'book', 'barber', 'shop'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
+  if (['discover', 'home', 'book', 'barber', 'shop', 'map'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
   if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
@@ -405,7 +458,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-fscope],[data-cpost],[data-cimgx],[data-plike],[data-pcomm],[data-csend],[data-cdel],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -494,6 +547,14 @@ app.addEventListener('click', async e => {
   if (D.ssave) return saveStyle(D.ssave);
   if (D.sbook) { const c = cutById(D.sbook); S.styleNote = `Style I want: ${c.name} (${c.top.toLowerCase()} on top, ${c.sides.toLowerCase()}). Suggested by Brotherhood Style Finder.`; toast('Pick your barber. Your style will be added to the booking notes.'); S.branch = ''; return nav('/discover'); }
   if (D.ngo) { if (D.ngo.startsWith('#/')) { S.mine = null; return nav(D.ngo.slice(1)); } return; }
+  if (D.locate != null) return locate();
+  if (D.locurl) return saveLoc(D.locurl, { fromMapUrl: true, mapUrl: document.getElementById('lu-' + D.locurl).value.trim() });
+  if (D.locsave) return saveLoc(D.locsave, { lat: document.getElementById('la-' + D.locsave).value, lng: document.getElementById('ln-' + D.locsave).value });
+  if (D.locgps) {
+    if (!navigator.geolocation) return toast('Your browser cannot share its location');
+    toast('Getting your location… stand inside the shop');
+    return navigator.geolocation.getCurrentPosition(p => saveLoc(D.locgps, { lat: p.coords.latitude, lng: p.coords.longitude }), () => toast('Could not get your location. Allow location access and try again.'), { enableHighAccuracy: true, timeout: 15000 });
+  }
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
   if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); return render(); }
   if (D.drange) { S.dashRange = D.drange; render(); return loadDash(); }
