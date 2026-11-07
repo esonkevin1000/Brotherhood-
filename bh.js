@@ -104,9 +104,9 @@ async function vBarber(id) {
     <div class="card row">${ic('pin')}<div class="sp sm"><b>${esc(j.branch.name)}</b><br><span class="mute">${esc(j.branch.address || '')} · ${t12(j.branch.openTime)}–${t12(j.branch.closeTime)}</span></div><button class="btn sec sm" data-go="/shop/${j.branch.id}">Shop</button></div>
     <div class="sec-h"><h2>Services</h2></div><div class="list">${j.services.map(s => `<div class="card row">${s.photo ? `<img src="${esc(s.photo)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover" alt="">` : ''}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${s.mins || 30} min</div></div><b class="num" style="font-size:18px">${peso(s.price)}</b></div>`).join('')}</div>`;
   }
-  return `<div class="pcover" style="background-image:linear-gradient(180deg,rgba(11,20,36,.2),rgba(11,20,36,.85)),url('${esc(cover)}')"></div>
+  return `<div class="pcover" style="background-image:linear-gradient(180deg,rgba(9,9,10,.2),rgba(9,9,10,.88)),url('${esc(cover)}')"></div>
   <div class="bar" style="margin-top:-150px;background:none"><button class="btn sec sm" data-go="/discover" aria-label="Back">${ic('back')}</button><span class="sp"></span></div>
-  <div class="phead">${pic(b.photo, b.name, 'av lg')}<span class="sp"></span><button class="btn ${fav ? 'sec' : ''} sm" style="margin-bottom:6px;min-width:104px" data-fav="${b.id}">${fav ? '✓ Following' : '+ Follow'}</button></div>
+  <div class="phead">${pic(b.photo, b.name, 'av lg')}<span class="sp"></span><button class="btn ${fav ? 'sec' : 'white'} sm" style="margin-bottom:6px;min-width:104px" data-fav="${b.id}">${fav ? '✓ Following' : '+ Follow'}</button></div>
   <h1 style="font-size:26px;margin-top:10px" class="row">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</h1>
   <div class="pill-row" style="margin:6px 0"><span class="gold">${esc(b.level)}</span>${j.certs.length ? `<span class="rankc">🎓 ${j.certs.length} seminar${j.certs.length === 1 ? '' : 's'}</span>` : ''}${j.rankWeek ? `<span class="rankc">🏆 Top #${j.rankWeek.rank} this week · ${j.rankWeek.cuts} cut${j.rankWeek.cuts === 1 ? '' : 's'}</span>` : ''}</div>
   <div class="mute sm">${esc(b.headline || 'Barber')} · ${esc(b.branchName)}</div>
