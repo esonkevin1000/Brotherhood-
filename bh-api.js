@@ -203,7 +203,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const handleBH = async function (req, res, p, method, q, ip) {
     const sub = p.slice('/api/bh'.length);
 
-    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood' });
+    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood', contact: String(process.env.CONTACT_EMAIL || '').trim().slice(0, 120) });
     // ----- accounts -----
     if (sub === '/signup' && method === 'POST') {
       if (tooMany(ip, 'su', 5, 3600e3)) bad(429, 'Too many sign-ups from this device. Try again later.');
@@ -278,7 +278,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       run('delete from bh_favorites where userId=?', u.id);
       run('delete from bh_notifs where userId=?', u.id); run('delete from bh_waitlist where userId=?', u.id);
       for (const t of ['bh_likes', 'bh_comments', 'bh_follows', 'bh_blocks', 'bh_reports', 'bh_saves']) run(`delete from ${t} where userId=?`, u.id);
-      run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
+      run("delete from bh_promos where userId=?", u.id); run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
       run('delete from bh_comments where postId in (select id from bh_posts where userId=?)', u.id);
       for (const r of all('select imageUrl from bh_posts where userId=?', u.id)) { const im = /\/img\/(\w+)/.exec(r.imageUrl || ''); if (im) run('delete from images where id=?', im[1]); }
       run('delete from bh_posts where userId=?', u.id); dropImg(u.photo); dropImg(u.cover); run('delete from bh_users where id=?', u.id);

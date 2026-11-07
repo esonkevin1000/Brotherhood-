@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Terms of Use · Brotherhood</title>
+<meta name="theme-color" content="#09090a">
+<style>
+:root{--bg:#09090a;--fg:#ececef;--mute:#9a9aa3;--line:#26262b;--acc:#3b82f6}
+@media (prefers-color-scheme:light){:root{--bg:#fff;--fg:#17171a;--mute:#5f5f68;--line:#e3e3e8;--acc:#2563eb}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:28px;margin:8px 0 4px}h2{font-size:19px;margin:30px 0 6px;padding-top:10px;border-top:1px solid var(--line)}
+.m{color:var(--mute);font-size:14px}a{color:var(--acc)}ul{padding-left:20px}
+nav{display:flex;gap:16px;flex-wrap:wrap;font-size:14px;margin-bottom:8px}
+</style>
+</head>
+<body>
+<main>
+<nav><a href="/brotherhood">Open the app</a><a href="/privacy">Privacy Policy</a><a href="/delete-account">Delete my account</a></nav>
+<h1>Terms of Use</h1>
+<p class="m">Brotherhood app and website · Last updated: November 2026</p>
+
+<p>These terms are an agreement between you and <b id="shop">BrotherhoodBarber</b> (the “shop”, “we”). By creating an account or using the app you agree to them and to our <a href="/privacy">Privacy Policy</a>. If you do not agree, please do not use the app.</p>
+
+<h2>1. Your account</h2>
+<ul>
+<li>You must be at least 13 years old. If you are under 18, use the app with a parent or guardian’s permission.</li>
+<li>Give accurate details, keep your password private, and tell us if someone uses your account without permission. You are responsible for what happens under your account.</li>
+<li>One person, one account. We may close accounts that are fake, shared or abused.</li>
+</ul>
+
+<h2>2. Bookings</h2>
+<ul>
+<li>The app lets you book a barber at a Brotherhood branch. You pay at the shop. Service prices shown in the app are guides; the price charged at the shop’s cashier is the final price.</li>
+<li>You can cancel up to 1 hour before your booking. Please cancel instead of not showing up. The shop may pause online booking for a number that repeatedly misses appointments; you can still book by calling the shop.</li>
+<li>Times depend on barbers’ availability. The shop may need to move or cancel a booking and will tell you when it does.</li>
+<li>Repeat bookings reserve several dates at once. Dates that are not available are skipped.</li>
+</ul>
+
+<h2>3. Promo codes, rewards and vouchers</h2>
+<ul>
+<li>Promo codes and reward vouchers have no cash value, cannot be exchanged for money, cannot be transferred, and are limited as shown (for example one use per person, an end date, or first-time customers only).</li>
+<li>Reward points come from paid visits recorded by the shop. A voucher you do not use before it expires returns its points to you.</li>
+<li>The shop may change, pause or end promotions and rewards, but will honour vouchers you have already claimed until they expire.</li>
+<li>We may cancel a discount or voucher that was obtained by abuse or by mistake.</li>
+</ul>
+
+<h2>4. Community rules</h2>
+<p>The community feed, reviews and comments are for real haircut and barbering content. You agree not to post anything that:</p>
+<ul>
+<li>is sexual or nude, hateful, harassing, threatening, or encourages violence or self-harm;</li>
+<li>is illegal, fraudulent, or promotes illegal products or services;</li>
+<li>is spam, advertising for other businesses, or fake reviews;</li>
+<li>shows or shares another person’s private information or photos without permission;</li>
+<li>infringes someone else’s copyright or other rights.</li>
+</ul>
+<p>You can report any post, comment or member from the app, and block members you do not want to see. We review reports and may remove content or accounts without notice. Content that receives several reports is hidden automatically until it is reviewed. We aim to act on reports within 24 hours, but cannot promise this.</p>
+
+<h2>5. Your content</h2>
+<p>You keep ownership of the photos and text you post. You give the shop a free, worldwide licence to host and display them in the app and on the shop’s own pages and social media, for as long as the content is on the app. You confirm that you have the right to post it. You can delete your posts at any time, and deleting your account removes them.</p>
+
+<h2>6. Barbers and the shop</h2>
+<p>Barbers have their own profiles, portfolios and reviews. Reviews are the opinions of customers, not of the shop. Marked “verified” reviews come from a completed, paid visit booked through the app.</p>
+
+<h2>7. Acceptable use</h2>
+<p>Do not attack, scrape, overload or try to break into the app, create accounts automatically, or use another person’s account.</p>
+
+<h2>8. Availability and changes</h2>
+<p>We work to keep the app running, but it may be unavailable at times and we may change or stop features. We may update these terms; the date above shows the latest version, and continued use means you accept it.</p>
+
+<h2>9. Liability</h2>
+<p>The app is provided “as is”. To the extent allowed by law, the shop is not liable for indirect or consequential losses from using the app. Nothing here limits your rights under Philippine consumer law or anything we cannot limit by law. Haircuts and services are provided by the barbers at the branch; concerns about a service should be raised with the branch first.</p>
+
+<h2>10. Ending your account</h2>
+<p>You can stop using the app and <a href="/delete-account">delete your account</a> at any time. We may suspend or close an account that breaks these terms.</p>
+
+<h2>11. Governing law and contact</h2>
+<p>These terms are governed by the laws of the Republic of the Philippines. Questions: <span id="contact">any Brotherhood branch</span>.</p>
+</main>
+<script>
+fetch('/api/bh/config').then(r=>r.json()).then(c=>{
+  if(c.shop){document.getElementById('shop').textContent=c.shop}
+  if(c.contact){const e=document.getElementById('contact');e.innerHTML='<a href="mailto:'+encodeURIComponent(c.contact).replace('%40','@')+'"></a>';e.firstChild.textContent=c.contact}
+}).catch(()=>{});
+</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+# Brotherhood: gabay para sa Play Store (at App Store)
+
+## Mga link na kailangan ng store
+Palitan ang domain kung iba ang gamit mo (para sa customer app, ang site host).
+
+| Hinihingi | Ilagay |
+|---|---|
+| Privacy policy URL | `https://getbrotherhoodapp.com/privacy` |
+| Terms | `https://getbrotherhoodapp.com/terms` |
+| Account deletion URL (Play Console, Data safety) | `https://getbrotherhoodapp.com/delete-account` |
+| Delete sa loob ng app | Profile, Account, Delete my account |
+| Contact email na lalabas sa mga pahina | Itakda ang `CONTACT_EMAIL` sa hosting variables (kung wala, "any Brotherhood branch" ang lalabas) |
+
+## Text ng listing (English, para sa store)
+**App name:** Brotherhood: Book Your Barber (hanggang 30 characters sa Play)
+
+**Short description (80 chars):**
+Find your barber, book your cut, earn rewards at Brotherhood barbershops.
+
+**Full description:**
+Brotherhood is the barbershop app for people who care about a fresh cut.
+
+BOOK IN SECONDS
+Pick a branch and a barber, choose your service, and grab a time that is actually free. Repeat your cut every few weeks in one go, and join the waitlist if your barber is full.
+
+FIND THE RIGHT BARBER
+See each barber's portfolio, ratings, specialties and next free slot. Browse styles, read verified reviews from real paid visits, and follow your favorites.
+
+JOIN THE COMMUNITY
+Share your cuts, follow barbers, save looks you love, and see what is trending.
+
+EARN REWARDS
+Every paid visit earns points. Redeem them for vouchers, free items and discounts, and use promo codes when you book.
+
+STAY ON TOP
+Get reminders before your appointment and a nudge when it is time for your next cut.
+
+Free for customers. You pay at the shop.
+
+**Category:** Lifestyle (o Beauty). **Tags:** barber, booking, haircut.
+
+## Mga screenshot at graphics (ikaw ang kukuha mula sa totoong app)
+- Phone screenshots: 4 hanggang 8, 1080x1920 o malapit (Discover, barber profile, booking, community, rewards).
+- App icon: 512x512 PNG (meron na tayong `icon-512.png`).
+- Feature graphic: 1024x500 (kailangan sa Play).
+
+## Play Console: mga sagot na tugma sa app
+- **Data safety:** kinokolekta ang Name, Email, Phone number, Photos (kung mag-upload), User content (posts, reviews), App activity (bookings). Hindi ibinebenta. Naka-encrypt in transit. May paraan ng pag-delete (URL sa taas). Walang ads, walang analytics.
+- **Content rating:** may user-generated content (community). Sagutin na may report at block na features.
+- **Target audience:** 13 pataas.
+- **App access:** kailangan ng login para mag-book. Gumawa ng demo na account para sa reviewers at ilagay sa App access (huwag gamitin ang owner password).
+- **Ads:** wala.
+
+## Hakbang (Android)
+1. Gumawa ng Google Play developer account ($25, may ID verification).
+2. Gumawa ng bagong TWA package para sa customer app. Halimbawa package name: `com.brotherhood.app`, start URL `https://getbrotherhoodapp.com/brotherhood`. (Hiwalay ito sa POS app na `com.brotherhood.pos`.)
+3. I-build ang signed AAB (PWABuilder o Bubblewrap).
+4. Sa Play Console, i-on ang Play App Signing. Kunin ang SHA-256 ng app signing key at idagdag sa `assetlinks.json` sa ilalim ng bagong package. (Ako na ang magdadagdag sa file kapag ibinigay mo ang fingerprint.)
+5. Punan ang listing, Data safety, content rating, at App access.
+6. Closed testing: kung bago ang personal account, kailangan ng mga 12 tester sa loob ng 14 na araw bago mag-production. Tingnan ang kasalukuyang patakaran sa Play Console.
+7. Isumite para sa review.
+
+## App Store (iPhone): mamaya
+- $99 kada taon at kailangan ng Mac na may Xcode (o cloud Mac).
+- Hindi tinatanggap ang website lang na ibinalot. Kailangan ng Capacitor at native na gamit tulad ng push notifications.
+- Kailangan na ng: delete account sa loob ng app (meron), report at block (meron), terms na tinatanggap sa signup (meron), at privacy policy link (meron).

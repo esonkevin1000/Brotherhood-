@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Delete your account · Brotherhood</title>
+<meta name="theme-color" content="#09090a">
+<style>
+:root{--bg:#09090a;--fg:#ececef;--mute:#9a9aa3;--line:#26262b;--acc:#3b82f6;--card:#131316;--bad:#ef4444;--ok:#22c55e}
+@media (prefers-color-scheme:light){:root{--bg:#fff;--fg:#17171a;--mute:#5f5f68;--line:#e3e3e8;--acc:#2563eb;--card:#f6f6f8}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:560px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:28px;margin:8px 0 4px}h2{font-size:18px;margin:26px 0 6px}
+.m{color:var(--mute);font-size:14px}a{color:var(--acc)}ul{padding-left:20px}
+nav{display:flex;gap:16px;flex-wrap:wrap;font-size:14px;margin-bottom:8px}
+form{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:18px}
+label{display:block;font-size:14px;color:var(--mute);margin-top:12px}label:first-child{margin-top:0}
+input[type=email],input[type=password]{width:100%;font:inherit;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);margin-top:4px}
+.row{display:flex;gap:10px;align-items:flex-start;margin-top:14px;color:var(--fg);font-size:15px}.row input{margin-top:5px;width:18px;height:18px}
+button{font:inherit;font-weight:600;width:100%;margin-top:16px;padding:13px;border-radius:10px;border:0;background:var(--bad);color:#fff;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+#msg{margin-top:14px;padding:12px;border-radius:10px;display:none;font-size:15px}
+#msg.err{display:block;background:#3a1518;color:#ffb4b4}#msg.ok{display:block;background:#10301c;color:#9be8b4}
+@media (prefers-color-scheme:light){#msg.err{background:#fde8e8;color:#9b1c1c}#msg.ok{background:#e3f6ea;color:#14532d}}
+</style>
+</head>
+<body>
+<main>
+<nav><a href="/brotherhood">Open the app</a><a href="/privacy">Privacy Policy</a><a href="/terms">Terms of Use</a></nav>
+<h1>Delete your account</h1>
+<p class="m"><span id="shop">Brotherhood</span> app</p>
+<p>You can delete your Brotherhood account here. You can also do it in the app: Profile → Account → Delete my account.</p>
+
+<h2>What is deleted</h2>
+<ul>
+<li>Your profile, profile and cover photos, and your sign-in.</li>
+<li>Your posts, photos, comments, likes, follows, saved items and favorites.</li>
+<li>Your notifications, waitlist entries, and any unused reward vouchers and reward points.</li>
+</ul>
+<h2>What the shop keeps</h2>
+<ul>
+<li>Ordinary business records of past bookings and paid visits (name, phone, service, amount), kept for accounting and tax reasons. They are no longer linked to an account.</li>
+<li>Reviews you left stay in the shop’s records, unlinked from your account.</li>
+</ul>
+<p class="m">Deleting your account cannot be undone.</p>
+
+<form id="f">
+<label>Account email<input type="email" id="email" required autocomplete="email"></label>
+<label>Password<input type="password" id="pw" required autocomplete="current-password"></label>
+<div class="row"><input type="checkbox" id="ok" required><span>I understand that my account will be permanently deleted.</span></div>
+<button id="go" type="submit">Delete my account</button>
+<div id="msg" role="status"></div>
+</form>
+
+<h2>Can’t sign in?</h2>
+<p>Contact <span id="contact">any Brotherhood branch</span> from the email or phone number on your account and ask for your account to be deleted. We will confirm and delete it.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id), msg=(t,k)=>{const m=$('msg');m.textContent=t;m.className=k};
+fetch('/api/bh/config').then(r=>r.json()).then(c=>{
+  if(c.shop)$('shop').textContent=c.shop;
+  if(c.contact){const e=$('contact');e.innerHTML='<a href="mailto:'+encodeURIComponent(c.contact).replace('%40','@')+'"></a>';e.firstChild.textContent=c.contact}
+}).catch(()=>{});
+$('f').addEventListener('submit',async e=>{
+  e.preventDefault();const b=$('go');b.disabled=true;msg('','');
+  try{
+    const h={'Content-Type':'application/json'};
+    const l=await fetch('/api/bh/login',{method:'POST',headers:h,body:JSON.stringify({email:$('email').value.trim(),password:$('pw').value})});
+    const lj=await l.json().catch(()=>({}));if(!l.ok)throw new Error(lj.error||'Email or password is wrong');
+    const d=await fetch('/api/bh/me',{method:'DELETE',headers:{...h,Authorization:'Bearer '+lj.token},body:JSON.stringify({password:$('pw').value})});
+    const dj=await d.json().catch(()=>({}));if(!d.ok)throw new Error(dj.error||'Could not delete the account');
+    try{localStorage.removeItem('bh_token')}catch(_){}
+    $('f').reset();msg('Your account has been deleted. Thank you for being part of the brotherhood.','ok');
+  }catch(x){msg(x.message,'err');b.disabled=false}
+});
+</script>
+</body>
+</html>
