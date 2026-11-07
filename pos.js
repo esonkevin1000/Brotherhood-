@@ -75,7 +75,7 @@ async function loadRemit() {
 }
 async function loadCustomers() {
   const c = P.cust, br = P.boot?.branch?.id || P.branch || '';
-  const r = await api('GET', '/api/customers?size=40&q=' + encodeURIComponent(c.q) + (c.tier ? '&tier=' + c.tier : '') + (br ? '&branch=' + br : ''));
+  const r = await api('GET', '/api/customers?size=100&q=' + encodeURIComponent(c.q) + (c.tier ? '&tier=' + c.tier : '') + (br ? '&branch=' + br : ''));
   c.rows = r.rows; c.total = r.total;
 }
 // ---------- offline-first attendance: selfie, encrypted local queue, automatic sync ----------
@@ -215,8 +215,41 @@ function render() {
     ${P.view === 'pos' && P.cart.mode !== 'now' && !isWide() && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
     <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`);
 }
+// ---------- long lists, page by page ----------
+// Any run of more than 15 tickets / appointments / cards in the main screen is shown 15 at a time (menu items, chairs and buttons are never split).
+P.pg = {};
+function paginateLists() {
+  const main = app.querySelector('main'); if (!main) return;
+  main.querySelectorAll('.pager').forEach(p => p.remove());
+  let idx = 0;
+  const sigOf = el => { const c = el.classList; if (!c) return ''; for (const k of ['ticket', 'appt', 'card', 'cust-card']) if (c.contains(k)) return el.tagName + '.' + k; return ''; };
+  const parents = [main, ...main.querySelectorAll('*')].filter(p => p.children.length > 15);
+  for (const parent of parents) {
+    const kids = [...parent.children]; let run = [];
+    const flush = () => {
+      if (run.length > 15) {
+        const key = P.view + '#' + (idx++), st = P.pg[key] ||= { p: 1, n: 15 }, total = run.length, pages = Math.max(1, Math.ceil(total / st.n));
+        if (st.p > pages) st.p = pages; const from = (st.p - 1) * st.n, to = Math.min(total, from + st.n);
+        run.forEach((el, i) => { el.style.display = i >= from && i < to ? '' : 'none'; });
+        const bar = document.createElement('div'); bar.className = 'pager'; bar.dataset.first = '1';
+        bar.innerHTML = `<span class="mute">${from + 1}–${to} of ${total}</span><div class="row" style="gap:10px;flex-wrap:nowrap"><button class="ghost sm" data-pgk="${key}" data-pgd="-1" ${st.p <= 1 ? 'disabled' : ''}>‹ Prev</button><b>${st.p} / ${pages}</b><button class="ghost sm" data-pgk="${key}" data-pgd="1" ${st.p >= pages ? 'disabled' : ''}>Next ›</button></div><select data-pgn="${key}" aria-label="Per page">${[15, 30, 50].map(n => `<option value="${n}" ${st.n === n ? 'selected' : ''}>${n} / page</option>`).join('')}</select>`;
+        run[run.length - 1].after(bar); bar._top = run[0];
+      }
+      run = [];
+    };
+    let sig = '';
+    for (const el of kids) { const s = sigOf(el); if (s && s === sig) run.push(el); else { flush(); sig = s; if (s) run = [el]; } }
+    flush();
+  }
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-pgd]'); if (!b) return; const st = P.pg[b.dataset.pgk]; if (!st) return;
+  st.p += +b.dataset.pgd; const top = b.closest('.pager')._top; paginateLists();
+  const nb = [...document.querySelectorAll('[data-pgk]')].find(x => x.dataset.pgk === b.dataset.pgk), first = nb && nb.closest('.pager') && nb.closest('.pager')._top; if (first && first.scrollIntoView) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+});
+document.addEventListener('change', e => { const s = e.target.dataset && e.target.dataset.pgn; if (!s) return; const st = P.pg[s]; if (st) { st.n = +e.target.value; st.p = 1; paginateLists(); } });
 const _render = render;
-render = function () { _render(); const h = document.getElementById('inbox-host'); if (h && window.Inbox && P.me) Inbox.mount(h, { token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); };
+render = function () { _render(); try { paginateLists(); } catch (e) { } const h = document.getElementById('inbox-host'); if (h && window.Inbox && P.me) Inbox.mount(h, { token: () => token, isAdmin: isAdminRole(), meId: P.me.id }); };
 const staffById = id => P.boot?.staff.find(s => s.id === id);
 const cuttingIds = () => new Set((P.boot?.queue || []).filter(o => o.status === 'in_chair').map(o => o.barberId));
 const stateLabel = { present: 'Present', late: 'Late', break: 'On break', off: 'Off duty', out: 'Timed out', none: 'Not timed in' };
@@ -701,7 +734,7 @@ document.addEventListener('click', async e => {
   if (a === 'pinclr') { P.pin = ''; return render(); }
   if (a === 'pinbk') { P.pin = P.pin.slice(0, -1); return render(); }
   if (a === 'closesheet') { closeSheet(); return render(); }
-  if (a === 'go') { P.view = d.v; render(); refresh(); return; }   // show the screen at once, fresh data fills in a moment later
+  if (a === 'go') { P.view = d.v; P.pg = {}; render(); refresh(); return; }   // show the screen at once, fresh data fills in a moment later
   if (a === 'more') {
     return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
       ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Report a Problem'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Daily Checklist'], ['leave', 'calendar', 'Leave Requests'], ['myperf', 'star', 'My Performance & Payslips'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}

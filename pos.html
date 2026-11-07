@@ -117,6 +117,7 @@ main.enter>*{animation:fade .25s ease-out both}@keyframes fade{from{opacity:0;tr
 .drawer a{display:flex;align-items:center;gap:14px;padding:15px 14px;border-radius:14px;color:var(--text);text-decoration:none;font-weight:600}
 .drawer a:hover{background:var(--s2)}.drawer a svg{color:var(--gold)}
 .toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:var(--grad);color:#fff;padding:11px 20px;border-radius:99px;font-weight:700;z-index:99;box-shadow:0 12px 30px -8px rgba(0,0,0,.3);animation:fade .2s}
+.pager{display:flex;align-items:center;justify-content:space-between;gap:10px 14px;flex-wrap:wrap;margin:14px 2px 6px}.pager select{width:auto;padding:8px 10px;font-size:14px}
 #busybar{position:fixed;top:calc(12px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:120;background:#000;color:#fff;font-weight:700;font-size:13px;padding:9px 16px 9px 38px;border-radius:99px;display:none;box-shadow:0 10px 26px -8px rgba(0,0,0,.4)}#busybar.on{display:block}#busybar::before{content:"";position:absolute;left:14px;top:50%;width:14px;height:14px;margin-top:-7px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .toast.err{background:linear-gradient(135deg,#ff7d89,#e0404f);color:#fff}
 
