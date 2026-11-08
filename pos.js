@@ -36,6 +36,7 @@ const closeSheet = () => { if (sheet.open) sheet.close(); };
 function toast(msg, err) { const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2600); }
 
 let token = ''; try { token = localStorage.getItem('bp.pos') || ''; } catch (e) { }
+let orgCode = ''; try { orgCode = localStorage.getItem('bp.org') || ''; } catch (e) { }   // partner shops: this device's shop code
 const P = { apptDate: ymd(0), bk: [], na: null, me: null, branch: '', branches: [], boot: null, dash: null, queue: [], att: [], exp: null, shift: null, z: [], zs: [], view: 'dashboard', pin: '', err: '',
   cart: { items: [], barberId: '', mode: 'later', editing: null }, q: [], sf: null, offline: false, cust: { q: '', tier: '', rows: [], total: 0 }, rm: { date: '', calc: null, list: [], proofId: '', preview: '', actual: '', resp: '', notes: '', busy: false }, cat: 'all', qf: { status: 'active', barber: '' }, expRange: 'today', expQ: '', tab: 'close', denoms: {}, remarks: '', custHits: [] };
 const DENOMS = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.25];
@@ -57,7 +58,7 @@ function busy(on, msg) {
 }
 async function api(method, url, body) {
   const up = method === 'POST' && /^\/api\/(files|pos\/idphoto)/.test(url); if (up) busy(true, 'Uploading photo…');
-  let r; try { r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: body ? JSON.stringify(body) : undefined }); } finally { if (up) busy(false); }
+  let r; try { r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(!token && orgCode && url === '/api/login' ? { 'x-org': orgCode } : {}) }, body: body ? JSON.stringify(body) : undefined }); } finally { if (up) busy(false); }
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && url !== '/api/login') { token = ''; P.me = null; render(); throw new Error('Login required'); }
   if (!r.ok) throw new Error(j.error || 'Request failed');
@@ -200,9 +201,9 @@ const TITLES = { dashboard: 'Executive Dashboard', pos: 'Point of Sale', queue: 
 const safeView = () => { try { return VIEWS[P.view](); } catch (e) { return '<p class="mute">Loading…</p>'; } };
 function render() {
   if (!P.me) {
-    app._html = ""; app.innerHTML = `<main class="login"><img class="logo" src="/logo.png" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
+    app._html = ""; app.innerHTML = `<main class="login"><img class="logo" src="/logo.png?v=b" alt=""><h1>Brotherhood</h1><p class="mute">Barbershop POS</p>
       <div class="dots">${[0, 1, 2, 3, 4, 5].map(i => `<i class="${i < P.pin.length ? 'on' : ''}"></i>`).join('')}</div><p style="color:var(--bad);min-height:22px;font-size:13px">${esc(P.err) || 'Enter your 6-digit PIN'}</p>
-      <div class="pin">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-a="pin" data-n="${n}">${n}</button>`).join('')}<button data-a="pinclr" class="ghost">CLR</button><button data-a="pin" data-n="0">0</button><button data-a="pinbk" class="ghost">⌫</button></div></main>`;    return;
+      <div class="pin">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button data-a="pin" data-n="${n}">${n}</button>`).join('')}<button data-a="pinclr" class="ghost">CLR</button><button data-a="pin" data-n="0">0</button><button data-a="pinbk" class="ghost">⌫</button></div><button data-a="orgcode" class="ghost" style="margin-top:14px;background:none;border:0;color:var(--mute);font-size:13px;text-decoration:underline">${orgCode ? 'Partner shop: ' + esc(orgCode) + ' · change' : 'Partner shop? Enter shop code'}</button></main>`;    return;
   }
   const b = P.boot; app.classList.toggle('in', !!P.me);
   if (!canOpen(P.view)) P.view = firstView();
@@ -213,7 +214,7 @@ function render() {
   setApp(`<header><button class="burger" data-a="more">${ic('menu')}</button>${P.me.role === 'barber' ? `<span class="hav" data-a="go" data-v="dashboard">${av(P.me.name, P.me.photo)}</span>` : ''}<div class="ttl"><h1>${TITLES[P.view]}</h1><small>${esc(b?.branch?.name || '')} · ${esc(P.me.name)}</small></div>${P.inUnread && P.view !== 'inbox' ? `<span class="shiftchip" style="color:#e5384a" data-a="go" data-v="inbox">✉ ${P.inUnread}</span>` : ''}${P.offline || navigator.onLine === false ? '<span class="shiftchip" style="color:var(--bad)">Offline</span>' : ''}${P.q && P.q.length ? `<span class="shiftchip" style="color:#b26a00" data-a="go" data-v="attendance">⟳ ${P.q.length} pending sync</span>` : ''}<span class="shiftchip ${s ? 'on' : ''}">${s ? '● Shift #' + s.no : '○ No shift'}</span></header>
     <main class="${enter}">${isAdminRole() ? `<select data-a="branchsel" style="margin-bottom:12px">${P.branches.map(x => `<option value="${x.id}" ${x.id === P.branch ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}${b ? safeView() : '<p class="mute">Loading…</p>'}</main>
     ${P.view === 'pos' && P.cart.mode !== 'now' && !isWide() && P.cart.items.length ? `<div class="cartbar"><button class="block" data-a="cart">${ic('cart')} ${P.cart.items.reduce((s, i) => s + i.qty, 0)} item(s) · ${peso(cartTotal())} — View cart</button></div>` : ''}
-    <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`);
+    <nav class="bottom">${isWide() ? `<p class="rbrand"><img src="/logo.png?v=b" alt=""><span><b>BROTHERHOOD</b><small>${esc(b?.branch?.name || '')}</small></span></p>` : ''}<div>${nav.map(([k, icn, l]) => `<button class="${P.view === k ? 'on' : ''}" data-a="go" data-v="${k}">${ic(icn)}${l}</button>`).join('')}${isWide() ? `<button class="ghost railout" data-a="logout">${ic('menu', 'sm')} Logout (${esc(P.me.name)})</button>` : ''}</div></nav>`);
 }
 // ---------- long lists, page by page ----------
 // Any run of more than 15 tickets / appointments / cards in the main screen is shown 15 at a time (menu items, chairs and buttons are never split).
@@ -731,12 +732,13 @@ document.addEventListener('click', async e => {
   const el = e.target.closest('[data-a]'); if (!el) return;
   const d = el.dataset, a = d.a;
   if (a === 'pin') { if (P.pin.length < 6) P.pin += d.n; P.err = ''; render(); if (P.pin.length === 6) { const pin = P.pin; P.pin = ''; try { await afterLogin(await api('POST', '/api/login', { pin })); } catch (x) { P.err = x.message; render(); } } return; }
+  if (a === 'orgcode') { const v = prompt('Shop code (leave blank for Brotherhood):', orgCode); if (v === null) return; orgCode = v.trim().toLowerCase(); try { if (orgCode) localStorage.setItem('bp.org', orgCode); else localStorage.removeItem('bp.org'); } catch (x) { } P.err = ''; return render(); }
   if (a === 'pinclr') { P.pin = ''; return render(); }
   if (a === 'pinbk') { P.pin = P.pin.slice(0, -1); return render(); }
   if (a === 'closesheet') { closeSheet(); return render(); }
   if (a === 'go') { P.view = d.v; P.pg = {}; render(); refresh(); return; }   // show the screen at once, fresh data fills in a moment later
   if (a === 'more') {
-    return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
+    return openSheet(`<div class="drawer"><div class="row between"><div class="row"><img src="/logo.png?v=b" width="42" height="42" style="border-radius:12px" alt=""><div><h2 style="margin:0;font-size:20px">BROTHERHOOD</h2><small class="mute">${esc(P.boot?.branch?.name || '')} · ${esc(P.me.name)}</small></div></div><button class="ghost sm" data-a="closesheet">Close</button></div><hr>
       ${[['dashboard', 'grid', 'Dashboard'], ['pos', 'pos', 'Point of Sale'], ['queue', 'users', 'Walk-in Queue'], ['expenses', 'wallet', 'Expenses'], ['appts', 'calendar', 'Appointments'], ['customers', 'star', 'Customer Directory'], ['remit', 'wallet', 'Daily Sales Remittance'], ['release', 'tag', 'Release Pay'], ['problems', 'tag', 'Report a Problem'], ['inbox', 'users', 'Inbox'], ['checklist', 'doc', 'Daily Checklist'], ['leave', 'calendar', 'Leave Requests'], ['myperf', 'star', 'My Performance & Payslips'], ['attendance', 'clock', 'Barber Attendance'], ['reading', 'doc', 'Sales Reading']].filter(([v]) => canOpen(v)).map(([v, i, l]) => `<a href="#" data-a="drawergo" data-v="${v}">${ic(i)}${l}</a>`).join('')}
       <a href="#" data-a="logout" style="color:var(--bad)">${ic('logout')}Logout</a></div>`);
   }

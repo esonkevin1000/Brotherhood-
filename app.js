@@ -10,6 +10,9 @@ const ago = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso
 // ---------- state ----------
 let S = { shop: 'Brotherhood', me: null, branches: [], chairs: [], staff: [], categories: [], items: [], discounts: [], users: [] };
 let token = ''; try { token = localStorage.getItem('bp.token') || ''; } catch (e) { }
+// partner shops log in with their shop code; Brotherhood leaves it blank
+let orgCode = ''; try { orgCode = localStorage.getItem('bp.org') || ''; } catch (e) { }
+const masterToken = () => { try { return localStorage.getItem('bp.master') || ''; } catch (e) { return ''; } };
 let loggedIn = false, loadErr = '';
 const ui = { navQ: '', pg: {}, view: 'dashboard', branch: 'all', from: today(), to: today(), rep: null, live: null, audit: [], bk: [], bf: today(), bt: addDays(today(), 7), cust: { q: '', page: 1, rows: [], total: 0, tier: '' }, settings: null, rp: 'today', reviews: [], picked: new Set(), navClosed: new Set((() => { try { return JSON.parse(localStorage.getItem('navClosed') || '[]'); } catch { return []; } })()) };
 const modal = document.getElementById('modal');
@@ -17,7 +20,7 @@ const openModal = h => { modal.innerHTML = h; if (!modal.open) modal.showModal()
 const closeModal = () => modal.close();
 
 async function api(method, url, body) {
-  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(!token && orgCode && (url === '/api/login' || url === '/api/public/login-hint') ? { 'x-org': orgCode } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && url !== '/api/login') { loggedIn = false; token = ''; render(); throw new Error(j.error || 'Login required'); }
   if (!r.ok) throw new Error(j.error || 'Request failed');
@@ -39,7 +42,7 @@ async function loadView() {
     else if (v === 'exp') ui.exp = await api('GET', `/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}`);
     else if (v === 'remit') ui.remit = await api('GET', `/api/remittances?${qs()}&status=${ui.rstatus || ''}`);
     else if (v === 'activity') ui.audit = await api('GET', '/api/audit');
-    else if (v === 'settings') ui.settings = await api('GET', '/api/settings');
+    else if (v === 'settings') { ui.settings = await api('GET', '/api/settings'); ui.orgs = S.me?.role === 'owner' && !S.org ? await api('GET', '/api/orgs').catch(() => []) : null; }
     else if (v === 'reviews') ui.reviews = await api('GET', '/api/reviews');
     else if (v === 'bookings') ui.bk = await api('GET', `/api/bookings?${qs()}`);
   } catch (e) { if (loggedIn) alert(e.message); }
@@ -93,9 +96,10 @@ function renderBase() {
   document.getElementById('mtop').hidden = true;
   if (!loggedIn) {
     nav.style.display = 'none';
-    view.innerHTML = `<div class="online card"><img class="logo" src="/logo.png" alt=""><h2>${esc(S.shop)}</h2><p class="mute" style="text-align:center;margin:-6px 0 6px">Back office login</p><form data-form="login">
+    view.innerHTML = `<div class="online card"><img class="logo" src="/logo.png?v=b" alt=""><h2>${esc(S.shop)}</h2><p class="mute" style="text-align:center;margin:-6px 0 6px">Back office login</p><form data-form="login">
       <label>Username ${ui.ownerNamed ? '' : '<span class="mute">(owner: leave blank)</span>'}</label><input name="username" autocapitalize="none" autocomplete="username">
       <label>Password</label><input type="password" name="password" autocomplete="current-password" required>
+      <label>Shop code <span class="mute">(partner shops only)</span></label><input name="org" autocapitalize="none" autocomplete="organization" value="${esc(orgCode)}" placeholder="Leave blank for Brotherhood">
       <p id="err" style="color:var(--bad);min-height:20px">${esc(loadErr === 'Login required' ? '' : loadErr)}</p><button class="btn" style="width:100%;justify-content:center;padding:12px">Login</button></form></div>`;
     return;
   }
@@ -106,13 +110,13 @@ function renderBase() {
   }
   nav.style.display = '';
   const on = k => ui.view === k ? 'on' : '';
-  nav.innerHTML = `<div class="brand"><img src="/logo.png" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
+  nav.innerHTML = `<div class="brand"><img src="/logo.png?v=b" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
     <button data-act="bell" style="background:${ui.notif && ui.notif.total ? '#fff1f2' : ''};color:${ui.notif && ui.notif.total ? '#e5384a' : ''};font-weight:700">🔔 Notifications${ui.notif && ui.notif.total ? ` <span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${ui.notif.total}</span>` : ''}</button>
     <input id="navq" type="search" placeholder="Search pages…" autocomplete="off" value="${esc(ui.navQ || '')}">
     <div id="navgroups">${navGroups(on)}</div>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { mb.textContent = ui.notif && ui.notif.total ? '🔔 ' + ui.notif.total : '🔔'; mb.style.color = ui.notif && ui.notif.total ? '#e5384a' : ''; }
-  view.innerHTML = branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
+  view.innerHTML = orgBar() + branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
   paginateTables();
 }
 // Branch picker shown at the top of every page (not only in the side menu), so it is one tap on phones too
@@ -245,7 +249,7 @@ function vChk() {
 function payslipHtml(x) {
   const row = (l, v, b, c) => `<tr><td${c ? ` style="color:${c}"` : ''}>${l}</td><td style="text-align:right">${b ? '<b>' + v + '</b>' : v}</td></tr>`, hd = t => `<tr><td colspan="2" style="padding-top:12px"><b>${t}</b></td></tr>`;
   const adv = x.advanceItems, ded = x.deductionItems, cats = ['Cash advance', 'Partial salary release', 'Other authorized deduction'];
-  return `<div style="text-align:center"><img src="/logo.png" width="76" style="border-radius:50%"><h2 style="margin:6px 0 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
+  return `<div style="text-align:center"><img src="/logo.png?v=b" width="76" style="border-radius:50%"><h2 style="margin:6px 0 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
     <p><b>${esc(x.staffName)}</b><br>${esc(x.branchName)}<br>Pay period: ${esc(x.period)} (${x.days.length} day${x.days.length > 1 ? 's' : ''})<br>Paid on ${esc(x.paidAt.slice(0, 10))}</p>
     <table style="width:100%;border-collapse:collapse">
     ${hd('EARNINGS')}${x.dayItems.map(d => row('Commission · ' + esc(d.date), peso(d.commission))).join('')}${x.topup ? row('Daily allowance top-up', peso(x.topup)) : ''}${x.lunch ? row('Free lunch allowance', peso(x.lunch)) : ''}${x.earningItems.map(e => row(esc(e.kind) + ': ' + esc(e.note), peso(e.amount))).join('')}${row('GROSS EARNINGS', peso(x.gross), 1)}
@@ -403,10 +407,32 @@ function vCustomers() {
   <div class="row" style="margin-top:12px;justify-content:center"><button class="btn ghost sm" data-act="page" data-n="-1" ${c.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span class="mute">Page ${c.page} / ${pages}</span><button class="btn ghost sm" data-act="page" data-n="1" ${c.page >= pages ? 'disabled' : ''}>Next ›</button></div>`;
 }
 const MOD_LABEL = { dashboard: 'Dashboard', pos: 'Point of Sale (create sales, take payments)', bookings: 'Bookings (appointments)', queue: 'Walk-in Queue (seat customers)', expenses: 'Expenses', attendance: 'Barber Attendance (time in / out, breaks)', reading: 'Sales Reading (shift, cash, Z-reading)', customers: 'Customer Directory (look up points and tiers)' };
+// partner shop banner, and the Brotherhood owner's list of partner shops
+function orgBar() {
+  if (!S.org) return '';
+  return `<div class="card row" style="margin-bottom:12px;align-items:center;gap:10px;border-color:#c7d7fe;background:#f3f6ff"><span style="font-size:20px">🤝</span><div style="flex:1;min-width:180px"><b>${esc(S.org.name)}</b> <span class="mute">· partner shop · code <b>${esc(S.org.code)}</b></span><div class="mute" style="font-size:12px">${masterToken() ? 'You are viewing this partner shop as the Brotherhood owner. Its data is separate from Brotherhood.' : 'Your data is private to your shop.'}</div></div>${masterToken() ? '<button class="btn sm" data-act="leaveorg">Back to Brotherhood</button>' : ''}</div>`;
+}
+function partnersCard() {
+  if (S.org || S.me.role !== 'owner') return '';
+  const rows = ui.orgs || [];
+  return `<div class="card overflow" style="margin-bottom:14px"><h3>Partner shops</h3>
+    <p class="mute" style="font-size:13px;margin:0 0 10px">Other barbershops that use the system. Each partner has its <b>own separate data</b>: they never see Brotherhood's sales, staff or customers, and you never mix their numbers into yours. They log in with their <b>shop code</b>, their owner username and password.</p>
+    ${rows.length ? `<table><tr><th>Shop</th><th>Code</th><th>Owner login</th><th>Branches</th><th>Barbers</th><th>Sales (30 days)</th><th>Status</th><th></th></tr>${rows.map(o => `<tr><td><b>${esc(o.name)}</b></td><td>${esc(o.code)}</td><td>${esc(o.ownerUser)}</td><td>${o.branches}</td><td>${o.barbers}</td><td>${peso(o.sales30)}</td><td>${o.active ? '<span class="tag done">Active</span>' : '<span class="tag">Paused</span>'}</td>
+      <td style="white-space:nowrap"><button class="btn sm" data-act="orgenter" data-id="${o.id}">Open back office</button> <button class="btn ghost sm" data-act="orgreset" data-id="${o.id}">New password</button> <button class="btn ghost sm" data-act="orgpause" data-id="${o.id}" data-on="${o.active ? 0 : 1}">${o.active ? 'Pause' : 'Resume'}</button></td></tr>`).join('')}</table>` : '<p class="mute">No partner shops yet.</p>'}
+    <h4 style="margin:16px 0 6px">Add a partner shop</h4>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+      <div><label>Shop name</label><input id="og-name" placeholder="e.g. Kingsman Cuts"></div>
+      <div><label>Shop code (for login)</label><input id="og-code" placeholder="e.g. kingsman" autocapitalize="none"></div>
+      <div><label>First branch name</label><input id="og-branch" placeholder="e.g. Calamba"></div>
+      <div><label>Owner username</label><input id="og-user" placeholder="e.g. juan" autocapitalize="none" autocomplete="off"></div>
+    </div>
+    <p class="mute" style="font-size:12px;margin:8px 0 10px">A temporary password is made for the owner and shown once. Give it to them privately; they can change it in their Settings.</p>
+    <button class="btn" data-act="neworg">Add partner shop</button></div>`;
+}
 function vSettings() {
   const s = ui.settings; if (!s) return '<p class="mute">Loading…</p>';
   const e = s.email, owner = S.me.role === 'owner';
-  return `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+  return `${partnersCard()}<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
     <div class="card"><h3>Attendance</h3><label class="chk" style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:500"><input type="checkbox" id="at-photo" ${s.attPhoto ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Require a selfie for every time in and time out</label>
       <label class="chk" style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:500"><input type="checkbox" id="at-geo" ${s.attGeo ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Also record the location (optional, needs location permission on the phone)</label>
       <p class="mute" style="font-size:12px;margin:8px 0 10px">Tell your staff that selfies and location are recorded for attendance only. Photos are encrypted and visible only to you and your branch staff. Attendance works without internet: it is saved on the phone and uploaded automatically.</p><button class="btn sm" data-act="saveatt">Save</button></div>
@@ -420,8 +446,10 @@ function vSettings() {
       <label>New owner username</label><input id="ou-name" value="${esc(s.ownerUser || '')}" placeholder="e.g. kevin" autocapitalize="none" autocomplete="off">
       <label>Current owner password (to confirm)</label><input id="ou-pw" type="password" autocomplete="current-password">
       <p class="mute" style="font-size:12px;margin:8px 0 10px">3 to 30 characters: letters, numbers, dot, dash or underscore. After saving, log in with this username and your usual owner password. Leave the username blank to go back to a blank username. The owner password itself is set in the Railway variable ADMIN_PASSWORD.</p>
-      <button class="btn sm" data-act="saveowner">Save username</button></div>` : ''}
-    <div class="card"><h3>Email (welcome and promos)</h3>
+      <button class="btn sm" data-act="saveowner">Save username</button>${S.org ? `<h4 style="margin:18px 0 6px">Change password</h4>
+      <label>Current password</label><input id="op-cur" type="password" autocomplete="current-password"><label>New password (8+ characters)</label><input id="op-new" type="password" autocomplete="new-password">
+      <button class="btn sm" data-act="saveownerpw" style="margin-top:10px">Change password</button>` : ''}</div>` : ''}
+    <div class="card" style="${S.org ? 'display:none' : ''}"><h3>Email (welcome and promos)</h3>
       <p style="margin:0 0 8px">${e.configured ? '<b style="color:var(--ok)">● Email service is connected</b>' : '<b style="color:var(--bad)">● Email service is not connected yet</b>'}</p>
       <p class="mute" style="font-size:13px;margin:0 0 10px">${e.configured ? `Sending from: <b>${esc(e.from)}</b><br>Unsubscribe links point to: ${esc(e.baseUrl)}` : 'Until it is connected, welcome emails wait in the queue (nothing is lost) and are sent once it is set up. Add RESEND_API_KEY and EMAIL_FROM in the Railway variables.'}</p>
       <label>Send a test email</label><div class="row" style="flex-wrap:nowrap"><input id="testto" type="email" placeholder="your email" style="flex:1"><button class="btn" data-act="testmail">Send test</button></div></div>
@@ -434,7 +462,7 @@ function vSettings() {
       <td><input type="number" min="0" id="bs-${b.id}-grace" value="${b.graceMins ?? 10}" style="width:90px"></td><td><input type="number" min="0" max="100" step="any" id="bs-${b.id}-pct" value="${b.defaultPct ?? ''}" placeholder="40" style="width:90px"></td>
       <td><button class="btn sm" data-act="savebranch" data-id="${b.id}">Save</button> <button class="btn ghost sm" data-act="applycomm" data-id="${b.id}">Apply to all barbers</button></td></tr>`).join('')}</table></div>
 
-  <div class="card" style="margin-top:14px"><h3>Booking site: branch pictures and contact details</h3>
+  <div class="card" style="margin-top:14px${S.org ? ';display:none' : ''}"><h3>Booking site: branch pictures and contact details</h3>
     <p class="mute" style="font-size:13px;margin:0 0 12px">This is what customers see on your booking page (<b>${esc(location.origin)}/book</b>). Upload a picture of the shop front so people can find it, then add the phone number, address and a Google Maps link. Click <b>Save</b> on each branch.</p>
     <div class="notice" style="margin:0 0 12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#f7f7f8;font-size:13px"><b>Google reviews:</b> ${s.google && s.google.configured ? '<span style="color:var(--ok)">Live ratings are ON.</span> The booking site shows each branch\'s Google rating and latest reviews.' : 'Live ratings are OFF (no <code>GOOGLE_PLACES_API_KEY</code> set on the server). The booking site still shows <b>Read</b> and <b>Write a review</b> buttons that open Google.'}<br>Paste each branch's <b>Place ID</b> (find it with Google's "Place ID Finder") or its Google review link. Leave blank to hide the Google block for that branch.</div>
     <div class="bgrid">${S.branches.map(b => `<div class="binfo"><div class="row" style="flex-wrap:nowrap;gap:14px;align-items:flex-start">
@@ -458,7 +486,7 @@ function vSettings() {
     <p class="mute" style="font-size:12px">This is only a draft. Have a lawyer or compliance officer review it so it follows the Data Privacy Act (RA 10173).</p>
     <div class="row"><button class="btn" data-act="saveterms">Save terms</button>${s.customTerms ? '<button class="btn ghost" data-act="resetterms">Restore default</button>' : ''}</div></div>
 
-  <div class="card overflow" style="margin-top:14px"><h3>Emails sent</h3><table><tr><th>When</th><th>To</th><th>Type</th><th>Status</th><th>Tries</th><th>Error</th></tr>
+  <div class="card overflow" style="margin-top:14px${S.org ? ';display:none' : ''}"><h3>Emails sent</h3><table><tr><th>When</th><th>To</th><th>Type</th><th>Status</th><th>Tries</th><th>Error</th></tr>
     ${s.log.map(l => `<tr><td>${new Date(l.createdAt).toLocaleString('en-PH')}</td><td>${esc(l.toAddr)}</td><td>${esc(l.kind)}</td><td><span class="tag ${l.status === 'sent' ? 'done' : l.status === 'pending' ? 'booked' : ''}">${esc(l.status)}</span></td><td>${l.attempts}</td><td class="mute">${esc(l.error)}</td></tr>`).join('') || '<tr><td colspan="6" class="mute">No emails yet.</td></tr>'}</table></div>
 
   ${owner ? `<div class="card" style="margin-top:14px;border-color:#f2b8bf"><h3 style="color:var(--bad)">Reset data</h3>
@@ -574,7 +602,7 @@ document.addEventListener('click', async e => {
   if (act === 'slipprint_old') {
     const x = ui.slip.rows[+d.i], w = window.open('', '_blank'); if (!w) return alert('Allow pop-ups to print the payslip.');
     const row = (l, v, b) => `<tr><td>${l}</td><td style="text-align:right">${b ? '<b>' + v + '</b>' : v}</td></tr>`;
-    w.document.write(`<!doctype html><title>Payslip</title><body style="font:14px Arial;max-width:420px;margin:24px auto"><div style="text-align:center"><img src="/logo.png" width="80" style="border-radius:50%"><h2 style="margin:6px 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
+    w.document.write(`<!doctype html><title>Payslip</title><body style="font:14px Arial;max-width:420px;margin:24px auto"><div style="text-align:center"><img src="/logo.png?v=b" width="80" style="border-radius:50%"><h2 style="margin:6px 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
       <p><b>${esc(x.staffName)}</b><br>${esc(x.branchName)}<br>Paid on ${esc(x.paidAt.slice(0, 10))} · Days: ${esc(x.days[0])}${x.days.length > 1 ? ' to ' + esc(x.days[x.days.length - 1]) : ''} (${x.days.length} day${x.days.length > 1 ? 's' : ''})</p>
       <table style="width:100%;border-collapse:collapse">${row('Commission', peso(x.commission))}${row('Daily allowance top-up', peso(x.topup))}${x.lunch ? row('Free lunch allowance', peso(x.lunch)) : ''}${row('Gross pay', peso(x.gross), 1)}${row('Less: advances taken during the day', '−' + peso(x.advance))}${x.deductionItems.map(d => row('Less: release pay installment ' + d.seq + ' (' + esc(d.type) + ')', '−' + peso(d.amount))).join('')}${row('NET PAY', peso(x.net), 1)}</table>
       <p style="font-size:11px;color:#666;margin-top:24px">Prepared by ${esc(x.paidBy || '')}. Deductions were authorized in writing by the employee.</p><script>window.print()<\/script>`);
@@ -658,7 +686,7 @@ document.addEventListener('click', async e => {
     try { await api('PUT', '/api/remittances/' + d.id + '/review', { action, note }); await loadView(); render(); } catch (x) { alert(x.message); } return;
   }
   if (act === 'viewid') { e.preventDefault(); return showIdPhoto(d.id); }
-  if (act === 'logout') { token = ''; try { localStorage.removeItem('bp.token'); } catch (x) { } loggedIn = false; return render(); }
+  if (act === 'logout') { token = ''; try { localStorage.removeItem('bp.token'); localStorage.removeItem('bp.master'); } catch (x) { } loggedIn = false; return render(); }
   if (act === 'edit') return form(d.kind, d.id);
   if (act === 'del') { if (confirm('Are you sure?')) mut(async () => { const r = await api('DELETE', `/api/${d.kind}/${d.id}`); if (r.deactivated) alert('This record has history, so it was deactivated instead of deleted.'); }); return; }
   if (act === 'export') return download(`/api/reports/${d.name}?${qs()}&format=csv`, `${d.name}-${ui.from}_${ui.to}.csv`);
@@ -687,6 +715,28 @@ document.addEventListener('click', async e => {
   if (act === 'saveaccess') {
     const perms = { cashier: [], barber: [] }; document.querySelectorAll('[data-perm]').forEach(c => { if (c.checked) { const [r, m] = c.dataset.perm.split(':'); perms[r].push(m); } });
     try { await api('PUT', '/api/settings', { perms }); await loadView(); render(); alert('Access saved.'); } catch (x) { alert(x.message); } return;
+  }
+  if (act === 'neworg') {
+    const v = k => document.getElementById('og-' + k).value.trim(), body = { name: v('name'), code: v('code').toLowerCase(), branch: v('branch'), ownerUser: v('user').toLowerCase() };
+    try { const r = await api('POST', '/api/orgs', body); await loadView(); render(); openModal(`<h3>Partner shop added</h3><p>Give these to the owner of <b>${esc(r.name)}</b> (privately):</p><table><tr><td>Back office</td><td><b>${esc(location.origin)}/backend</b></td></tr><tr><td>Shop code</td><td><b>${esc(r.code)}</b></td></tr><tr><td>Username</td><td><b>${esc(r.ownerUser)}</b></td></tr><tr><td>Temporary password</td><td><b style="font-family:monospace;font-size:16px">${esc(r.password)}</b></td></tr></table><p class="mute" style="font-size:12px">This password is shown only now. Ask them to change it in Settings after logging in.</p><button class="btn" data-act="close">Done</button>`); } catch (x) { alert(x.message); } return;
+  }
+  if (act === 'orgreset') {
+    const o = (ui.orgs || []).find(x => x.id === d.id); if (!o || !confirm(`Make a new password for ${o.name}? Their old password stops working.`)) return;
+    try { const r = await api('POST', `/api/orgs/${d.id}/reset`); openModal(`<h3>New password for ${esc(o.name)}</h3><p>Shop code <b>${esc(o.code)}</b>, username <b>${esc(r.ownerUser)}</b></p><p>Temporary password: <b style="font-family:monospace;font-size:16px">${esc(r.password)}</b></p><p class="mute" style="font-size:12px">Shown only now.</p><button class="btn" data-act="close">Done</button>`); } catch (x) { alert(x.message); } return;
+  }
+  if (act === 'orgpause') {
+    const o = (ui.orgs || []).find(x => x.id === d.id); if (!o || !confirm(d.on === '1' ? `Resume ${o.name}? Their staff can log in again.` : `Pause ${o.name}? Nobody from that shop can log in until you resume it. Their data is kept.`)) return;
+    try { await api('PUT', `/api/orgs/${d.id}`, { active: d.on === '1' }); await loadView(); render(); } catch (x) { alert(x.message); } return;
+  }
+  if (act === 'orgenter') {
+    try { const r = await api('POST', `/api/orgs/${d.id}/enter`); try { localStorage.setItem('bp.master', token); } catch (x) { } token = r.token; try { localStorage.setItem('bp.token', token); } catch (x) { } ui.view = 'dashboard'; ui.branch = 'all'; await load(); } catch (x) { alert(x.message); } return;
+  }
+  if (act === 'leaveorg') {
+    const m = masterToken(); if (!m) return; token = m; try { localStorage.setItem('bp.token', token); localStorage.removeItem('bp.master'); } catch (x) { } ui.view = 'settings'; ui.branch = 'all'; await load(); return;
+  }
+  if (act === 'saveownerpw') {
+    const password = document.getElementById('op-cur').value, newPassword = document.getElementById('op-new').value;
+    try { const r = await api('PUT', '/api/settings/owner-password', { password, newPassword }); token = r.token; try { localStorage.setItem('bp.token', token); } catch (x) { } alert('Password changed.'); await loadView(); render(); } catch (x) { alert(x.message); } return;
   }
   if (act === 'saveowner') {
     const username = document.getElementById('ou-name').value.trim(), password = document.getElementById('ou-pw').value;
@@ -775,6 +825,7 @@ document.addEventListener('submit', e => {
   const f = e.target; if (!f.dataset.form) return; e.preventDefault();
   const fd = new FormData(f), kind = f.dataset.form, id = f.dataset.id, err = f.querySelector('#err');
   if (kind === 'login') {
+    orgCode = String(fd.get('org') || '').trim().toLowerCase(); try { if (orgCode) localStorage.setItem('bp.org', orgCode); else localStorage.removeItem('bp.org'); } catch (x) { }
     api('POST', '/api/login', { username: fd.get('username'), password: fd.get('password') })
       .then(j => { token = j.token; try { localStorage.setItem('bp.token', token); } catch (x) { } return load(); }).catch(x => { if (err) err.textContent = x.message; });
     return;

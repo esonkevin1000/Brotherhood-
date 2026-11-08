@@ -2,7 +2,7 @@
 // Mounted from server.js under /api/bh/*. Shares the same database, staff, branches, bookings and reviews as the POS.
 import { loadVapid, sendPush, knownPushHost } from './bh-push.js';
 export function mountBH(c) {
-  const { db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor,
+  const { inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor,
     whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName, getSetting, setSetting, queueEmail, emailReady, baseUrl, esc: escHtml, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
 
   // ---------- schema ----------
@@ -102,7 +102,8 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   setInterval(() => hits.clear(), 3600e3).unref();
 
   // in-app notifications (deduplicated by user + kind + ref)
-  const notify = (userId, kind, text, link, ref, push = true) => {
+  const notify = (...a) => inMain(() => notifyMain(...a));
+  const notifyMain = (userId, kind, text, link, ref, push = true) => {
     if (!userId) return;
     try { const r = run('insert or ignore into bh_notifs(id,userId,kind,text,link,ref,createdAt,readAt) values(?,?,?,?,?,?,?,null)', uid(), userId, kind, String(text).slice(0, 200), link || '', ref || uid(), nowISO()); if (push && Number(r.changes) > 0) pushUser(userId, kind, String(text).slice(0, 200), link, ref); } catch { }
   };
@@ -209,12 +210,14 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const JOB_MS = +process.env.BH_JOB_MS || 600000;
   setInterval(() => { try { runJobs(); } catch (e) { console.error('bh jobs:', e.message); } try { runPushJobs(); } catch (e) { console.error('bh push jobs:', e.message); } }, JOB_MS).unref(); setTimeout(() => { try { runJobs(); } catch { } try { runPushJobs(); } catch { } }, Math.min(20000, JOB_MS)).unref();
   const unreadOf = id => one('select count(*) n from bh_notifs where userId=? and readAt is null', id).n;
-  const userOf = req => {
+  const userOf = req => inMain(() => {
     const o = readToken((req.headers.authorization || '').replace(/^Bearer /, ''));
-    if (!o || !String(o.u).startsWith('c:')) return null;
+    if (!o || !String(o.u).startsWith('c:') || o.o) return null;
     const u = get('bh_users', String(o.u).slice(2));
     return u && u.passHash.slice(-8) === o.v ? u : null;
-  };
+  });
+  // run a shop page in the database that holds it (Brotherhood or a partner shop)
+  const atShop = (kind, id, fn) => { const o = ownerOf(kind, id); return o ? inOrg(o, () => fn(o)) : inMain(() => fn(null)); };
   const needUser = req => userOf(req) || bad(401, 'Please log in');
   const tokenOf = u => makeToken('c:' + u.id, u.passHash.slice(-8));
   const pubUser = u => ({ id: u.id, name: u.name, email: u.email, phone: u.phone, city: u.city || '', bio: u.bio || '', styles: jp(u.styles), photo: u.photo || '', cover: u.cover || '' });
@@ -252,7 +255,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const handleBH = async function (req, res, p, method, q, ip) {
     const sub = p.slice('/api/bh'.length);
 
-    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood', contact: String(process.env.CONTACT_EMAIL || '').trim().slice(0, 120), stats: { shops: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n } });
+    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood', contact: String(process.env.CONTACT_EMAIL || '').trim().slice(0, 120), stats: { shops: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n }, partners: activeOrgs().length });
     // ----- accounts -----
     if (sub === '/signup' && method === 'POST') {
       if (tooMany(ip, 'su', 5, 3600e3)) bad(429, 'Too many sign-ups from this device. Try again later.');
@@ -357,6 +360,16 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
 
     // ----- discover -----
     if (sub === '/discover' && method === 'GET') {
+      const parts = [inMain(() => discoverIn(null)), ...activeOrgs().map(o => inOrg(o, () => discoverIn(o)))], main = parts[0];
+      if (parts.length === 1) { const { cmpB, ...out } = main; return send(res, 200, out); }
+      const styleN = new Map(), shopSvc = {};
+      for (const p of parts) for (const t of p.styleTiles) { const x = styleN.get(t.name); if (x) { x.n += t.n; x.image ||= t.image; } else styleN.set(t.name, { ...t }); }
+      for (const p of parts.slice(1)) for (const s of p.shops) shopSvc[s.id] = p.services;
+      return send(res, 200, { shops: parts.flatMap(p => p.shops), barbers: parts.flatMap(p => p.barbers).sort(main.cmpB), specialties: [...new Set(parts.flatMap(p => p.specialties))].sort(),
+        styleTiles: [...styleN.values()].sort((a, b) => b.n - a.n), pkgTiles: main.pkgTiles.map(t => { const all_ = parts.map(p => p.pkgTiles.find(x => x.pkg === t.pkg)).filter(x => x && x.n); return { pkg: t.pkg, n: all_.reduce((a, x) => a + x.n, 0), from: all_.length ? Math.min(...all_.map(x => x.from)) : 0 }; }),
+        services: main.services, shopSvc });
+    }
+    function discoverIn(brand) {
       const brs = all('select * from branches order by rowid'), bm = new Map(brs.map(b => [b.id, b])), rm = ratingMap(), pc = portCount(), brr = branchRatings();
       const mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));   // weeks run Monday to Sunday
       const ex = {
@@ -377,19 +390,20 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       if (spec) barbers = barbers.filter(b => b.specialties.some(x => x.toLowerCase() === spec));
       if (q.available === '1') barbers = barbers.filter(b => b.slotsToday > 0);
       if (+q.minRating > 0) barbers = barbers.filter(b => b.rating >= +q.minRating);
-      barbers.sort(q.sort === 'rating' ? (a, b) => b.rating - a.rating || b.reviews - a.reviews : q.sort === 'experience' ? (a, b) => b.years - a.years : q.sort === 'name' ? (a, b) => a.name.localeCompare(b.name)
+      const cmpB = (q.sort === 'rating' ? (a, b) => b.rating - a.rating || b.reviews - a.reviews : q.sort === 'experience' ? (a, b) => b.years - a.years : q.sort === 'name' ? (a, b) => a.name.localeCompare(b.name)
         : q.sort === 'trending' ? (a, b) => b.weekCuts - a.weekCuts || b.score - a.score : q.sort === 'soonest' ? (a, b) => (a.nextSlot || '99:99').localeCompare(b.nextSlot || '99:99') || b.score - a.score
-        : q.sort === 'cheapest' ? (a, b) => priceOf(a) - priceOf(b) || b.score - a.score : (a, b) => b.score - a.score);
+        : q.sort === 'cheapest' ? (a, b) => priceOf(a) - priceOf(b) || b.score - a.score : (a, b) => b.score - a.score); barbers.sort(cmpB);
+      if (brand) for (const b of barbers) b.brand = brand.name;
       const shops = brs.filter(b => !bid || b.id === bid).map(b => ({ id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '',
         photo: b.photo || siteCover(b.name) || '', lat: b.lat ?? null, lng: b.lng ?? null, rating: brr.get(b.id)?.a || 0, reviews: brr.get(b.id)?.n || 0, barbers: all('select count(*) n from staff where branchId=? and active=1', b.id)[0].n }))
-        .filter(s => !term || (s.name + ' ' + s.address).toLowerCase().includes(term) || barbers.some(x => x.branchId === s.id));
+        .filter(s => !term || (s.name + ' ' + s.address + ' ' + (brand?.name || '')).toLowerCase().includes(term) || barbers.some(x => x.branchId === s.id)).map(s => brand ? { ...s, brand: brand.name } : s);
       const specialties = [...new Set(all('select specialties from bh_barber').flatMap(r => jp(r.specialties)))].sort();
       const styleTiles = all("select p.style name, count(*) n, (select p2.url from bh_portfolio p2 where p2.style=p.style order by p2.createdAt desc limit 1) image from bh_portfolio p join staff s on s.id=p.staffId and s.active=1 where p.style<>'' group by p.style order by n desc");
       const pkgTiles = PKG_IDS.map(k => { const rows = all('select o.price from bh_offers o join staff s on s.id=o.staffId and s.active=1 where o.pkg=?', k); return { pkg: k, n: rows.length, from: rows.length ? Math.min(...rows.map(r => r.price)) : 0 }; });
-      return send(res, 200, { shops, barbers, specialties, styleTiles, pkgTiles, services: servicesList() });
+      return { shops, barbers, specialties, styleTiles, pkgTiles, services: servicesList(), cmpB };
     }
     const bm = sub.match(/^\/barbers\/(\w+)$/);
-    if (bm && method === 'GET') {
+    if (bm && method === 'GET') return atShop('staff', bm[1], org => {
       const s = get('staff', bm[1]); if (!s || !s.active) bad(404, 'Barber not found');
       const brs = new Map(all('select * from branches').map(b => [b.id, b])), card = barberCard(s, ratingMap(), portCount(), brs), pr = one('select * from bh_barber where staffId=?', s.id) || {};
       const br = brs.get(s.branchId) || {};
@@ -398,20 +412,20 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       // public, aggregate-only numbers (no revenue): completed cuts, clients served, rebook rate, followers, weekly rank and level
       const pOrders = all("select customerId, customerName from orders where status='paid' and barberId=?", s.id), byClient = new Map();
       for (const o of pOrders) { const k = o.customerId || ('n:' + String(o.customerName || '').toLowerCase()); if (k !== 'n:') byClient.set(k, (byClient.get(k) || 0) + 1); }
-      const stats = { cuts: pOrders.length, clients: byClient.size, rebook: byClient.size ? Math.round([...byClient.values()].filter(n => n > 1).length / byClient.size * 100) : 0, followers: one('select count(*) n from bh_favorites where staffId=?', s.id).n };
+      const stats = { cuts: pOrders.length, clients: byClient.size, rebook: byClient.size ? Math.round([...byClient.values()].filter(n => n > 1).length / byClient.size * 100) : 0, followers: inMain(() => one('select count(*) n from bh_favorites where staffId=?', s.id).n) };
       const mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));   // weeks run Monday to Sunday
       const activeIds = new Set(all('select id from staff where active=1').map(x => x.id)), ranked = all("select barberId, count(*) n from orders where status='paid' and date>=? and barberId<>'' group by barberId order by n desc", dOf(mon)).filter(x => activeIds.has(x.barberId));
       const ri = ranked.findIndex(x => x.barberId === s.id), rankWeek = ri >= 0 ? { rank: ri + 1, of: ranked.length, cuts: ranked[ri].n } : null;
       const level = stats.cuts >= 1000 ? 'Legend' : stats.cuts >= 300 ? 'Master Barber' : stats.cuts >= 50 ? 'Pro Barber' : 'Rising Barber';
       let nextFree = null; for (let i = 0; i < 7 && !nextFree; i++) { const d = dOf(new Date(Date.now() + i * 864e5)); try { const sl = slotsFor(s.branchId, d, s.id, 30); if (sl.length) nextFree = { date: d, time: sl[0] }; } catch { } }
-      const taggedPosts = all("select p.id, p.text, p.imageUrl image, p.createdAt, (select count(*) from bh_likes l where l.postId=p.id) likes from bh_posts p where p.staffId=? and p.hidden=0 order by p.createdAt desc limit 30", s.id);
+      const taggedPosts = inMain(() => all("select p.id, p.text, p.imageUrl image, p.createdAt, (select count(*) from bh_likes l where l.postId=p.id) likes from bh_posts p where p.staffId=? and p.hidden=0 order by p.createdAt desc limit 30", s.id));
       return send(res, 200, { stats, rankWeek, nextFree, posts: taggedPosts, certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc limit 40', s.id), barber: { ...card, level, followers: stats.followers, cover: pr.cover || '', bio: pr.bio || '', instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '' },
-        branch: { id: br.id, name: br.name, photo: br.photo || siteCover(br.name) || '', address: br.address || '', phone: br.phone || '', openTime: br.openTime || '09:00', closeTime: br.closeTime || '21:00', mapUrl: br.mapUrl || '' },
+        branch: { brand: org?.name || '', id: br.id, name: br.name, photo: br.photo || siteCover(br.name) || '', address: br.address || '', phone: br.phone || '', openTime: br.openTime || '09:00', closeTime: br.closeTime || '21:00', mapUrl: br.mapUrl || '' },
         portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc limit 60', s.id), reviews,
-        services: servicesList(), favorite: !!(u && one('select 1 x from bh_favorites where userId=? and staffId=?', u.id, s.id)) });
-    }
+        services: servicesList(), brand: org?.name || '', favorite: !!(u && inMain(() => one('select 1 x from bh_favorites where userId=? and staffId=?', u.id, s.id))) });
+    });
     const shm = sub.match(/^\/shops\/(\w+)$/);
-    if (shm && method === 'GET') {
+    if (shm && method === 'GET') return atShop('branches', shm[1], org => {
       const b = get('branches', shm[1]); if (!b) bad(404, 'Shop not found');
       const bm2 = new Map(all('select * from branches').map(x => [x.id, x])), rm = ratingMap(), pc = portCount(), rv = one('select count(*) n, avg(rating) a from reviews where branchId=?', b.id);
       const barbers = all('select * from staff where branchId=? and active=1', b.id).map(s => barberCard(s, rm, pc, bm2)).sort((x, y) => y.score - x.score);
@@ -421,11 +435,11 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const nowM = new Date().getHours() * 60 + new Date().getMinutes(), isOpen = nowM >= toMin(b.openTime || '09:00') && nowM < toMin(b.closeTime || '21:00');
       const live = { open: isOpen, waiting, cutting, onDuty, estWait: isOpen && onDuty ? Math.ceil(waiting / onDuty) * 30 : null };
       return send(res, 200, { live, shop: { id: b.id, name: b.name, address: b.address || '', phone: b.phone || '', openTime: b.openTime || '09:00', closeTime: b.closeTime || '21:00', mapUrl: b.mapUrl || '', lat: b.lat ?? null, lng: b.lng ?? null, photo: b.photo || siteCover(b.name) || '',
-        rating: rv.n ? Math.round(rv.a * 10) / 10 : 0, reviews: rv.n }, gallery: b.photo ? [b.photo, ...gallery.filter(g => g !== b.photo)] : gallery, barbers, reviews, services: servicesList() });
-    }
+        rating: rv.n ? Math.round(rv.a * 10) / 10 : 0, reviews: rv.n, brand: org?.name || '' }, gallery: b.photo ? [b.photo, ...gallery.filter(g => g !== b.photo)] : gallery, barbers: org ? barbers.map(x => ({ ...x, brand: org.name })) : barbers, reviews, services: servicesList() });
+    });
     const fm = sub.match(/^\/favorites\/(\w+)$/);
     if (fm && (method === 'PUT' || method === 'DELETE')) {
-      const u = needUser(req); if (!get('staff', fm[1])) bad(404, 'Barber not found');
+      const u = needUser(req); if (ownerOf('staff', fm[1]) === undefined) bad(404, 'Barber not found');
       if (method === 'PUT') run('insert or ignore into bh_favorites(userId,staffId,createdAt) values(?,?,?)', u.id, fm[1], nowISO()); else run('delete from bh_favorites where userId=? and staffId=?', u.id, fm[1]);
       return send(res, 200, { ok: true });
     }
@@ -436,12 +450,18 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const b = await readBody(req);
       // optional repeat: every 1, 2, 3, 4 or 6 weeks for 2 to 6 cuts in total; slots that are taken are skipped and reported
       const every = [1, 2, 3, 4, 6].includes(+b.repeatEvery) ? +b.repeatEvery : 0, count = every ? Math.max(2, Math.min(6, Math.round(+b.repeatCount) || 2)) : 1;
+      const org = ownerOf('branches', b.branchId); if (org === undefined) bad(400, 'Pick a shop');   // Brotherhood or a partner shop
+      if (org && b.promo) bad(400, 'Promo codes work only at Brotherhood shops');
       let pc = null; if (b.promo) pc = promoCheck(b.promo, b.itemIds, u.phone, u.email, u.id);   // checked first: a bad code stops the booking with a clear message
       const make = date => {
-        const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
-        run('update bookings set userId=? where id=?', u.id, x.id); if (x.customerId && !u.customerId) { run('update bh_users set customerId=? where id=?', x.customerId, u.id); u.customerId = x.customerId; }
-        notify(u.id, 'booking', `Booked: ${x.date} ${x.time} with ${x.staffName || 'any barber'} at ${x.branchName}`, '#/bookings', 'bk-' + x.id, false);
-        log({ name: 'App: ' + u.name }, 'booking', 'bookings', x.id, `${x.date} ${x.time} ${x.branchName}`); return x;
+        const at = () => {
+          const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
+          run('update bookings set userId=? where id=?', u.id, x.id); log({ name: 'App: ' + u.name }, 'booking', 'bookings', x.id, `${x.date} ${x.time} ${x.branchName}`); return x;
+        };
+        const x = org ? inOrg(org, at) : at();
+        if (!org && x.customerId && !u.customerId) { run('update bh_users set customerId=? where id=?', x.customerId, u.id); u.customerId = x.customerId; }   // loyalty links only to Brotherhood's customer records
+        notify(u.id, 'booking', `Booked: ${x.date} ${x.time} with ${x.staffName || 'any barber'} at ${org ? org.name + ' ' : ''}${x.branchName}`, '#/bookings', 'bk-' + x.id, false);
+        return x;
       };
       const bk = make(String(b.date || '')); hit(ip, 'bk'); const series = [];
       if (pc) { run('update bookings set promoCode=?, promoAmt=? where id=?', pc.promo.code, pc.amt, bk.id); bk.promo = { code: pc.promo.code, amt: pc.amt }; }   // only the first cut of a repeat series gets the promo
@@ -449,7 +469,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const d = dOf(new Date(new Date(bk.date + 'T00:00:00').getTime() + i * every * 7 * 864e5));
         try { const x = make(d); series.push({ date: x.date, time: x.time, ok: true, staff: x.staffName }); } catch (er) { series.push({ date: d, time: String(b.time), ok: false, reason: er.message }); }
       }
-      return send(res, 201, { ok: true, booking: { id: bk.id, date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, items: bk.items, total: bk.total, promo: bk.promo || null }, series });
+      return send(res, 201, { ok: true, booking: { id: bk.id, brand: org?.name || '', date: bk.date, time: bk.time, branch: org ? `${org.name} · ${bk.branchName}` : bk.branchName, staff: bk.staffName, items: bk.items, total: bk.total, promo: bk.promo || null }, series });
     }
     if (sub === '/promo/check' && method === 'GET') {
       const u = needUser(req); if (tooMany(ip, 'pc', 30, 3600e3)) bad(429, 'Too many tries. Please try again later.'); hit(ip, 'pc');
@@ -458,33 +478,38 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     }
     if (sub === '/bookings' && method === 'GET') {
       const u = needUser(req), now = Date.now();
-      const rows = all('select * from bookings where userId=? order by date desc, time desc limit 100', u.id).map(b => {
+      const mine = org => all('select * from bookings where userId=? order by date desc, time desc limit 100', u.id).map(b => {
         const v = bookingView(b), start = new Date(`${b.date}T${b.time}:00`).getTime();
         const reviewed = b.orderId ? !!one('select 1 x from reviews where orderId=?', b.orderId) : false;
         const paid = b.orderId ? one("select status from orders where id=?", b.orderId)?.status === 'paid' : false;
         return { id: v.id, branchId: v.branchId, branchName: v.branchName, staffId: v.staffId, staffName: v.staffName, staffPhoto: v.staffPhoto, date: v.date, time: v.time, mins: v.mins, status: v.status,
-          items: v.items, itemIds: v.itemIds, total: v.total, promoCode: b.promoCode || '', promoAmt: b.promoAmt || 0, notes: v.notes || '', canCancel: v.status === 'booked' && start - now >= 3600e3, canReview: paid && !reviewed, reviewed };
+          items: v.items, itemIds: v.itemIds, total: v.total, branchName: org ? `${org.name} · ${v.branchName}` : v.branchName, promoCode: b.promoCode || '', promoAmt: b.promoAmt || 0, notes: v.notes || '', canCancel: v.status === 'booked' && start - now >= 3600e3, canReview: paid && !reviewed, reviewed, brand: org?.name || '' };
       });
+      const rows = [...inMain(() => mine(null)), ...activeOrgs().flatMap(o => inOrg(o, () => mine(o)))].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).slice(0, 100);
       return send(res, 200, { bookings: rows });
     }
     const cm = sub.match(/^\/bookings\/(\w+)\/cancel$/);
     if (cm && method === 'POST') {
+      return atShop('bookings', cm[1], () => {
       const u = needUser(req), b = one('select * from bookings where id=? and userId=?', cm[1], u.id); if (!b) bad(404, 'Booking not found');
       if (b.status !== 'booked') bad(409, 'This booking is already ' + b.status);
       if (new Date(`${b.date}T${b.time}:00`).getTime() - Date.now() < 3600e3) bad(409, 'Bookings can be cancelled up to 1 hour before. Please call the shop.');
       run("update bookings set status='cancelled' where id=?", b.id); log({ name: 'App: ' + u.name }, 'booking-cancelled', 'bookings', b.id, b.customerName); freed(b.branchId, b.staffId, b.date);
       return send(res, 200, { ok: true });
+      });
     }
 
     // ----- verified reviews: only for a completed, paid visit that was booked through the app -----
     if (sub === '/reviews' && method === 'POST') {
       const u = needUser(req), b = await readBody(req), rating = Math.round(+b.rating), text = clip(b.text, 600);
       if (!(rating >= 1 && rating <= 5)) bad(400, 'Please choose a rating from 1 to 5 stars');
+      return atShop('bookings', String(b.bookingId || ''), () => {
       const bk = one('select * from bookings where id=? and userId=?', String(b.bookingId || ''), u.id); if (!bk || !bk.orderId) bad(404, 'Visit not found');
       const o = get('orders', bk.orderId); if (!o || o.status !== 'paid') bad(409, 'You can review after your haircut is completed');
       if (one('select 1 x from reviews where orderId=?', o.id)) bad(409, 'You already reviewed this visit');
       const id = uid(); run('insert into reviews(id,branchId,staffId,name,rating,text,createdAt,userId,orderId,verified) values(?,?,?,?,?,?,?,?,?,1)', id, o.branchId, o.barberId || bk.staffId || '', short(u.name), rating, text, nowISO(), u.id, o.id);
       log({ name: 'App: ' + u.name }, 'review', 'reviews', id, `${rating} stars (verified)`); return send(res, 201, { ok: true });
+      });
     }
 
 
@@ -495,6 +520,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     }
     if (sub === '/waitlist' && method === 'POST') {
       const u = needUser(req), b = await readBody(req), date = String(b.date || ''), staffId = String(b.staffId || 'any');
+      if (ownerOf('branches', b.branchId)) bad(409, 'The waitlist is only for Brotherhood shops for now. Please pick another time.');
       if (!get('branches', String(b.branchId || ''))) bad(400, 'Pick a shop'); if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < todayStr()) bad(400, 'Pick a valid date');
       if (staffId !== 'any' && get('staff', staffId)?.branchId !== String(b.branchId)) bad(400, 'Pick a barber from this shop');
       if (slotsFor(String(b.branchId), date, staffId, 30).length) bad(409, 'There are open slots for that day. Please book instead.');

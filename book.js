@@ -125,7 +125,7 @@ function reviewsHtml() {
 function render() {
   if (!I) { app.innerHTML = '<div class="top"><h1>Brotherhood</h1><p>Loading…</p></div>'; return; }
   const all = I.ratings ? Object.values(I.ratings) : [], n = all.reduce((s, r) => s + r.count, 0), avg = n ? all.reduce((s, r) => s + r.avg * r.count, 0) / n : 0;
-  const head = `<div class="top"><img src="/logo-sm.png" alt=""><h1>${esc(I.shop)}</h1><p>Book your cut online. No waiting, no queue.</p>${n ? `<div class="stars">★ ${avg.toFixed(1)} · ${n} review${n === 1 ? '' : 's'}</div>` : ''}</div>`;
+  const head = `<div class="top"><img src="/logo-sm.png?v=b" alt=""><h1>${esc(I.shop)}</h1><p>Book your cut online. No waiting, no queue.</p>${n ? `<div class="stars">★ ${avg.toFixed(1)} · ${n} review${n === 1 ? '' : 's'}</div>` : ''}</div>`;
   if (S.showTerms) { app.innerHTML = head + `<div class="wrap"><div class="step"><h2>Terms &amp; Conditions</h2><div class="terms">${esc(S.terms)}</div><br><button class="go" data-act="closeterms">I understand</button></div></div>`; window.scrollTo(0, 0); return; }
   if (S.done) {
     const b = S.done, when = new Date(b.date + 'T00:00').toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' });

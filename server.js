@@ -8,13 +8,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { mountBH } from './bh-api.js';
 
 process.env.TZ ||= 'Asia/Manila';
 const PORT = +process.env.PORT || 3000;
 const PASS = process.env.ADMIN_PASSWORD || 'admin123';
 // Recovery: OWNER_USERNAME_FORCE (hosting variable) overrides whatever owner username was saved in Settings, so a forgotten owner username can always be reset from the host.
-const ownerUser = () => String(process.env.OWNER_USERNAME_FORCE || getSetting('ownerUser') || process.env.OWNER_USERNAME || '').trim().toLowerCase();   // chosen by the owner in Settings (or OWNER_USERNAME); blank = old behaviour
+const ownerUser = () => curOrg() ? String(curOrg().ownerUser || '') : String(process.env.OWNER_USERNAME_FORCE || getSetting('ownerUser') || process.env.OWNER_USERNAME || '').trim().toLowerCase();   // chosen by the owner in Settings (or OWNER_USERNAME); blank = old behaviour
 const SHOP = process.env.SHOP_NAME || 'Brotherhood';
 const DIR = import.meta.dirname;
 const BRANCHES = ['Alaminos', 'Bay', 'Calauan', 'Nagcarlan', 'Tiaong', 'San Pablo', 'Sto. Tomas'];
@@ -23,7 +24,14 @@ if (!process.env.ADMIN_PASSWORD) console.warn('⚠  Using default owner password
 // ---------- database ----------
 const DB_FILE = process.env.DB_FILE || path.join(DIR, 'barber.db');
 fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-const db = new DatabaseSync(DB_FILE);
+// ----- partner shops (multi-tenant) -----
+// Brotherhood's own data lives in the main database. Each partner shop has its own database file (org-<id>.db) with the same tables,
+// so a partner can never see Brotherhood's data (or another partner's). Every request runs against one database, chosen from the
+// signed login token; all queries go through the `db` proxy below, which points at the database of the current request.
+const mainDb = new DatabaseSync(DB_FILE);
+const als = new AsyncLocalStorage();
+const curOrg = () => als.getStore()?.org || null;
+const db = new Proxy({}, { get: (_, k) => { const d = als.getStore()?.db || mainDb, v = d[k]; return typeof v === 'function' ? v.bind(d) : v; } });
 db.exec(`
 create table if not exists branches(id text primary key, name text, phone text, address text);
 create table if not exists chairs(id text primary key, branchId text, name text, sort integer, active integer);
@@ -102,6 +110,34 @@ create index if not exists reviews_branch on reviews(branchId, createdAt);
 `);
 db.exec("create table if not exists settings(k text primary key, v text)");
 db.exec("create unique index if not exists users_pin on users(pinKey) where pinKey is not null and pinKey<>''");
+mainDb.exec('create table if not exists orgs(id text primary key, code text unique, name text, ownerUser text, ownerHash text, active integer, createdAt text)');
+const ORG_DBS = new Map(); let schemaReady = false;
+const orgRow = id => mainDb.prepare('select * from orgs where id=?').get(String(id || ''));
+const orgList = () => mainDb.prepare('select * from orgs order by createdAt').all();
+// copy every table, column and index of the main database into a partner database (safe to repeat; only adds what is missing)
+function syncSchema(d) {
+  const objs = mainDb.prepare("select type,name,sql from sqlite_master where sql is not null and name not like 'sqlite_%' and type in ('table','index') order by case type when 'table' then 0 else 1 end").all();
+  for (const o of objs) {
+    if (o.type === 'table') {
+      d.exec(o.sql.replace(/^CREATE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?/i, 'CREATE TABLE IF NOT EXISTS '));
+      const have = new Set(d.prepare(`pragma table_info("${o.name}")`).all().map(c => c.name));
+      for (const c of mainDb.prepare(`pragma table_info("${o.name}")`).all()) if (!have.has(c.name)) d.exec(`alter table "${o.name}" add column "${c.name}" ${c.type || ''}`);
+    } else d.exec(o.sql.replace(/^CREATE\s+(UNIQUE\s+)?INDEX\s+(IF\s+NOT\s+EXISTS\s+)?/i, (m, u) => `CREATE ${u || ''}INDEX IF NOT EXISTS `));
+  }
+}
+function orgDb(id) {
+  if (!/^\w+$/.test(id)) throw new Error('bad org id');
+  let d = ORG_DBS.get(id); if (d) return d;
+  d = new DatabaseSync(path.join(path.dirname(DB_FILE), `org-${id}.db`)); syncSchema(d);
+  if (schemaReady) ORG_DBS.set(id, d);   // before startup finishes the main schema is not complete yet, so sync again later
+  return d;
+}
+const inOrg = (org, fn) => als.run({ db: orgDb(org.id), org }, fn);
+const inMain = fn => als.run({ db: mainDb, org: null }, fn);
+const activeOrgs = () => orgList().filter(o => o.active);
+// which database holds this record: null = Brotherhood, a shop row = that partner, undefined = nowhere (or a paused partner)
+const ownerOf = (kind, id) => { id = String(id || ''); if (!id) return undefined; if (inMain(() => get(kind, id))) return null; for (const o of activeOrgs()) if (inOrg(o, () => get(kind, id))) return o; return undefined; };
+const shopName = () => curOrg()?.name || SHOP;
 
 const COLS = {
   branches: ['name', 'phone', 'address', 'openTime', 'graceMins', 'closeTime', 'photo', 'mapUrl', 'defaultPct', 'googlePlaceId', 'googleUrl'],
@@ -189,6 +225,11 @@ function dailyBackup() {
     backup(path.join(BK_DIR, `barber-${todayStr()}.db`));
     const files = fs.readdirSync(BK_DIR).filter(f => /^barber-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort();
     for (const f of files.slice(0, -14)) fs.rmSync(path.join(BK_DIR, f));
+    for (const o of orgList()) {
+      inOrg(o, () => backup(path.join(BK_DIR, `org-${o.id}-${todayStr()}.db`)));
+      const of = fs.readdirSync(BK_DIR).filter(f => new RegExp(`^org-${o.id}-\\d{4}-\\d{2}-\\d{2}\\.db$`).test(f)).sort();
+      for (const f of of.slice(0, -14)) fs.rmSync(path.join(BK_DIR, f));
+    }
   } catch (e) { console.error('backup failed:', e.message); }
 }
 dailyBackup(); setInterval(dailyBackup, 6 * 3600e3).unref();
@@ -201,7 +242,7 @@ const encBuf = b => { const iv = crypto.randomBytes(12), c = crypto.createCipher
 const decBuf = b => { const d = crypto.createDecipheriv('aes-256-gcm', FKEY, b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]); };
 const TOKEN_DAYS = 30;
 const sign = s => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');
-const makeToken = (u, v) => { const p = Buffer.from(JSON.stringify({ u, v, e: Date.now() + TOKEN_DAYS * 864e5 })).toString('base64url'); return p + '.' + sign(p); };
+const makeToken = (u, v, o) => { const p = Buffer.from(JSON.stringify({ u, v, e: Date.now() + TOKEN_DAYS * 864e5, ...(o ? { o } : {}) })).toString('base64url'); return p + '.' + sign(p); };
 function readToken(t) {
   const [p, sig] = String(t).split('.');
   if (!p || !sig) return null;
@@ -213,7 +254,8 @@ function readToken(t) {
 function whoami(req) {
   const o = readToken((req.headers.authorization || '').replace(/^Bearer /, ''));
   if (!o) return null;
-  if (o.u === 'owner') return { id: 'owner', role: 'owner', name: 'Owner' };
+  const g = curOrg(); if ((o.o || null) !== (g?.id || null)) return null;   // a token only works in its own shop's database
+  if (o.u === 'owner') { if (g && o.v !== String(g.ownerHash).slice(-8)) return null; return { id: 'owner', role: 'owner', name: 'Owner' }; }
   const u = get('users', o.u);
   if (!u || !u.active || ![u.passHash, u.pinKey].some(h => h && h.slice(-8) === o.v)) return null;
   return { id: u.id, role: u.role, name: u.name, branchId: u.role === 'cashier' || u.role === 'barber' ? u.branchId : null };
@@ -440,7 +482,7 @@ function welcomeEmail(c) {
     .map(([n, r]) => `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:700">${n}</td><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#555">${r}</td></tr>`).join('');
   const html = `<!doctype html><html><body style="margin:0;background:#f5f5f6;font-family:Arial,Helvetica,sans-serif;color:#111"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#fff;border-radius:16px;overflow:hidden">
-<tr><td style="background:#fff;text-align:center;padding:26px 20px 10px"><img src="${baseUrl()}/logo.png" width="130" height="130" alt="Brotherhood Barber" style="display:inline-block;border-radius:65px"></td></tr>
+<tr><td style="background:#fff;text-align:center;padding:26px 20px 10px"><img src="${baseUrl()}/logo.png?v=b" width="130" height="130" alt="Brotherhood Barber" style="display:inline-block;border-radius:65px"></td></tr>
 <tr><td style="height:5px;background:repeating-linear-gradient(135deg,#d6283a 0 10px,#fff 10px 20px,#2563eb 20px 30px)"></td></tr>
 <tr><td style="padding:28px 26px"><h1 style="margin:0 0 10px;font-size:22px">Welcome, ${first}! 💈</h1>
 <p style="line-height:1.55;margin:0 0 14px">Thank you for joining <b>Brotherhood Barber</b>. You are now a <b>Member</b> of our loyalty program.</p>
@@ -453,6 +495,7 @@ function welcomeEmail(c) {
   const text = `Welcome, ${String(c.name).trim().split(/\s+/)[0] || 'there'}!\n\nThank you for joining Brotherhood Barber. You are now a Member of our loyalty program.\nEvery completed haircut = 1 point.\nMember 0-4 visits | Bronze 5-15 | Silver 16-25 | Gold 26-50 | VIP 51+\n\nJust give the cashier your mobile number or email on every visit so your points are added automatically.\n\nUnsubscribe: {{UNSUB}}`;
   return { subject: 'Welcome to Brotherhood Barber 💈', html, text };
 }function maybeWelcome(c) {
+  if (curOrg()) return;
   if (!c.consent || !c.email || !validEmail(c.email) || c.welcomedAt) return;
   const m = welcomeEmail(c);
   run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt) values(?,?,?,?,?,?,?,'pending',0,'',?)", uid(), c.id, c.email, 'welcome', m.subject, m.html, m.text, nowISO());
@@ -460,7 +503,7 @@ function welcomeEmail(c) {
   setTimeout(() => processEmails().catch(() => { }), 50);
 }
 function queueEmail({ customerId = '', to, kind, subject, html, text }) {   // transactional mail from the app (reminders, review requests); only queued when the email service is connected
-  if (!EMAIL.key || !validEmail(to)) return false;
+  if (curOrg() || !EMAIL.key || !validEmail(to)) return false;
   run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt) values(?,?,?,?,?,?,?,'pending',0,'',?)", uid(), customerId, to, kind, subject, html, text, nowISO());
   setTimeout(() => processEmails().catch(() => { }), 50); return true;
 }
@@ -865,7 +908,21 @@ const setPw = (id, b) => {
   if (b.pin) run('update users set pinKey=? where id=?', pinKeyOf(String(b.pin).trim()), id);
 };
 
+// pick the database for this request: a partner shop's token (or, for logging in, its shop code) runs it in that shop's database
 async function handle(req, res) {
+  const tk = readToken(String(req.headers.authorization || '').replace(/^Bearer /, '')), pth = req.url.split('?')[0];
+  let org = null;
+  if (tk && tk.o) { org = orgRow(tk.o); if (!org) return send(res, 401, { error: 'Login required' }); }
+  else if (!tk && pth === '/api/public/slots') { const o = ownerOf('branches', new URL(req.url, 'http://x').searchParams.get('branch')); if (o) org = o; }   // the customer app asks a partner shop for its free times
+  else if (!tk && (pth === '/api/login' || pth === '/api/public/login-hint')) {
+    const code = String(req.headers['x-org'] || '').trim().toLowerCase();
+    if (code) { org = mainDb.prepare('select * from orgs where code=?').get(code); if (!org) return send(res, 404, { error: 'Shop code not found. Check the code and try again.' }); }
+  }
+  if (!org) return handleIn(req, res);
+  if (!org.active) return send(res, 403, { error: 'This shop account is paused. Please contact Brotherhood.' });
+  return inOrg(org, () => handleIn(req, res));
+}
+async function handleIn(req, res) {
   const url = new URL(req.url, 'http://x'), p = url.pathname, method = req.method, q = Object.fromEntries(url.searchParams);
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   // Host-based routing (only when SITE_HOST / APP_HOST are set; otherwise every path works on every host, as in local dev and on the Railway URL).
@@ -894,7 +951,9 @@ async function handle(req, res) {
   if (sm0 && method === 'GET') { if (!fs.existsSync(path.join(DIR, 'site', sm0[1]))) return send(res, 404, { error: 'Not found' }); return serveStatic(req, res, 'site/' + sm0[1]); }
   const im = p.match(/^\/img\/(\w+)$/);
   if (im && method === 'GET') {
-    const r = one('select mime,data from images where id=?', im[1]); if (!r) return send(res, 404, { error: 'Not found' });
+    let r = one('select mime,data from images where id=?', im[1]);
+    if (!r && !curOrg()) for (const o of orgList()) { r = orgDb(o.id).prepare('select mime,data from images where id=?').get(im[1]); if (r) break; }
+    if (!r) return send(res, 404, { error: 'Not found' });
     res.writeHead(200, { 'Content-Type': r.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
     return res.end(Buffer.from(r.data));
   }
@@ -960,12 +1019,12 @@ async function handle(req, res) {
     const pin = String(b.pin || '').trim();
     if (pin) {
       const u = /^\d{6}$/.test(pin) ? one('select * from users where pinKey=? and active=1', pinKeyOf(pin)) : null;
-      if (u) { tok = makeToken(u.id, u.pinKey.slice(-8)); who = u.name; }
+      if (u) { tok = makeToken(u.id, u.pinKey.slice(-8), curOrg()?.id); who = u.name; }
     }
-    else if ((ownerUser() ? uname === ownerUser() : (!uname || uname === 'owner')) && crypto.timingSafeEqual(sha(pw), sha(PASS))) { tok = makeToken('owner', ''); who = 'Owner'; }
+    else if (curOrg() ? (uname === curOrg().ownerUser && checkPw(pw, curOrg().ownerHash)) : ((ownerUser() ? uname === ownerUser() : (!uname || uname === 'owner')) && crypto.timingSafeEqual(sha(pw), sha(PASS)))) { tok = makeToken('owner', curOrg() ? String(curOrg().ownerHash).slice(-8) : '', curOrg()?.id); who = 'Owner'; }
     else if (uname) {
       const u = one('select * from users where username=? and active=1', uname);
-      if (u?.passHash && checkPw(pw, u.passHash)) { tok = makeToken(u.id, u.passHash.slice(-8)); who = u.name; }
+      if (u?.passHash && checkPw(pw, u.passHash)) { tok = makeToken(u.id, u.passHash.slice(-8), curOrg()?.id); who = u.name; }
     }
     if (!tok) { noteFail(ip); log({ name: uname || 'owner' }, 'login-failed', 'auth', '', ip); return send(res, 401, { error: pin ? 'Wrong PIN' : 'Wrong username or password' }); }
     fails.delete(ip); log({ name: who }, 'login', 'auth', '', ip);
@@ -1006,9 +1065,9 @@ async function handle(req, res) {
   // ----- admin data -----
   if (p === '/api/state' && method === 'GET') {
     if (admin) rememberOrigin(req);
-    if (!admin) { const su = get('users', me.id), sp = su && su.staffId ? get('staff', su.staffId) : null; return send(res, 200, { shop: SHOP, me: sp ? { ...me, photo: sp.photo || '' } : me, modules: modulesFor(me.role) }); }   // a barber's own profile picture
+    if (!admin) { const su = get('users', me.id), sp = su && su.staffId ? get('staff', su.staffId) : null; return send(res, 200, { shop: shopName(), org: curOrg() ? { name: curOrg().name, code: curOrg().code } : null, me: sp ? { ...me, photo: sp.photo || '' } : me, modules: modulesFor(me.role) }); }   // a barber's own profile picture
     return send(res, 200, {
-      shop: SHOP, me, branches: all('select * from branches order by rowid'), chairs: all('select * from chairs order by branchId, sort'), staff: all('select * from staff order by name'),
+      shop: shopName(), org: curOrg() ? { name: curOrg().name, code: curOrg().code } : null, me, branches: all('select * from branches order by rowid'), chairs: all('select * from chairs order by branchId, sort'), staff: all('select * from staff order by name'),
       categories: all('select * from categories order by name'), items: all('select * from items order by name'), discounts: all('select * from discounts order by name'),
       users: all('select * from users order by name').map(strip), equipment: all('select * from equipment order by branchId, name')
     });
@@ -1127,9 +1186,54 @@ async function handle(req, res) {
     const b = await readBody(req), u = String(b.username || '').trim().toLowerCase();
     if (u && !/^[a-z0-9._-]{3,30}$/.test(u)) bad(400, 'Username must be 3 to 30 characters: letters, numbers, dot, dash or underscore');
     if (u && one('select 1 x from users where lower(username)=?', u)) bad(409, 'That username is already used by another user');
+    if (curOrg()) {
+      if (!u) bad(400, 'Enter a username');
+      if (!checkPw(String(b.password || ''), curOrg().ownerHash)) bad(403, 'Wrong password. Enter your current owner password to confirm.');
+      mainDb.prepare('update orgs set ownerUser=? where id=?').run(u, curOrg().id); log(me, 'owner-username', 'settings', '', u);
+      return send(res, 200, { ok: true, username: u });
+    }
     if (!crypto.timingSafeEqual(sha(String(b.password || '')), sha(PASS))) bad(403, 'Wrong password. Enter your current owner password to confirm.');
     setSetting('ownerUser', u); log(me, 'owner-username', 'settings', '', u || '(blank)');
     return send(res, 200, { ok: true, username: u });
+  }
+  if (p === '/api/settings/owner-password' && method === 'PUT') {   // partner shop owners set their own password (Brotherhood's owner password is a hosting variable)
+    if (me.role !== 'owner' || !curOrg()) bad(403, 'Only a partner shop owner can change the password here');
+    const b = await readBody(req), np = String(b.newPassword || '');
+    if (!checkPw(String(b.password || ''), curOrg().ownerHash)) bad(403, 'Wrong current password');
+    if (np.length < 8) bad(400, 'The new password needs at least 8 characters');
+    const h = hashPw(np); mainDb.prepare('update orgs set ownerHash=? where id=?').run(h, curOrg().id); log(me, 'owner-password', 'settings', '', '');
+    return send(res, 200, { ok: true, token: makeToken('owner', h.slice(-8), curOrg().id) });
+  }
+  // ----- partner shops: only Brotherhood's owner can add, pause or open them -----
+  if (p.startsWith('/api/orgs')) {
+    if (curOrg() || me.role !== 'owner') bad(403, 'Only the Brotherhood owner can manage partner shops');
+    const om2 = p.match(/^\/api\/orgs(?:\/(\w+)(?:\/(enter|reset))?)?$/); if (!om2) bad(404, 'Not found');
+    const temp = () => crypto.randomBytes(9).toString('base64url').replace(/[-_]/g, 'x').slice(0, 10), since = dOf(new Date(Date.now() - 30 * 864e5));
+    if (!om2[1] && method === 'GET') return send(res, 200, orgList().map(({ ownerHash, ...o }) => inOrg(o, () => ({ ...o, active: !!o.active,
+      branches: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n, users: one('select count(*) n from users where active=1').n,
+      sales30: r2(one("select coalesce(sum(total),0) t from orders where status='paid' and date>=?", since).t) }))));
+    if (!om2[1] && method === 'POST') {
+      const b = await readBody(req), name = String(b.name || '').trim().slice(0, 60), code = String(b.code || '').trim().toLowerCase(), ou = String(b.ownerUser || '').trim().toLowerCase(), br = String(b.branch || '').trim().slice(0, 60) || name;
+      if (name.length < 2) bad(400, 'Enter the shop name');
+      if (!/^[a-z0-9-]{3,30}$/.test(code)) bad(400, 'Shop code: 3 to 30 letters, numbers or dashes (e.g. kingsman-cuts)');
+      if (mainDb.prepare('select 1 x from orgs where code=?').get(code)) bad(409, 'That shop code is already used');
+      if (!/^[a-z0-9._-]{3,30}$/.test(ou)) bad(400, 'Owner username: 3 to 30 letters, numbers, dot, dash or underscore');
+      const id = uid(), pw = temp();
+      mainDb.prepare('insert into orgs(id,code,name,ownerUser,ownerHash,active,createdAt) values(?,?,?,?,?,1,?)').run(id, code, name, ou, hashPw(pw), nowISO());
+      inOrg(orgRow(id), () => { const bid = insert('branches', { name: br, openTime: '09:00', closeTime: '21:00', graceMins: 10 }).id; for (let i = 1; i <= 3; i++) insert('chairs', { branchId: bid, name: 'Chair ' + i, sort: i, active: 1 }); log({ name: 'Brotherhood' }, 'create', 'shop', id, name); });
+      log(me, 'create', 'orgs', id, `${name} (${code})`);
+      return send(res, 201, { id, code, name, ownerUser: ou, password: pw });
+    }
+    const g = orgRow(om2[1]); if (!g) bad(404, 'Partner shop not found');
+    if (!om2[2] && method === 'PUT') {
+      const b = await readBody(req);
+      if ('name' in b) { const n = String(b.name || '').trim().slice(0, 60); if (n.length < 2) bad(400, 'Enter the shop name'); mainDb.prepare('update orgs set name=? where id=?').run(n, g.id); }
+      if ('active' in b) mainDb.prepare('update orgs set active=? where id=?').run(b.active ? 1 : 0, g.id);
+      log(me, 'update', 'orgs', g.id, JSON.stringify(b).slice(0, 200)); return send(res, 200, { ok: true });
+    }
+    if (om2[2] === 'reset' && method === 'POST') { const pw = temp(); mainDb.prepare('update orgs set ownerHash=? where id=?').run(hashPw(pw), g.id); log(me, 'reset-password', 'orgs', g.id, g.name); return send(res, 200, { ownerUser: g.ownerUser, password: pw }); }
+    if (om2[2] === 'enter' && method === 'POST') { log(me, 'open', 'orgs', g.id, g.name); return send(res, 200, { token: makeToken('owner', String(g.ownerHash).slice(-8), g.id), name: g.name }); }
+    bad(404, 'Not found');
   }
   if (p === '/api/settings/test-email' && method === 'POST') {
     adminOnly(); const to = normEmail((await readBody(req)).to); if (!validEmail(to)) bad(400, 'Invalid email address');
@@ -1884,8 +1988,9 @@ async function handle(req, res) {
   bad(405, 'Method not allowed');
 }
 
-const BH = mountBH({ db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
+const BH = mountBH({ inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 
+schemaReady = true; ORG_DBS.clear();
 http.createServer(async (req, res) => {
   if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);
   try { await handle(req, res); }
