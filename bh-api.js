@@ -252,7 +252,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const handleBH = async function (req, res, p, method, q, ip) {
     const sub = p.slice('/api/bh'.length);
 
-    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood', contact: String(process.env.CONTACT_EMAIL || '').trim().slice(0, 120) });
+    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood', contact: String(process.env.CONTACT_EMAIL || '').trim().slice(0, 120), stats: { shops: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n } });
     // ----- accounts -----
     if (sub === '/signup' && method === 'POST') {
       if (tooMany(ip, 'su', 5, 3600e3)) bad(429, 'Too many sign-ups from this device. Try again later.');
