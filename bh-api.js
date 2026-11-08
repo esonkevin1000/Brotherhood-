@@ -651,13 +651,14 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const admin = me.role === 'owner' || me.role === 'admin', mine = me.role === 'barber' ? get('users', me.id)?.staffId || '' : '';
       const target = sid => { sid = String(sid || mine); const s = get('staff', sid); if (!s) bad(404, 'Choose a barber'); if (!admin && sid !== mine) bad(403, 'You can only edit your own profile'); return s; };
       if (sub === '/pro/me' && method === 'GET') {
-        if (!admin && !mine) bad(404, 'Your login is not linked to a barber profile yet. Ask the owner to link it in Back office → Users.');
-        const staff = (admin ? all('select * from staff where active=1 order by name') : [get('staff', mine)]).filter(Boolean).map(s => {
+        const desk = me.role === 'cashier';   // front desk: runs the day board for its shop, no profile editing
+        if (!admin && !mine && !desk) bad(404, 'Your login is not linked to a barber profile yet. Ask the owner to link it in Back office → Users.');
+        const staff = (admin ? all('select * from staff where active=1 order by name') : desk ? all('select * from staff where active=1 and branchId=? order by name', me.branchId) : [get('staff', mine)]).filter(Boolean).map(s => {
           const pr = one('select * from bh_barber where staffId=?', s.id) || {};
           return { id: s.id, name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', headline: pr.headline || '', bio: pr.bio || '', years: pr.years || 0, specialties: jp(pr.specialties),
             instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, cover: pr.cover || '', offers: all('select pkg,price from bh_offers where staffId=?', s.id), portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id), certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc', s.id) };
         });
-        return send(res, 200, { admin, name: me.name, staff });
+        return send(res, 200, { admin, role: me.role, desk, name: me.name, staff });
       }
       if (sub === '/pro/branch-location' && method === 'PUT') {   // owner: set a branch's map pin by coordinates, or detect it from the branch's Google Maps link
         if (!admin) bad(403, 'Owner only'); const b = await readBody(req), br = get('branches', String(b.branchId || '')); if (!br) bad(404, 'Branch not found');

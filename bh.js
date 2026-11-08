@@ -413,11 +413,12 @@ function vAccount() {
 async function loadPro() { try { S.pro = await api('/pro/me', {}, S.proToken); S.proErr = ''; } catch (e) { S.pro = null; S.proErr = e.message; if (e.code === 401) { S.proToken = null; store.set('bh_pro', null); } } }
 function vPro() {
   if (!S.proToken || !S.pro) return header('Pro tools', '/') + `<p class="mute">Sign in with your Brotherhood staff username and password (same as the POS / back office).</p><form id="prolf">${S.proPin ? '<label class="f">6-digit PIN<input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label>' : '<label class="f">Username (owners may leave this blank)<input name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label><label class="f">Password<input name="password" type="password" autocomplete="current-password" required></label>'}<label class="f">Shop code (partner shops only)<input name="org" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Leave blank for Brotherhood" value="${esc(store.get('bh_org') || '')}"></label>${S.proErr ? `<div class="err">${esc(S.proErr)}</div>` : ''}<button class="btn block" style="margin-top:14px">Sign in</button><p class="mute sm" style="text-align:center"><button type="button" class="link" data-proPin>${S.proPin ? 'Use username and password instead' : 'Barber or cashier? Sign in with your 6-digit PIN'}</button></p></form>`;
+  if (S.pro.desk) { if (!S.td) loadToday(true); return header('Front desk', '/') + vToday() + '<button class="btn ghost block" style="margin-top:22px" data-prologout>Sign out</button>'; }   // front desk: the day board only
   const sel = S.pro.staff.find(s => s.id === S.proSel) || S.pro.staff[0]; S.proSel = sel?.id;
   if (!sel) return header('Pro tools', '/') + '<div class="empty">No barbers found.</div>';
   return header('Pro tools', '/') + `${S.pro.admin && !['shop', 'mod', 'ins'].includes(S.proTab) ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
-  <div class="tabs scroll">${S.pro.admin ? `<button class="${S.proTab === 'shop' ? 'on' : ''}" data-ptab="shop">Shop</button><button class="${S.proTab === 'ins' ? 'on' : ''}" data-ptab="ins">Insights</button>` : ''}<button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">${S.pro.admin ? 'Barber' : 'Dashboard'}</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
-  ${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'ins' && S.pro.admin ? vInsights() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}${linkCard(sel)}${offersEditor(sel)}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
+  <div class="tabs scroll"><button class="${S.proTab === 'today' ? 'on' : ''}" data-ptab="today">Today</button>${S.pro.admin ? `<button class="${S.proTab === 'shop' ? 'on' : ''}" data-ptab="shop">Shop</button><button class="${S.proTab === 'ins' ? 'on' : ''}" data-ptab="ins">Insights</button>` : ''}<button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">${S.pro.admin ? 'Barber' : 'Dashboard'}</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
+  ${S.proTab === 'today' ? vToday() : ''}${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'ins' && S.pro.admin ? vInsights() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}${linkCard(sel)}${offersEditor(sel)}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
   <label class="f">Years of experience<input name="years" type="number" min="0" max="60" value="${sel.years || ''}"></label><label class="f">Specialties (comma separated)<input name="specialties" value="${esc(sel.specialties.join(', '))}" placeholder="Skin Fade, Taper, Pompadour"></label>
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
@@ -1047,7 +1048,7 @@ async function onRoute() {
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (['home', 'me', 'book', 'profile'].includes(r.a) && S.token && !S.loyal) api('/loyalty').then(j => { S.loyal = j; render(); }).catch(() => { });
   if (['me', 'book'].includes(r.a) && S.token && !S.push) loadPush();
-  if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
+  if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } else { S.proTab = 'today'; loadToday(true); } loadDash(); }
   if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
   if (r.a === 'community') loadCommunity();
   if (r.a === 'notifications' && S.token) { S.notifs = null; loadNotifs(); }
@@ -1114,7 +1115,7 @@ app.addEventListener('submit', async e => {
   } else if (f.id === 'prolf') {
     const org = String(d.org || '').trim().toLowerCase(); delete d.org; store.set('bh_org', org || null);
     try { const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(org ? { 'x-org': org } : {}) }, body: JSON.stringify(d) }), j = await r.json(); if (!r.ok) throw new Error(j.error);
-      S.proToken = j.token; store.set('bh_pro', j.token); await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } else S.proTab = 'dash'; loadDash(); } catch (x) { S.proErr = x.message; } render();
+      S.proToken = j.token; store.set('bh_pro', j.token); await loadPro(); S.proSel = S.pro?.staff[0]?.id; S.td = null; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } else { S.proTab = 'today'; loadToday(true); } loadDash(); } catch (x) { S.proErr = x.message; } render();
   } else if (f.id === 'certf') {
     S.certBusy = true; S.certErr = ''; render();
     try { const file = f.querySelector('[name=file]').files[0]; await api('/pro/certs', { method: 'POST', body: { staffId: S.proSel, title: d.title, org: d.org, date: d.date, data: file ? await compress(file) : undefined } }, S.proToken); await loadPro(); toast('Seminar added'); }
@@ -1289,10 +1290,150 @@ app.addEventListener('click', async e => {
   if (D.blockadd != null) return openBlock();
   if (D.blockdel) { if (!confirm('Remove this blocked time?')) return; try { await api('/pro/blocks/' + D.blockdel, { method: 'DELETE' }, S.proToken); await loadBlocks(); toast('Removed'); } catch (x) { toast(x.message); } return render(); }
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
-  if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); if (D.ptab === 'ins') { S.health = null; S.ret = null; loadInsights(); } return render(); }
+  if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'today') { S.td = null; loadToday(); } if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); if (D.ptab === 'ins') { S.health = null; S.ret = null; loadInsights(); } return render(); }
   if (D.drange) { S.dashRange = D.drange; render(); return loadDash(); }
   if (D.prologout != null) { S.proToken = null; S.pro = null; store.set('bh_pro', null); return render(); }
 });
+// ----- Today: the shop's day board (bookings, walk-ins, the line, in the chair, done). It takes over from the POS. -----
+// Tracking only: no receipts, no invoice numbers, no shift readings. The shop issues its own BIR invoice and may note its number.
+async function sapi(path, opt = {}) {
+  const r = await fetch('/api' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), Authorization: 'Bearer ' + S.proToken }, body: opt.body ? JSON.stringify(opt.body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.error || 'Something went wrong'); e.code = r.status; throw e; }
+  return j;
+}
+async function loadToday(quiet) {
+  try { S.td = await sapi('/svc/today' + (S.tdBranch ? '?branch=' + encodeURIComponent(S.tdBranch) : '')); S.tdErr = ''; }
+  catch (e) { S.tdErr = e.message; if (!quiet) toast(e.message); }
+  if (S.proTab === 'today' && !document.querySelector('.lb')) render();
+}
+setInterval(() => { if (S.proToken && S.proTab === 'today' && !document.hidden && document.querySelector('[data-today]') && !document.querySelector('.lb')) loadToday(true); }, 20000);
+const NOT_RECEIPT = 'Tracking only. This is not an official receipt: issue your BIR invoice to the customer separately.';
+const minsAgo = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; };
+const svcLine = x => x.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ');
+function tdCard(x, sub, acts) {
+  return `<div class="card tk"><div class="row" style="gap:12px;align-items:flex-start"><span class="tkno">#${x.no}</span><div class="sp" style="min-width:0"><div class="nm">${esc(x.customerName)}</div><div class="sm mute">${svcLine(x)}</div>${sub ? `<div class="sm mute">${sub}</div>` : ''}</div><b class="num" style="font-size:19px;white-space:nowrap">${peso(x.total)}</b></div>${acts ? `<div class="row" style="gap:8px;margin-top:12px">${acts}</div>` : ''}</div>`;
+}
+function vToday() {
+  const d = S.td; if (!d) return `<div data-today>${S.tdErr ? `<div class="card sm">${esc(S.tdErr)}</div>` : skelList()}</div>`;
+  const me = d.role === 'barber', waiting = d.tickets.filter(x => x.status === 'waiting'), chair = d.tickets.filter(x => x.status === 'in_chair'), done = d.tickets.filter(x => x.status === 'done');
+  const empty = t => `<div class="card sm mute">${t}</div>`;
+  return `<div data-today>
+  ${d.branches.length ? `<label class="f" style="margin-top:0">Shop<select id="tdbranch">${d.branches.map(b => `<option value="${b.id}" ${b.id === d.branch.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label>` : ''}
+  <div class="row" style="margin:14px 0 2px;gap:12px;align-items:flex-end"><div class="sp"><div class="sm mute">${esc(d.branch.name)} · ${fmtDate(d.date)}</div><div class="tdh">${me ? 'My day' : 'Today'}</div></div>${d.locked ? '' : `<button class="btn" data-twalk>${ic('plus')} Walk-in</button>`}</div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">${kpi('Waiting', d.totals.waiting)}${kpi('In the chair', d.totals.inChair)}${kpi(me ? 'Done · mine' : 'Done', d.totals.done, peso(d.totals.earned))}</div>
+  ${d.locked ? '<div class="card sm" style="margin-top:10px">Today is already closed for this shop.</div>' : ''}
+  ${d.bookings.length ? `<div class="sec-h"><h2>Booked today</h2><span class="mute sm">${d.bookings.length}</span></div><div class="list">${d.bookings.map(b => `<div class="card tk"><div class="row" style="gap:12px;align-items:flex-start"><span class="tkno">${t12(b.time)}</span><div class="sp" style="min-width:0"><div class="nm">${esc(b.customerName)}</div><div class="sm mute">${esc(b.items.join(', '))} · ${esc(b.staffName)}</div></div></div><div class="row" style="gap:8px;margin-top:12px"><button class="btn sm sp" data-tarrive="${b.id}">${ic('check')} Arrived</button>${b.phone ? `<a class="btn sec sm" href="tel:${esc(b.phone)}">Call</a>` : ''}</div></div>`).join('')}</div>` : ''}
+  <div class="sec-h"><h2>In the chair</h2><span class="mute sm">${chair.length}</span></div><div class="list">${chair.map(x => tdCard(x, `${esc(x.barberName)} · started ${minsAgo(x.startedAt || x.createdAt)} ago`, `<button class="btn sm sp" data-tfin="${x.id}">${ic('check')} Done</button><button class="btn sec sm" data-tcan="${x.id}">Cancel</button>`)).join('') || empty('Nobody in the chair right now.')}</div>
+  <div class="sec-h"><h2>Waiting</h2><span class="mute sm">${waiting.length}</span></div><div class="list">${waiting.map(x => tdCard(x, `${x.barberName ? 'For ' + esc(x.barberName) : 'Any barber'} · waiting ${minsAgo(x.createdAt)}`, `<button class="btn sm sp" data-tstart="${x.id}">${me ? 'Start with me' : 'Start'}</button><button class="btn sec sm" data-tfin="${x.id}">Done</button><button class="btn sec sm" data-tcan="${x.id}">Cancel</button>`)).join('') || empty('No one is waiting.')}</div>
+  <div class="sec-h"><h2>Done today</h2><span class="mute sm">${done.length} · ${peso(d.totals.earned)}</span></div><div class="list">${done.slice().reverse().map(x => tdCard(x, `${esc(x.barberName)} · ${esc(x.method)}${x.discountName ? ' · ' + esc(x.discountName) : ''}${x.invoiceNo ? ' · BIR invoice ' + esc(x.invoiceNo) : ''}`, '')).join('') || empty('No finished services yet today.')}</div>
+  <p class="sm mute" style="margin:16px 2px 0">${NOT_RECEIPT}</p></div>`;
+}
+// a photo from the phone, made small before it is sent
+async function shrinkPhoto(file, max = 1100) {
+  let bmp = null; if (file.size > 500000) { try { bmp = await createImageBitmap(file, { resizeWidth: max, resizeQuality: 'medium', imageOrientation: 'from-image' }); } catch (e) { bmp = null; } }
+  if (!bmp) bmp = await createImageBitmap(file);
+  const s = Math.min(1, max / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(bmp.width * s)); c.height = Math.max(1, Math.round(bmp.height * s));
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); if (bmp.close) bmp.close(); return c.toDataURL('image/jpeg', 0.76);
+}
+const discAmt = (sub, dc) => !dc ? 0 : Math.min(sub, Math.max(0, dc.kind === 'percent' ? sub * dc.value / 100 : dc.value));
+function idBlock(W) {
+  return `<div class="card" style="margin-top:12px"><b>ID needed</b><div class="sm mute" style="margin-top:2px">This service is for Senior, PWD and Student customers. Take a clear photo of the ID.</div>
+    <div class="chips" style="margin-top:10px">${['Senior', 'PWD', 'Student'].map(t => `<button class="chip ${W.idType === t ? 'on' : ''}" data-wid="${t}">${t}</button>`).join('')}</div>
+    ${W.idPreview ? `<img src="${W.idPreview}" alt="ID photo" style="width:100%;max-height:180px;object-fit:contain;border-radius:12px;margin-top:10px;background:#000">` : ''}
+    <label class="btn sec block" style="margin-top:10px;cursor:pointer">${W.idPhotoId ? 'Retake the ID photo' : 'Take a photo of the ID'}<input type="file" accept="image/*" capture="environment" data-wfile hidden></label></div>`;
+}
+async function uploadId(W, file, redraw) {
+  if (!W.idType) return toast('Choose the ID type first');
+  try { W.busy = true; redraw(); const data = await shrinkPhoto(file, 1100); const r = await sapi('/svc/idphoto', { method: 'POST', body: { data, idType: W.idType, branchId: S.td.branch.id } }); W.idPhotoId = r.id; W.idPreview = data; }
+  catch (e) { toast(e.message || 'Could not read that photo. Please try again.'); }
+  W.busy = false; redraw();
+}
+function openWalkin() {
+  const d = S.td, me = d.role === 'barber', W = { name: '', phone: '', items: [], barberId: '', idType: '', idPhotoId: '', idPreview: '', busy: false, err: '' };
+  const o = sheet('<div id="tw"></div>'), box = o.querySelector('#tw');
+  const draw = () => {
+    const pick = d.menu.filter(i => W.items.includes(i.id)), sub = pick.reduce((t, i) => t + i.price, 0), needId = pick.some(i => i.needId);
+    const free = s => ['present', 'late'].includes(s.state) && !s.busy;
+    box.innerHTML = `<div class="row"><h3 style="margin:0" class="sp">New walk-in</h3><button class="btn sec sm" data-x>Close</button></div>
+      <label class="f">Customer name<input id="tw-name" value="${esc(W.name)}" autocomplete="off" placeholder="e.g. Juan Dela Cruz"></label>
+      <label class="f">Mobile number (optional, for rewards)<input id="tw-phone" value="${esc(W.phone)}" inputmode="tel" placeholder="09XX XXX XXXX"></label>
+      <div class="sm mute" style="margin:14px 0 6px">Services</div><div class="chips wrap">${d.menu.filter(i => i.type === 'service').map(i => `<button class="chip ${W.items.includes(i.id) ? 'on' : ''}" data-witem="${i.id}">${esc(i.name)} · ${peso(i.price)}</button>`).join('')}</div>
+      ${d.menu.some(i => i.type === 'product') ? `<div class="sm mute" style="margin:12px 0 6px">Products</div><div class="chips wrap">${d.menu.filter(i => i.type === 'product').map(i => `<button class="chip ${W.items.includes(i.id) ? 'on' : ''}" data-witem="${i.id}">${esc(i.name)} · ${peso(i.price)}</button>`).join('')}</div>` : ''}
+      ${needId ? idBlock(W) : ''}
+      ${me ? '' : `<label class="f">Barber<select id="tw-barber"><option value="">Next free barber (wait in line)</option>${d.staff.map(s => `<option value="${s.id}" ${W.barberId === s.id ? 'selected' : ''} ${free(s) ? '' : 'disabled'}>${esc(s.name)}${free(s) ? '' : s.busy ? ' · cutting' : ' · not clocked in'}</option>`).join('')}</select></label>`}
+      ${W.err ? `<div class="err" style="margin-top:10px">${esc(W.err)}</div>` : ''}
+      <button class="btn block" style="margin-top:16px" data-wsave ${W.busy ? 'disabled' : ''}>${W.busy ? 'Please wait…' : (me || W.barberId ? 'Start now' : 'Add to the line') + (sub ? ' · ' + peso(sub) : '')}</button>`;
+  };
+  o.addEventListener('input', e => { if (e.target.id === 'tw-name') W.name = e.target.value; if (e.target.id === 'tw-phone') W.phone = e.target.value; });
+  o.addEventListener('change', e => { if (e.target.id === 'tw-barber') { W.barberId = e.target.value; draw(); } if (e.target.matches('[data-wfile]') && e.target.files[0]) uploadId(W, e.target.files[0], draw); });
+  o.addEventListener('click', async e => {
+    const t = e.target.closest('[data-witem],[data-wid],[data-wsave]'); if (!t) return;
+    if (t.dataset.witem) { const id = t.dataset.witem; W.items = W.items.includes(id) ? W.items.filter(x => x !== id) : [...W.items, id]; W.err = ''; return draw(); }
+    if (t.dataset.wid) { W.idType = t.dataset.wid; return draw(); }
+    if (t.hasAttribute('data-wsave')) {
+      if (!W.name.trim()) { W.err = "Enter the customer's name"; return draw(); }
+      if (!W.items.length) { W.err = 'Choose at least one service'; return draw(); }
+      W.busy = true; W.err = ''; draw();
+      try { await sapi('/svc/walkin', { method: 'POST', body: { branchId: d.branch.id, name: W.name, phone: W.phone, items: W.items.map(itemId => ({ itemId, qty: 1 })), barberId: W.barberId, idPhotoId: W.idPhotoId } }); o.remove(); toast('Walk-in added'); loadToday(); }
+      catch (x) { W.busy = false; W.err = x.message; draw(); }
+    }
+  });
+  draw(); setTimeout(() => o.querySelector('#tw-name')?.focus(), 50);
+}
+function openFinish(id) {
+  const d = S.td, x = d.tickets.find(t => t.id === id); if (!x) return;
+  const W = { items: x.items.map(i => i.itemId), discountId: x.discountId || '', method: '', invoiceNo: '', barberId: x.barberId, idType: '', idPhotoId: '', idPreview: '', busy: false, err: '' };
+  const o = sheet('<div id="tf"></div>'), box = o.querySelector('#tf'), me = d.role === 'barber';
+  const draw = () => {
+    const pick = d.menu.filter(i => W.items.includes(i.id)), sub = pick.reduce((t, i) => t + i.price, 0), dc = d.discounts.find(z => z.id === W.discountId), less = discAmt(sub, dc), total = sub - less;
+    const needId = pick.some(i => i.needId) && !x.hasId;
+    box.innerHTML = `<div class="row"><h3 style="margin:0" class="sp">#${x.no} · ${esc(x.customerName)}</h3><button class="btn sec sm" data-x>Close</button></div>
+      <div class="sm mute" style="margin:14px 0 6px">What was done</div><div class="chips wrap">${d.menu.map(i => `<button class="chip ${W.items.includes(i.id) ? 'on' : ''}" data-fitem="${i.id}">${esc(i.name)} · ${peso(i.price)}</button>`).join('')}</div>
+      ${needId ? idBlock(W) : ''}
+      ${!x.barberId && !me ? `<label class="f">Barber who did the cut<select id="tf-barber"><option value="">Choose the barber</option>${d.staff.map(s => `<option value="${s.id}" ${W.barberId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>` : ''}
+      ${d.discounts.length ? `<label class="f">Discount<select id="tf-disc"><option value="">No discount</option>${d.discounts.map(z => `<option value="${z.id}" ${W.discountId === z.id ? 'selected' : ''}>${esc(z.name)} (${z.kind === 'percent' ? z.value + '%' : peso(z.value)})</option>`).join('')}</select></label>` : ''}
+      <div class="sm mute" style="margin:14px 0 6px">How did the customer pay?</div><div class="chips wrap">${d.methods.map(m => `<button class="chip ${W.method === m ? 'on' : ''}" data-fpay="${m}">${m}</button>`).join('')}</div>
+      <label class="f">BIR invoice no. (optional)<input id="tf-inv" value="${esc(W.invoiceNo)}" placeholder="From your BIR invoice booklet or system" autocomplete="off"></label>
+      <div class="card" style="margin-top:14px"><div class="row sm"><span class="sp mute">Services</span><span>${peso(sub)}</span></div>${less ? `<div class="row sm" style="margin-top:4px"><span class="sp mute">${esc(dc.name)}</span><span>−${peso(less)}</span></div>` : ''}<div class="row" style="margin-top:8px"><b class="sp">Total</b><b class="num" style="font-size:24px">${peso(total)}</b></div></div>
+      <p class="sm mute" style="margin:10px 2px 0">${NOT_RECEIPT}</p>
+      ${W.err ? `<div class="err" style="margin-top:10px">${esc(W.err)}</div>` : ''}
+      <button class="btn block" style="margin-top:14px" data-fsave ${W.busy ? 'disabled' : ''}>${W.busy ? 'Please wait…' : `${ic('check')} Mark as done · ${peso(total)}`}</button>`;
+  };
+  o.addEventListener('input', e => { if (e.target.id === 'tf-inv') W.invoiceNo = e.target.value; });
+  o.addEventListener('change', e => { if (e.target.id === 'tf-disc') { W.discountId = e.target.value; draw(); } if (e.target.id === 'tf-barber') W.barberId = e.target.value; if (e.target.matches('[data-wfile]') && e.target.files[0]) uploadId(W, e.target.files[0], draw); });
+  o.addEventListener('click', async e => {
+    const t = e.target.closest('[data-fitem],[data-fpay],[data-wid],[data-fsave]'); if (!t) return;
+    if (t.dataset.fitem) { const id = t.dataset.fitem; W.items = W.items.includes(id) ? W.items.filter(z => z !== id) : [...W.items, id]; W.err = ''; return draw(); }
+    if (t.dataset.fpay) { W.method = t.dataset.fpay; W.err = ''; return draw(); }
+    if (t.dataset.wid) { W.idType = t.dataset.wid; return draw(); }
+    if (t.hasAttribute('data-fsave')) {
+      if (!W.items.length) { W.err = 'Choose what was done'; return draw(); }
+      if (!W.method) { W.err = 'Choose how the customer paid'; return draw(); }
+      W.busy = true; W.err = ''; draw();
+      try { await sapi(`/svc/${x.id}/finish`, { method: 'POST', body: { items: W.items.map(itemId => ({ itemId, qty: 1 })), discountId: W.discountId, method: W.method, invoiceNo: W.invoiceNo, barberId: W.barberId, idPhotoId: W.idPhotoId } }); o.remove(); toast('Done. Nice cut!'); loadToday(); }
+      catch (z) { W.busy = false; W.err = z.message; draw(); }
+    }
+  });
+  draw();
+}
+function openStart(id) {
+  const d = S.td, x = d.tickets.find(t => t.id === id); if (!x) return;
+  const free = s => ['present', 'late'].includes(s.state) && !s.busy;
+  const o = sheet(`<div class="row"><h3 style="margin:0" class="sp">Who takes #${x.no} ${esc(x.customerName)}?</h3><button class="btn sec sm" data-x>Close</button></div>
+    <div class="list" style="margin-top:12px">${d.staff.map(s => `<button class="card row" style="width:100%;text-align:left;gap:12px" data-tsb="${s.id}" ${free(s) ? '' : 'disabled'}>${s.photo ? `<img src="${esc(s.photo)}" alt="" class="av" style="width:44px;height:44px;object-fit:cover">` : `<span class="av" style="width:44px;height:44px;font-size:14px">${esc(initials(s.name))}</span>`}<span class="sp"><span class="nm">${esc(s.name)}</span><span class="sm mute" style="display:block">${free(s) ? 'Free now' : s.busy ? 'Cutting' : s.state === 'break' ? 'On break' : 'Not clocked in'}</span></span>${free(s) ? `<span class="tag ok">Free</span>` : ''}</button>`).join('')}</div>`);
+  o.addEventListener('click', async e => { const b = e.target.closest('[data-tsb]'); if (!b || b.disabled) return; try { await sapi(`/svc/${x.id}/start`, { method: 'POST', body: { barberId: b.dataset.tsb } }); o.remove(); loadToday(); } catch (z) { toast(z.message); } });
+}
+document.addEventListener('click', async e => {
+  const t = e.target.closest('[data-twalk],[data-tfin],[data-tstart],[data-tcan],[data-tarrive]'); if (!t || !S.td) return;
+  if (t.hasAttribute('data-twalk')) return openWalkin();
+  if (t.dataset.tfin) return openFinish(t.dataset.tfin);
+  if (t.dataset.tstart) { if (S.td.role === 'barber') { try { await sapi(`/svc/${t.dataset.tstart}/start`, { method: 'POST', body: {} }); loadToday(); } catch (z) { toast(z.message); } return; } return openStart(t.dataset.tstart); }
+  if (t.dataset.tcan) { const why = prompt('Why is this visit cancelled? (for example: customer left)'); if (why === null) return; try { await sapi(`/svc/${t.dataset.tcan}/cancel`, { method: 'POST', body: { reason: why } }); toast('Cancelled'); loadToday(); } catch (z) { toast(z.message); } return; }
+  if (t.dataset.tarrive) { try { await sapi(`/bookings/${t.dataset.tarrive}/arrive`, { method: 'POST', body: {} }); toast('Checked in'); loadToday(); } catch (z) { toast(z.message); } }
+});
+document.addEventListener('change', e => { if (e.target.id === 'tdbranch') { S.tdBranch = e.target.value; S.td = null; render(); loadToday(); } });
+
 function openReview(bookingId) {
   let rating = 0; const o = document.createElement('div'); o.className = 'lb'; o.style.alignItems = 'end';
   o.innerHTML = `<div class="card pop" style="width:100%;max-width:720px;border-radius:22px 22px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom))"><h2 style="font-size:20px">How was your cut?</h2><div class="stars-in" style="margin:8px 0">${[1, 2, 3, 4, 5].map(n => `<button data-n="${n}">★</button>`).join('')}</div><textarea rows="3" maxlength="600" placeholder="Tell others about your visit (optional)"></textarea><div id="rverr"></div><div class="row" style="margin-top:12px"><button class="btn ghost sp" data-x>Not now</button><button class="btn sp" data-send>Post review</button></div></div>`;
