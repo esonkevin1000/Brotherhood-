@@ -78,6 +78,7 @@ function vHome() {
   <div class="sec-h"><h2>Our shops</h2><button class="link" data-go="/map">View map</button></div>${D ? `<div class="hscroll">${D.shops.map(shopTile).join('')}</div>` : ''}`;
 }
 // ----- Discover: a marketplace of barbers and haircuts -----
+Object.assign(ICON, { chev: '<path d="m9 6 6 6-6 6"/>', lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>', doc: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>', shield: '<path d="M12 3 4 6.5v5c0 4.8 3.4 8.3 8 9.5 4.6-1.2 8-4.7 8-9.5v-5z"/>', cam: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>' });
 Object.assign(ICON, { gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>' });
 Object.assign(ICON, { filter: '<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>' });
 const SORTS = [['best', 'Best match'], ['cheapest', 'Lowest price'], ['soonest', 'Soonest available'], ['trending', 'Trending this week'], ['rating', 'Top rated'], ['nearest', 'Nearest to me'], ['experience', 'Most experienced'], ['name', 'A to Z']];
@@ -325,20 +326,66 @@ async function vMember(id, self) {
   const j = S.mem, m = j.member;
   return `<div class="pcover" style="background-image:linear-gradient(180deg,rgba(9,9,10,.2),rgba(9,9,10,.88))${m.cover ? `,url('${esc(m.cover)}')` : ''}"></div>
   <div class="bar" style="margin-top:-150px;background:none;border:0;-webkit-backdrop-filter:none;backdrop-filter:none">${self ? '' : `<button class="btn sec sm" data-go="/community" aria-label="Back">${ic('back')}</button>`}<span class="sp"></span>${self ? `<button class="btn sec sm" data-go="/notifications" aria-label="Notifications">${ic('bell')}</button><button class="btn sec sm" data-go="/me" aria-label="Settings">${ic('gear')}</button>` : ''}</div>
-  <div class="phead">${pic(m.photo, m.name, 'av lg')}<span class="sp"></span>${m.mine ? `<button class="btn sec sm" style="margin-bottom:6px" data-go="/me">${ic('gear')} Edit profile</button>` : S.user ? `<button class="btn ${m.following ? 'sec' : 'white'} sm" style="margin-bottom:6px;min-width:104px" data-mfollow="${m.id}" data-on="${m.following ? 1 : 0}">${m.following ? '✓ Following' : '+ Follow'}</button>` : `<button class="btn white sm" style="margin-bottom:6px;min-width:104px" data-go="/auth">+ Follow</button>`}</div>
+  <div class="phead">${pic(m.photo, m.name, 'av lg')}<span class="sp"></span>${m.mine ? `<button class="btn sec sm" style="margin-bottom:6px" data-go="/me/edit">Edit profile</button>` : S.user ? `<button class="btn ${m.following ? 'sec' : 'white'} sm" style="margin-bottom:6px;min-width:104px" data-mfollow="${m.id}" data-on="${m.following ? 1 : 0}">${m.following ? '✓ Following' : '+ Follow'}</button>` : `<button class="btn white sm" style="margin-bottom:6px;min-width:104px" data-go="/auth">+ Follow</button>`}</div>
   <h1 style="font-size:26px;margin-top:10px">${esc(m.name)}</h1>${m.bio ? `<p class="mute" style="margin:6px 0 0;white-space:pre-wrap">${esc(m.bio)}</p>` : ''}<div class="mute sm" style="margin-top:4px">Member since ${new Date(m.joined).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' })}</div>
   <div class="stats5" style="grid-template-columns:repeat(3,1fr)"><div><b class="num">${m.posts}</b><span>Posts</span></div><div><b class="num">${m.likes}</b><span>Likes</span></div><div><b class="num">${m.followers}</b><span>Followers</span></div></div>
   <div class="sec-h"><h2>Posts</h2></div><div class="list">${j.posts.map(postCard).join('') || '<div class="card empty">No posts yet.</div>'}</div>`;
 }
 function vMe() {
-  if (!S.user) { setTimeout(() => nav('/auth')); return ''; }
-  const u = S.user, favs = S.D ? S.D.barbers.filter(b => S.favs.includes(b.id)) : [];
-  return header('Settings', '/profile') + `${memberPhotos(u)}<div class="sec-h"><h2>Rewards</h2></div>${loyaltyCard()}${pushCard()}
-  <div class="sec-h"><h2>Barbers you follow</h2></div><div class="list">${favs.map(barberRow).join('') || emptyBox('heart', 'No barbers yet', 'Tap Follow on a barber to keep them here.', '<button class="btn sm" data-go="/discover">Browse barbers</button>')}</div>
-  <div class="sec-h"><h2>Saved styles</h2><button class="link" data-go="/style">Style finder</button></div><div class="pill-row">${(u.styles || []).map(id => cutById(id)).filter(Boolean).map(c => `<span class="tag">${esc(c.name)}</span>`).join('') || '<span class="mute sm">None yet. Try the Style finder.</span>'}</div>
-  <div class="sec-h"><h2>My details</h2></div><form id="mef">${S.meMsg ? `<div class="${S.meMsg.ok ? 'ok' : 'err'}">${esc(S.meMsg.t)}</div>` : ''}<label class="f">Name<input name="name" value="${esc(u.name)}" required></label><label class="f">Mobile<input name="phone" type="tel" value="${esc(u.phone)}" required></label><label class="f">City<input name="city" value="${esc(u.city)}" placeholder="e.g. San Pablo"></label><button class="btn block" style="margin-top:14px">Save</button></form>
-  <div class="sec-h"><h2>For barbers & owners</h2></div><div class="card"><p class="mute sm" style="margin-top:0">Manage your professional profile and portfolio with your Brotherhood staff login.</p><button class="btn sec block" data-go="/pro">Open pro tools</button></div>
-  <div class="sec-h"><h2>Account</h2></div><div class="list"><button class="btn ghost block" data-logout>Log out</button><div class="sm mute" style="text-align:center;margin:4px 0"><a href="/terms" target="_blank" rel="noopener">Terms of Use</a> · <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a></div><details class="card"><summary>Delete my account</summary><p class="sm mute">This removes your account and favorites. Shop booking records stay with the shop but are unlinked from you.</p><input id="delpw" type="password" placeholder="Confirm password"><button class="btn danger block" style="margin-top:10px" data-delete>Delete account</button></details></div>`;
+  if (!S.user) { if (!S.token) { setTimeout(() => nav('/auth')); return ''; } return header('Settings', '/profile') + skelList(); }   // still loading the account after a reload
+  const sub = route().b;
+  if (sub === 'edit') return vEditProfile();
+  if (sub === 'notifications') return header('Notifications', '/me') + `${pushCard() || emptyBox('bell', 'Not available here', 'This browser cannot show notifications. Try Chrome, or add Brotherhood to your home screen.')}
+    <div class="glabel">Email</div><div class="card"><b>Booking reminders and review requests</b><div class="sm mute" style="margin-top:4px">Sent to ${esc(S.user.email)} when the shop has email turned on.</div></div>`;
+  if (sub === 'account') return vAccount();
+  const u = S.user, l = S.loyal, saved = (u.styles || []).length;
+  const row = (icon, title, subt, attrs, extra = '') => `<button class="srow" ${attrs}><span class="si">${ic(icon)}</span><span class="sp"><b>${title}</b><small>${subt}</small></span>${extra}<span class="chev">${ic('chev')}</span></button>`;
+  const canInstall = !isStandalone();
+  return header('Settings', '/profile') + `
+  <button class="sprof pop" data-go="/profile">${pic(u.photo, u.name, 'av')}<span class="sp"><b>${esc(u.name)}</b><small>View your public profile</small></span><span class="chev">${ic('chev')}</span></button>
+  <div class="sstats pop"><div><b class="num">${l ? l.balance ?? l.visits : '—'}</b><span>Points</span></div><div><b class="num">${l ? l.visits : '—'}</b><span>Paid visits</span></div><div><b>${l ? esc(l.tier) : '—'}</b><span>Tier</span></div></div>
+  <div class="probanner pop"><span class="sp"><b>Barber or shop owner?</b><small>Manage your profile, clients and shop</small></span><button class="btn sm" data-go="/pro">Pro tools</button></div>
+  <div class="glabel">Account</div><div class="sgroup">
+    ${row('user', 'Edit profile', 'Photo, cover, bio and your details', 'data-go="/me/edit"')}
+    ${row('star', 'Rewards', l ? `${l.balance ?? l.visits} points · ${esc(l.tier)} · redeem vouchers` : 'Points, tier and vouchers', l ? 'data-rewards' : 'data-go="/me"')}
+    ${row('bell', 'Notifications', 'Reminders, slot alerts and community', 'data-go="/me/notifications"')}
+    ${row('lock', 'Account and security', 'Password, email and delete account', 'data-go="/me/account"')}
+  </div>
+  <div class="glabel">Your cuts</div><div class="sgroup">
+    ${row('cal', 'My bookings', 'Upcoming cuts and past visits', 'data-go="/bookings"')}
+    ${row('scissors', 'Saved styles', saved ? `${saved} saved · open the Style finder` : 'Find a cut that suits your face', 'data-go="/style"')}
+    ${row('pin', 'Shops near you', 'Map of all branches', 'data-go="/map"')}
+  </div>
+  <div class="glabel">App</div><div class="sgroup">
+    ${canInstall ? row('home', 'Install the app', 'Add Brotherhood to your home screen', deferredInstall ? 'data-install' : 'data-insthelp') : ''}
+    ${row('chat', 'Help and support', 'Report a problem or ask a question', S.contact ? `data-mailto="${esc(S.contact)}"` : 'data-go="/"')}
+    ${row('doc', 'Terms of Use', 'The rules for using Brotherhood', 'data-open="/terms"')}
+    ${row('shield', 'Privacy Policy', 'How we handle your information', 'data-open="/privacy"')}
+  </div>
+  <button class="btn ghost block" style="margin-top:22px;color:var(--bad)" data-logout>Log out</button>
+  <div class="sm mute" style="text-align:center;margin:14px 0 4px">Brotherhood · More than a haircut</div>`;
+}
+function vEditProfile() {
+  const u = S.user;
+  return header('Edit profile', '/me') + `<div class="ecover pop" style="${u.cover ? `background-image:linear-gradient(180deg,rgba(0,0,0,.05),rgba(0,0,0,.45)),url('${esc(u.cover)}')` : ''}"><div class="ecbtns"><label class="btn sec sm">${ic('cam')} ${u.cover ? 'Change cover' : 'Add cover'}<input type="file" id="mcoverf" accept="image/*" hidden></label>${u.cover ? `<button class="btn sec sm" data-mcovdel>Remove</button>` : ''}</div></div>
+  <div class="eav">${pic(u.photo, u.name, 'av lg')}<label class="camb" aria-label="Change profile photo">${ic('cam')}<input type="file" id="mavatar" accept="image/*" hidden></label></div>
+  <div style="text-align:center;margin:-2px 0 4px">${u.photo ? '<button class="link" data-mphotodel style="color:var(--mute)">Remove profile photo</button>' : '<span class="sm mute">Tap the camera to add a photo</span>'}</div>
+  <form id="mef">${S.meMsg ? `<div class="${S.meMsg.ok ? 'ok' : 'err'}">${esc(S.meMsg.t)}</div>` : ''}
+    <label class="f">Bio<textarea name="bio" rows="3" maxlength="300" placeholder="Your style, your barber, anything you want the brotherhood to know">${esc(u.bio || '')}</textarea></label>
+    <div class="glabel" style="margin-top:22px">My details</div>
+    <label class="f" style="margin-top:0">Name<input name="name" value="${esc(u.name)}" required></label>
+    <label class="f">Mobile<input name="phone" type="tel" value="${esc(u.phone)}" required></label>
+    <label class="f">City<input name="city" value="${esc(u.city || '')}" placeholder="e.g. San Pablo"></label>
+    <label class="f">Email<input value="${esc(u.email)}" disabled></label>
+    <button class="btn block" style="margin-top:18px">Save changes</button></form>
+  <div class="sm mute" style="margin-top:12px;text-align:center">Your photo, cover, name and bio are public. Your mobile and email are never shown.</div>`;
+}
+function vAccount() {
+  const u = S.user;
+  return header('Account', '/me') + `<div class="glabel">Signed in as</div><div class="card"><b>${esc(u.email)}</b><div class="sm mute" style="margin-top:2px">Your email is your login.</div></div>
+  <div class="glabel">Change password</div><form id="pwf" class="card">${S.pwMsg ? `<div class="${S.pwMsg.ok ? 'ok' : 'err'}">${esc(S.pwMsg.t)}</div>` : ''}<label class="f" style="margin-top:0">Current password<input name="current" type="password" autocomplete="current-password" required></label><label class="f">New password<input name="password" type="password" minlength="8" autocomplete="new-password" required></label><label class="f">Repeat new password<input name="password2" type="password" minlength="8" autocomplete="new-password" required></label><button class="btn block" style="margin-top:14px">Update password</button></form>
+  <div class="glabel">Danger zone</div><details class="card"><summary style="cursor:pointer;color:var(--bad);font-weight:600">Delete my account</summary><p class="sm mute">This removes your account, posts, photos and vouchers. Shop booking records stay with the shop but are unlinked from you. This cannot be undone.</p><input id="delpw" type="password" placeholder="Confirm password"><button class="btn danger block" style="margin-top:10px" data-delete>Delete account</button></details>
+  <button class="btn ghost block" style="margin-top:22px;color:var(--bad)" data-logout>Log out</button>`;
 }
 
 // ----- pro tools -----
@@ -1038,8 +1085,11 @@ app.addEventListener('submit', async e => {
     try { const j = await api(S.auth.mode === 'signup' ? '/signup' : '/login', { method: 'POST', body: { ...d, email: String(d.email || '').trim(), agree: !!d.agree } }, null); S.push = null; S.token = j.token; store.set('bh_token', j.token); S.user = j.user; await loadMe(); S.mine = null; nav(S.bk ? '/book' : '/me'); }
     catch (x) { S.auth.err = x.message; }
     S.auth.busy = false; render();
+  } else if (f.id === 'pwf') {
+    if (d.password !== d.password2) { S.pwMsg = { ok: false, t: 'The new passwords do not match' }; return render(); }
+    try { const j = await api('/me/password', { method: 'PUT', body: { current: d.current, password: d.password } }); if (j.token) { S.token = j.token; store.set('bh_token', j.token); } S.pwMsg = { ok: true, t: 'Password updated. Other devices are signed out.' }; f.reset(); } catch (x) { S.pwMsg = { ok: false, t: x.message }; } render();
   } else if (f.id === 'mef') {
-    try { S.user = (await api('/me', { method: 'PUT', body: d })).user; S.meMsg = { ok: true, t: 'Saved' }; } catch (x) { S.meMsg = { ok: false, t: x.message }; } render();
+    try { S.user = (await api('/me', { method: 'PUT', body: d })).user; S.meMsg = { ok: true, t: 'Saved' }; S.mem = null; toast('Profile saved'); } catch (x) { S.meMsg = { ok: false, t: x.message }; } render();
   } else if (f.id === 'prolf') {
     try { const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }), j = await r.json(); if (!r.ok) throw new Error(j.error);
       S.proToken = j.token; store.set('bh_pro', j.token); await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } else S.proTab = 'dash'; loadDash(); } catch (x) { S.proErr = x.message; } render();
@@ -1052,7 +1102,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-nsallow],[data-ics],[data-pushon],[data-pushoff],[data-pushtest],[data-vcheck],[data-vclaim],[data-promoadd],[data-rewards],[data-rewardadd],[data-rewardtoggle],[data-rewarddel],[data-usevoucher],[data-promotoggle],[data-promodel],[data-promoapply],[data-blockadd],[data-blockdel],[data-idays],[data-ldays],[data-client],[data-copylink],[data-sharelink],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-nsallow],[data-ics],[data-mailto],[data-open],[data-insthelp],[data-pushon],[data-pushoff],[data-pushtest],[data-vcheck],[data-vclaim],[data-promoadd],[data-rewards],[data-rewardadd],[data-rewardtoggle],[data-rewarddel],[data-usevoucher],[data-promotoggle],[data-promodel],[data-promoapply],[data-blockadd],[data-blockdel],[data-idays],[data-ldays],[data-client],[data-copylink],[data-sharelink],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -1191,6 +1241,9 @@ app.addEventListener('click', async e => {
   }
   if (D.sharelink) { try { await navigator.share({ title: D.sname + ' · Book a cut', url: D.sharelink }); } catch { } return; }
   if (D.nsallow) { try { await api('/pro/noshow-allow', { method: 'POST', body: { customerId: D.nsallow, allow: D.allow === '1' } }, S.proToken); toast(D.allow === '1' ? 'Customer can book online again' : 'Customer restricted'); await loadRules(); } catch (x) { toast(x.message); } return render(); }
+  if (D.mailto) { location.href = 'mailto:' + D.mailto + '?subject=' + encodeURIComponent('Brotherhood app help'); return; }
+  if (D.open) { window.open(D.open, '_blank', 'noopener'); return; }
+  if (D.insthelp != null) { sheet(`<h3>Install Brotherhood</h3><div class="list" style="margin-top:6px"><div class="card"><b>iPhone</b><div class="sm mute" style="margin-top:4px">Open this page in Safari, tap the Share button, then <b>Add to Home Screen</b>.</div></div><div class="card"><b>Android</b><div class="sm mute" style="margin-top:4px">Open it in Chrome, tap the menu, then <b>Install app</b> or <b>Add to Home screen</b>.</div></div></div><button class="btn block" style="margin-top:14px" data-x>Got it</button>`); return; }
   if (D.ics != null && S.bk && S.bk.done) {
     const b = S.bk.done, start = new Date(`${b.date}T${b.time}:00`), end = new Date(start.getTime() + 45 * 6e4), f = d => `${ymd(d).replace(/-/g, '')}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
     const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Brotherhood//Booking//EN', 'BEGIN:VEVENT', `UID:${b.id}@brotherhood`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`, `DTSTART:${f(start)}`, `DTEND:${f(end)}`, `SUMMARY:Haircut at ${b.branch}`, `DESCRIPTION:${(b.items || []).map(i => i.name).join(' + ')} with ${b.staff || 'your barber'}`, `LOCATION:${b.branch}`, 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
@@ -1232,7 +1285,7 @@ function openReview(bookingId) {
 }
 
 (async function init() {
-  api('/config').then(j => { S.shop = j.shop; if (S.shop && !/^brotherhood$/i.test(S.shop)) document.title = S.shop + ' · Book your cut'; render(); }).catch(() => { });
+  api('/config').then(j => { S.shop = j.shop; S.contact = j.contact || ''; if (S.shop && !/^brotherhood$/i.test(S.shop)) document.title = S.shop + ' · Book your cut'; render(); }).catch(() => { });
   if (S.token) await loadMe();
   if (S.token) loadBookings().then(render);
   onRoute();
