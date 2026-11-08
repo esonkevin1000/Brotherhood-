@@ -15,3 +15,15 @@ self.addEventListener('fetch', e => {
     return r;
   }).catch(() => caches.match(e.request).then(m => m || new Response('Offline: no internet connection. Please try again.', { status: 503 }))));
 });
+// Push notifications (booking, reminders, community). The server sends { title, body, url, tag }.
+self.addEventListener('push', e => {
+  let d = {}; try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Brotherhood', { body: d.body || '', icon: '/bh-icon-192.png', badge: '/bh-icon-192.png', tag: d.tag || undefined, renotify: !!d.tag, data: { url: d.url || '/member' } }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close(); const url = (e.notification.data && e.notification.data.url) || '/member';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+    for (const c of cs) { if (new URL(c.url).origin === location.origin && 'focus' in c) { if ('navigate' in c) c.navigate(url).catch(() => { }); return c.focus(); } }
+    return clients.openWindow(url);
+  }));
+});

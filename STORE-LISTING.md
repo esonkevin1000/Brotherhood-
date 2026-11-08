@@ -39,10 +39,11 @@ Free for customers. You pay at the shop.
 
 **Category:** Lifestyle (o Beauty). **Tags:** barber, booking, haircut.
 
-## Mga screenshot at graphics (ikaw ang kukuha mula sa totoong app)
-- Phone screenshots: 4 hanggang 8, 1080x1920 o malapit (Discover, barber profile, booking, community, rewards).
-- App icon: 512x512 PNG (meron na tayong `icon-512.png`).
-- Feature graphic: 1024x500 (kailangan sa Play).
+## Mga screenshot at graphics (nasa folder na `store-assets/`)
+- **Feature graphic 1024x500:** `store-assets/feature-graphic.jpg` (galing sa `feature-graphic.html`).
+- **Phone screenshots 1080x1920 (6):** `phone-1-home.jpg`, `phone-2-discover.jpg`, `phone-3-shop.jpg`, `phone-4-barber.jpg`, `phone-5-style-finder.jpg`, `phone-6-map.jpg`. Kinuha mula sa totoong live app (public na pages). Kailangan ng Play ng 2 hanggang 8.
+- **App icon 512x512:** `bh-icon-512.png` sa root ng project.
+- Mas maganda kung papalitan mo ng mga screenshot mula sa sarili mong phone pagdating ng public release, lalo na kapag marami nang review at barber na may rating.
 
 ## Play Console: mga sagot na tugma sa app
 - **Data safety:** kinokolekta ang Name, Email, Phone number, Photos (kung mag-upload), User content (posts, reviews), App activity (bookings). Hindi ibinebenta. Naka-encrypt in transit. May paraan ng pag-delete (URL sa taas). Walang ads, walang analytics.

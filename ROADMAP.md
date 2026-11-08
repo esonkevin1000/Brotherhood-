@@ -65,6 +65,17 @@ Paalala: ang promo ay nakakabit sa booking sa app. Ang walk-in ay patuloy na gum
 | **Gamit ng voucher:** isang beses lang, 60 araw ang validity, hanggang 3 hindi pa nagagamit nang sabay. May button sa booking page. Sa cashier ay kusang nagiging discount ("Reward: ...") | Booking page at POS |
 | **Puntos:** ang balanse ay bayad na bisita minus ang nagastos. Ang tier ay batay sa kabuuang bisita kaya hindi bumababa. Ang voucher na hindi nagamit hanggang mag-expire, o ang booking na na-cancel, ay nagbabalik ng puntos | |
 
+## 2e. Idinagdag sa phase 3: push notifications
+
+| Feature | Saan makikita |
+|---|---|
+| **Push sa phone** (Web Push, walang dagdag na library): paalala mga 2 oras bago ang gupit, abiso kapag kinansela o binago ng shop ang booking, may bumukas na slot sa waitlist, "How was your cut?" pagkatapos magbayad, at paalala na oras na ulit ng gupit | Customer: Profile o pagkatapos mag-book, Turn on notifications |
+| **Mga pagpipilian:** Bookings, reminders at slot alerts (naka-on), Community (comments, followers, naka-off), Send a test, Turn off | Customer: Profile |
+| **Mga patakaran:** walang abiso sa sarili mong ginawang booking; walang nudge mula 9 PM hanggang 8 AM; hanggang 5 phone kada member; natatanggal ang patay na phone; natatanggal ang lahat kapag nag-delete ng account o nag-logout | |
+| Kailangan sa iPhone: Add to Home Screen muna (hinihingi ng Apple) | |
+
+Ang mga lumang in-app na notification ay patuloy na gumagana. Ang push ay dagdag lang.
+
 ## 3. Susunod (inirerekomendang pagkakasunod-sunod)
 
 1. **SMS na paalala** (kailangan ng SMS provider; ang email ay tapos na).

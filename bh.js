@@ -246,7 +246,7 @@ async function loadSlots() {
 function vBook() {
   const k = S.bk, D = S.D; if (!k || !D) { setTimeout(() => nav('/discover')); return ''; }
   const br = D.shops.find(s => s.id === k.branchId), team = D.barbers.filter(b => b.branchId === k.branchId), days = Array.from({ length: 14 }, (_, i) => new Date(Date.now() + i * 864e5));
-  if (k.done) return header('Booked!') + `<div class="ok pop"><b>You're booked, ${esc(S.user.name.split(' ')[0])}!</b><br>${fmtDate(k.done.date)} at ${t12(k.done.time)} · ${esc(k.done.branch)}<br>${esc(k.done.items.map(i => i.name).join(' + '))} with ${esc(k.done.staff)} · ${peso(k.done.total)}${k.done.promo ? `<br>Promo <b>${esc(k.done.promo.code)}</b>: you save ${peso(k.done.promo.amt)} · you pay ${peso(Math.max(0, k.done.total - k.done.promo.amt))}` : ''}<br><span class="sm">Pay at the shop. Cancel up to 1 hour before.</span>${seriesHtml(k)}</div><button class="btn block" data-go="/bookings">View my bookings</button>`;
+  if (k.done) return header('Booked!') + `<div class="ok pop"><b>You're booked, ${esc(S.user.name.split(' ')[0])}!</b><br>${fmtDate(k.done.date)} at ${t12(k.done.time)} · ${esc(k.done.branch)}<br>${esc(k.done.items.map(i => i.name).join(' + '))} with ${esc(k.done.staff)} · ${peso(k.done.total)}${k.done.promo ? `<br>Promo <b>${esc(k.done.promo.code)}</b>: you save ${peso(k.done.promo.amt)} · you pay ${peso(Math.max(0, k.done.total - k.done.promo.amt))}` : ''}<br><span class="sm">Pay at the shop. Cancel up to 1 hour before.</span>${seriesHtml(k)}</div>${pushCard()}<button class="btn block" data-go="/bookings">View my bookings</button>`;
   const total = D.services.filter(s => k.items.includes(s.id)).reduce((t, s) => t + s.price, 0);
   return header('Book a cut', k.staffId !== 'any' ? '/barber/' + k.staffId : '/discover') + `<div class="card row">${ic('pin')}<div class="sp"><b>${esc(br?.name || '')}</b><div class="sm mute">${esc(br?.address || '')}</div></div></div>
   ${k.pkg ? `<div class="card row" style="margin-top:10px"><div class="pa s">${pkgArt(k.pkg.key)}</div><div class="sp"><b>${esc(k.pkg.name)}</b><div class="sm mute">${peso(k.pkg.price)} · the barber's price, pay at the shop</div></div><button class="link" data-rmpkg>Remove</button></div>` : ''}<div class="sec-h"><h2>1 · Barber</h2></div><div class="chips"><button class="chip ${k.staffId === 'any' ? 'on' : ''}" data-bstaff="any">Any available</button>${team.map(b => `<button class="chip ${k.staffId === b.id ? 'on' : ''}" data-bstaff="${b.id}">${esc(b.name)}</button>`).join('')}</div>
@@ -313,7 +313,7 @@ async function vMember(id) {
 function vMe() {
   if (!S.user) { setTimeout(() => nav('/auth')); return ''; }
   const u = S.user, favs = S.D ? S.D.barbers.filter(b => S.favs.includes(b.id)) : [];
-  return header('Profile', '/') + `${memberPhotos(u)}${loyaltyCard()}
+  return header('Profile', '/') + `${memberPhotos(u)}${loyaltyCard()}${pushCard()}
   <div class="sec-h"><h2>Barbers you follow</h2></div><div class="list">${favs.map(barberRow).join('') || '<div class="card empty">Tap Follow on a barber to keep them here.</div>'}</div>
   <div class="sec-h"><h2>Saved styles</h2><button class="link" data-go="/style">Style finder</button></div><div class="pill-row">${(u.styles || []).map(id => cutById(id)).filter(Boolean).map(c => `<span class="tag">${esc(c.name)}</span>`).join('') || '<span class="mute sm">None yet. Try the Style finder.</span>'}</div>
   <div class="sec-h"><h2>My details</h2></div><form id="mef">${S.meMsg ? `<div class="${S.meMsg.ok ? 'ok' : 'err'}">${esc(S.meMsg.t)}</div>` : ''}<label class="f">Name<input name="name" value="${esc(u.name)}" required></label><label class="f">Mobile<input name="phone" type="tel" value="${esc(u.phone)}" required></label><label class="f">City<input name="city" value="${esc(u.city)}" placeholder="e.g. San Pablo"></label><button class="btn block" style="margin-top:14px">Save</button></form>
@@ -398,6 +398,43 @@ function loyaltyCard() {
   return `<div class="card" style="margin:12px 0"><div class="row"><span class="sm mute" style="letter-spacing:1px">BROTHERHOOD REWARDS</span><span class="sp"></span><span class="gold">${esc(l.tier)}</span></div><div class="row" style="align-items:baseline;gap:8px;margin-top:4px"><b class="num" style="font-size:30px">${l.balance ?? l.visits}</b><span class="mute sm">point${(l.balance ?? l.visits) === 1 ? '' : 's'} to spend · ${l.visits} paid visit${l.visits === 1 ? '' : 's'} so far</span></div>
     <div class="bar2" style="margin:8px 0 6px"><i class="ok" style="width:${pct}%"></i></div><div class="sm mute">${l.next ? `${l.next.visitsNeeded} more visit${l.next.visitsNeeded === 1 ? '' : 's'} to ${esc(l.next.name)}` : 'You are at the top tier. Thank you!'}${l.linked ? '' : ' · Book your first cut to start earning.'}</div>${(l.rewards || []).length || (l.vouchers || []).length ? `<button class="btn white sm block" data-rewards style="margin-top:10px">${ic('star')} Redeem rewards${(l.vouchers || []).some(v => v.status === 'active') ? ' · you have a voucher' : ''}</button>` : ''}</div>`;
 }
+
+// ----- push notifications: turn on reminders and alerts on this phone -----
+const swReady = (ms = 5000) => Promise.race([navigator.serviceWorker.ready, new Promise((_, no) => setTimeout(() => no(new Error('no service worker')), ms))]);   // never wait forever when the worker did not start
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const keyToArray = k => { const raw = atob((k + '='.repeat((4 - k.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from([...raw].map(c => c.charCodeAt(0))); };
+async function loadPush() {
+  S.push = { loading: true }; const p = { ok: pushSupported(), perm: 'Notification' in window ? Notification.permission : 'unsupported', on: false, prefs: { bookings: true, community: false }, ios: isIOS && !isStandalone() };
+  if (p.ok && S.token) {
+    try { const reg = await swReady(), sub = await reg.pushManager.getSubscription(); p.on = !!sub && Notification.permission === 'granted'; } catch { p.ok = false; }
+    try { p.prefs = (await api('/push/prefs')).prefs; } catch { }
+  }
+  S.push = p; render();
+}
+async function enablePush() {
+  try {
+    if (!pushSupported()) return toast('This browser cannot show notifications. Try Chrome, or add Brotherhood to your home screen.');
+    if (await Notification.requestPermission() !== 'granted') { toast('Notifications are blocked. You can allow them in your phone or browser settings.'); return loadPush(); }
+    const reg = await swReady(), { key } = await api('/push/key');
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) { try { await sub.unsubscribe(); } catch { } sub = null; }   // always a fresh subscription for this server key
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyToArray(key) });
+    await api('/push/subscribe', { method: 'POST', body: sub.toJSON() }); toast('Notifications are on');
+  } catch (e) { toast(e.message || 'Could not turn on notifications'); }
+  loadPush();
+}
+async function disablePush() {
+  try { const reg = await swReady(), sub = await reg.pushManager.getSubscription(); if (sub) { try { await api('/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch { } await sub.unsubscribe(); } toast('Notifications are off'); } catch (e) { toast(e.message || 'Could not turn off'); }
+  loadPush();
+}
+const pushCard = () => {
+  const p = S.push; if (!S.user || !p || p.loading) return '';
+  const box = inner => `<div class="card" style="margin:12px 0">${inner}</div>`, head = t => `<div class="row"><span class="av" style="width:40px;height:40px">${ic('bell')}</span><div class="sp"><b>${t}</b></div></div>`;
+  if (!p.ok) return p.ios ? box(`${head('Get reminders on your iPhone')}<div class="sm mute" style="margin-top:8px">Tap the Share button in Safari, then <b>Add to Home Screen</b>. Open Brotherhood from your home screen, then turn on notifications here.</div>`) : '';
+  if (p.perm === 'denied') return box(`${head('Notifications are blocked')}<div class="sm mute" style="margin-top:8px">Allow notifications for Brotherhood in your phone or browser settings, then come back here.</div>`);
+  if (!p.on) return box(`${head('Get booking reminders')}<div class="sm mute" style="margin:6px 0 10px">A reminder before your cut, and a message if the shop changes your booking or a slot opens.</div><button class="btn block" data-pushon>Turn on notifications</button>`);
+  return box(`${head('Notifications are on')}<label class="row" style="gap:10px;margin:12px 0 4px;cursor:pointer"><input type="checkbox" id="pbook" style="width:20px;height:20px" ${p.prefs.bookings ? 'checked' : ''}><span>Bookings, reminders and slot alerts</span></label><label class="row" style="gap:10px;margin:8px 0;cursor:pointer"><input type="checkbox" id="pcomm" style="width:20px;height:20px" ${p.prefs.community ? 'checked' : ''}><span>Community (comments and new followers)</span></label><div class="row" style="gap:8px;margin-top:8px"><button class="btn sec sm sp" data-pushtest>Send a test</button><button class="btn ghost sm sp" data-pushoff>Turn off</button></div>`);
+};
 const logoText = () => S.shop && !/^brotherhood$/i.test(S.shop) ? esc(S.shop) : '<img src="/bh-mark.png" alt="" width="30" height="30"><span>Brother<b>hood</b></span>';   // the B mark is the Brotherhood app's logo; partner shops show their own name
 // ----- booking rules and no-show watch (owner), blocked time (barber), repeat bookings (member) -----
 const seriesHtml = k => (k.series || []).length ? `<div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.12);padding-top:8px" class="sm"><b>Repeat bookings</b>${k.series.map(x => `<div>${x.ok ? '✓' : '✕'} ${fmtDate(x.date)} at ${t12(x.time)}${x.ok ? '' : ` <span style="opacity:.8">· ${esc(x.reason)}</span>`}</div>`).join('')}</div>` : '';
@@ -721,7 +758,7 @@ function locate() {
 }
 
 // ----- notifications -----
-const NICON = { due: 'scissors', waitlist: 'cal', reply: 'chat', booking: 'cal', rate: 'heart', like: 'heart', comment: 'chat', follow: 'team' };
+const NICON = { reminder: 'bell', due: 'scissors', waitlist: 'cal', reply: 'chat', booking: 'cal', rate: 'heart', like: 'heart', comment: 'chat', follow: 'team' };
 function vNotifs() {
   if (!S.token) { setTimeout(() => nav('/auth')); return ''; }
   const n = S.notifs; if (!n) return header('Notifications', '/') + '<div class="empty">Loading…</div>';
@@ -878,6 +915,7 @@ async function onRoute() {
   if (['discover', 'home', 'book', 'barber', 'shop', 'map', 'community', 'me', 'member'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
   if (['home', 'me', 'book'].includes(r.a) && S.token && !S.loyal) api('/loyalty').then(j => { S.loyal = j; render(); }).catch(() => { });
+  if (['me', 'book'].includes(r.a) && S.token && !S.push) loadPush();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
   if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
   if (r.a === 'community') loadCommunity();
@@ -912,6 +950,10 @@ app.addEventListener('change', async e => {
     const f = e.target.files[0], id = e.target.dataset.rwfile; e.target.value = ''; if (!f) return;
     try { await api('/pro/rewards/' + id, { method: 'PUT', body: { photo: await compress(f) } }, S.proToken); toast('Picture saved'); await loadRules(); render(); } catch (x) { toast(x.message); }
   }
+  if ((e.target.id === 'pbook' || e.target.id === 'pcomm') && S.push) {
+    S.push.prefs = { bookings: document.getElementById('pbook').checked, community: document.getElementById('pcomm').checked };
+    try { await api('/push/prefs', { method: 'PUT', body: S.push.prefs }); toast('Saved'); } catch (x) { toast(x.message); }
+  }
   if (e.target.id === 'brep' && S.bk) { S.bk.repEvery = +e.target.value; render(); }
   if (e.target.id === 'brepn' && S.bk) { S.bk.repCount = +e.target.value; }
   if (e.target.id === 'rnoshow' || e.target.id === 'rbuffer') {
@@ -928,7 +970,7 @@ app.addEventListener('submit', async e => {
   e.preventDefault(); const f = e.target, d = Object.fromEntries(new FormData(f));
   if (f.id === 'authf') {
     S.auth.busy = true; S.auth.err = ''; render();
-    try { const j = await api(S.auth.mode === 'signup' ? '/signup' : '/login', { method: 'POST', body: { ...d, email: String(d.email || '').trim(), agree: !!d.agree } }, null); S.token = j.token; store.set('bh_token', j.token); S.user = j.user; await loadMe(); S.mine = null; nav(S.bk ? '/book' : '/me'); }
+    try { const j = await api(S.auth.mode === 'signup' ? '/signup' : '/login', { method: 'POST', body: { ...d, email: String(d.email || '').trim(), agree: !!d.agree } }, null); S.push = null; S.token = j.token; store.set('bh_token', j.token); S.user = j.user; await loadMe(); S.mine = null; nav(S.bk ? '/book' : '/me'); }
     catch (x) { S.auth.err = x.message; }
     S.auth.busy = false; render();
   } else if (f.id === 'mef') {
@@ -945,7 +987,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-nsallow],[data-vcheck],[data-vclaim],[data-promoadd],[data-rewards],[data-rewardadd],[data-rewardtoggle],[data-rewarddel],[data-usevoucher],[data-promotoggle],[data-promodel],[data-promoapply],[data-blockadd],[data-blockdel],[data-idays],[data-ldays],[data-client],[data-copylink],[data-sharelink],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-nsallow],[data-pushon],[data-pushoff],[data-pushtest],[data-vcheck],[data-vclaim],[data-promoadd],[data-rewards],[data-rewardadd],[data-rewardtoggle],[data-rewarddel],[data-usevoucher],[data-promotoggle],[data-promodel],[data-promoapply],[data-blockadd],[data-blockdel],[data-idays],[data-ldays],[data-client],[data-copylink],[data-sharelink],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -989,7 +1031,7 @@ app.addEventListener('click', async e => {
   if (D.rebook) { const b = S.mine.find(x => x.id === D.rebook); startBooking(b.branchId, b.staffId); S.bk.items = b.itemIds.filter(id => S.D?.services.some(s => s.id === id)); if (!S.token) return nav('/auth'); return loadSlots(); }
   if (D.review) { openReview(D.review); return; }
   if (D.authmode) { S.auth.mode = D.authmode; S.auth.err = ''; return render(); }
-  if (D.logout != null) { S.token = null; S.user = null; S.favs = []; S.mine = null; store.set('bh_token', null); return nav('/'); }
+  if (D.logout != null) { try { if (pushSupported()) { const reg = await swReady(1500), sub = await reg.pushManager.getSubscription(); if (sub) { try { await api('/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch { } await sub.unsubscribe(); } } } catch { } S.push = null; S.token = null; S.user = null; S.favs = []; S.mine = null; store.set('bh_token', null); return nav('/'); }
   if (D.delete != null) {
     const pw = document.getElementById('delpw').value; if (!pw || !confirm('Delete your account permanently?')) return;
     try { await api('/me', { method: 'DELETE', body: { password: pw } }); S.token = null; S.user = null; store.set('bh_token', null); toast('Account deleted'); nav('/'); } catch (x) { toast(x.message); } return;
@@ -1084,6 +1126,9 @@ app.addEventListener('click', async e => {
   }
   if (D.sharelink) { try { await navigator.share({ title: D.sname + ' · Book a cut', url: D.sharelink }); } catch { } return; }
   if (D.nsallow) { try { await api('/pro/noshow-allow', { method: 'POST', body: { customerId: D.nsallow, allow: D.allow === '1' } }, S.proToken); toast(D.allow === '1' ? 'Customer can book online again' : 'Customer restricted'); await loadRules(); } catch (x) { toast(x.message); } return render(); }
+  if (D.pushon != null) return enablePush();
+  if (D.pushoff != null) return disablePush();
+  if (D.pushtest != null) { try { const j = await api('/push/test', { method: 'POST' }); toast(j.sent ? 'Test sent. It should show up in a moment.' : j.gone ? 'This phone is no longer registered. Turn notifications off and on again.' : 'Could not reach this phone. Try again.'); } catch (x) { toast(x.message); } if (S.push) loadPush(); return; }
   if (D.vcheck != null) { S.vcode = (document.getElementById('vcode')?.value || '').trim(); S.vchk = null; S.verr = ''; if (!S.vcode) { S.verr = 'Enter the voucher code'; return render(); } try { S.vchk = await api('/pro/voucher?code=' + encodeURIComponent(S.vcode), {}, S.proToken); } catch (x) { S.verr = x.message; } return render(); }
   if (D.vclaim) { try { await api('/pro/voucher/claim', { method: 'POST', body: { code: D.vclaim } }, S.proToken); toast('Marked as claimed'); S.vchk = await api('/pro/voucher?code=' + encodeURIComponent(D.vclaim), {}, S.proToken); } catch (x) { toast(x.message); } return render(); }
   if (D.rewards != null) return openRewards();

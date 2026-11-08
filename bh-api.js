@@ -1,5 +1,6 @@
 // Brotherhood customer app API (accounts, discover, barber profiles, booking history, verified reviews, pro tools).
 // Mounted from server.js under /api/bh/*. Shares the same database, staff, branches, bookings and reviews as the POS.
+import { loadVapid, sendPush, knownPushHost } from './bh-push.js';
 export function mountBH(c) {
   const { db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor,
     whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName, getSetting, setSetting, queueEmail, emailReady, baseUrl, esc: escHtml, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
@@ -38,6 +39,8 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   db.exec('create index if not exists bookings_user on bookings(userId); create index if not exists reviews_staff on reviews(staffId)');
   // promo codes: each code is tied to a POS discount, so the cashier's discount report shows it too
   db.exec(`create table if not exists bh_promos(id text primary key, code text unique, kind text, value real, firstVisit integer, maxUses integer, expires text, active integer, note text, discountId text, createdAt text);`);
+  db.exec('create table if not exists bh_push(id text primary key, userId text, endpoint text unique, p256dh text, auth text, createdAt text); create index if not exists bh_push_user on bh_push(userId)');
+  addCol('bh_users', 'pushPrefs', 'text'); addCol('bookings', 'pushRemAt', 'text');
   addCol('bookings', 'promoCode', 'text'); addCol('bookings', 'promoAmt', 'real');
   const cleanCode = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
   const promoUses = code => one("select count(*) n from bookings where promoCode=? and status in ('booked','arrived')", code).n;
@@ -99,12 +102,36 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   setInterval(() => hits.clear(), 3600e3).unref();
 
   // in-app notifications (deduplicated by user + kind + ref)
-  const notify = (userId, kind, text, link, ref) => { if (!userId) return; try { run('insert or ignore into bh_notifs(id,userId,kind,text,link,ref,createdAt,readAt) values(?,?,?,?,?,?,?,null)', uid(), userId, kind, String(text).slice(0, 200), link || '', ref || uid(), nowISO()); } catch { } };
+  const notify = (userId, kind, text, link, ref, push = true) => {
+    if (!userId) return;
+    try { const r = run('insert or ignore into bh_notifs(id,userId,kind,text,link,ref,createdAt,readAt) values(?,?,?,?,?,?,?,null)', uid(), userId, kind, String(text).slice(0, 200), link || '', ref || uid(), nowISO()); if (push && Number(r.changes) > 0) pushUser(userId, kind, String(text).slice(0, 200), link, ref); } catch { }
+  };
+  // ---------- push notifications to phones (Web Push, see bh-push.js) ----------
+  const PUSH_CAT = { booking: 'bookings', reminder: 'bookings', waitlist: 'bookings', rate: 'bookings', due: 'bookings', reply: 'bookings', comment: 'community', follow: 'community', like: 'community' };
+  const prefsOf = u => { let p = {}; try { p = JSON.parse(u.pushPrefs || '{}') || {}; } catch { } return { bookings: p.bookings !== false, community: p.community === true }; };
+  let _vapid; const vapidKeys = () => { if (_vapid) return _vapid; let st = null; try { st = JSON.parse(getSetting('vapidKeys') || 'null'); } catch { } const v = loadVapid(st); if (v.created) setSetting('vapidKeys', JSON.stringify(v.stored)); return _vapid = v; };
+  const pushSubject = () => process.env.CONTACT_EMAIL ? 'mailto:' + String(process.env.CONTACT_EMAIL).trim() : baseUrl();
+  async function pushOne(s, msg, opts = {}) {
+    try {
+      const st = await sendPush(s, msg, vapidKeys(), pushSubject(), opts);
+      if (st === 404 || st === 410) { run('delete from bh_push where id=?', s.id); return 'gone'; }
+      return st >= 200 && st < 300 ? 'sent' : 'failed';
+    } catch (e) { return 'failed'; }
+  }
+  function pushUser(userId, kind, text, link, ref, opts = {}) {
+    try {
+      const u = get('bh_users', userId); if (!u) return;
+      if (!opts.force && !prefsOf(u)[PUSH_CAT[kind] || 'bookings']) return;
+      const subs = all('select * from bh_push where userId=?', userId); if (!subs.length) return;
+      const msg = { title: shopName || 'Brotherhood', body: String(text), url: '/member' + (link || ''), tag: kind + '-' + String(ref || ''), kind };
+      for (const s of subs) pushOne(s, msg, { urgency: kind === 'reminder' || kind === 'waitlist' ? 'high' : 'normal', ttl: kind === 'reminder' || kind === 'waitlist' ? 3600 : 86400 }).catch(() => { });
+    } catch (e) { console.error('push:', e.message); }
+  }
   // "rate your cut" appears once a booked visit has been paid at the POS
-  const syncRate = userId => {
+  const syncRate = (userId, push = false) => {
     for (const b of all("select id,orderId,staffId,date from bookings where userId=? and status='arrived' and orderId<>''", userId)) {
       if (one("select status from orders where id=?", b.orderId)?.status !== 'paid' || one('select 1 x from reviews where orderId=?', b.orderId)) continue;
-      notify(userId, 'rate', `How was your cut with ${get('staff', b.staffId)?.name || 'your barber'}? Rate your visit.`, '#/bookings', b.id);
+      notify(userId, 'rate', `How was your cut with ${get('staff', b.staffId)?.name || 'your barber'}? Rate your visit.`, '#/bookings', b.id, push);
     }
   };
   // when a slot is freed (cancel / no-show), tell waitlisted members for that shop and day if that barber (or anyone) now has an opening
@@ -121,14 +148,14 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   };
   // smart rebooking: when a member is due for another cut (their own average gap, or 21 days), nudge once per cycle
   const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 864e5);
-  const syncDue = userId => {
+  const syncDue = (userId, push = false) => {
     const paid = all("select b.id, b.date, b.staffId from bookings b join orders o on o.id=b.orderId where b.userId=? and b.status='arrived' and o.status='paid' order by b.date", userId);
     if (!paid.length) return;
     const last = paid[paid.length - 1], gaps = paid.slice(1).map((x, i) => daysBetween(paid[i].date, x.date)).filter(g => g > 0);
     const cadence = Math.max(10, Math.min(60, gaps.length >= 2 ? Math.round(gaps.reduce((a, g) => a + g, 0) / gaps.length) : 21)), since = daysBetween(last.date, todayStr());
     if (since < cadence || one("select 1 x from bookings where userId=? and status='booked' and date>=?", userId, todayStr())) return;
     const who = get('staff', last.staffId)?.name;
-    notify(userId, 'due', `It has been ${since} days since your last cut${who ? ' with ' + who : ''}. Time for a fresh one?`, last.staffId ? '#/barber/' + last.staffId : '#/discover', 'due-' + last.id);
+    notify(userId, 'due', `It has been ${since} days since your last cut${who ? ' with ' + who : ''}. Time for a fresh one?`, last.staffId ? '#/barber/' + last.staffId : '#/discover', 'due-' + last.id, push);
   };
   // ---------- email jobs: booking reminders and review requests (only when the email service is connected) ----------
   const dayWord = d => d === todayStr() ? 'today' : d === dOf(new Date(Date.now() + 864e5)) ? 'tomorrow' : new Date(d + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'long', month: 'short', day: 'numeric' });
@@ -157,8 +184,30 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       queueEmail({ customerId: b.customerId || '', to: m.to, kind: 'review', subject: `How was your cut with ${who}?`, html: mailShell(`How was your cut, ${escHtml(first)}?`, `<p style="line-height:1.55;margin:0">Thanks for visiting. Your review helps ${escHtml(who)} and the next customer choose well. It takes ten seconds.</p>`, { href: link, label: 'Rate my cut' }), text: `Hi ${first}, how was your cut with ${who}? Rate it: ${link}` });
     }
   }
+  const quiet = () => { if (process.env.PUSH_NO_QUIET === '1') return false; const h = new Date().getHours(); return h < 8 || h >= 21; };   // no nudges at night (shop time)
+  function runPushJobs() {
+    const now = Date.now();
+    // a reminder about 2 hours before the cut (not when it was booked less than an hour ago)
+    for (const b of all("select * from bookings where userId<>'' and status='booked' and pushRemAt is null and date>=? and date<=?", todayStr(), dOf(new Date(now + 864e5)))) {
+      const hrs = (new Date(`${b.date}T${b.time}:00`).getTime() - now) / 36e5;
+      if (hrs < 0.25) { run('update bookings set pushRemAt=? where id=?', nowISO(), b.id); continue; }
+      if (hrs > 2.5 || now - new Date(b.createdAt).getTime() < 3600e3) continue;
+      run('update bookings set pushRemAt=? where id=?', nowISO(), b.id);
+      const who = get('staff', b.staffId)?.name, br = get('branches', b.branchId)?.name;
+      notify(b.userId, 'reminder', `Your cut${who ? ' with ' + who : ''} is ${dayWord(b.date)} at ${t12s(b.time)}${br ? ' at ' + br : ''}. See you there!`, '#/bookings', 'rm-' + b.id);
+    }
+    if (quiet()) return;
+    // "how was your cut?" a little while after the sale is paid, within 3 days
+    const lo = new Date(now - 72 * 36e5).toISOString(), hi = new Date(now - 20 * 60e3).toISOString();
+    for (const b of all("select b.* from bookings b join orders o on o.id=b.orderId where b.userId<>'' and b.status='arrived' and o.status='paid' and o.paidAt>=? and o.paidAt<=?", lo, hi)) {
+      if (one('select 1 x from reviews where orderId=?', b.orderId)) continue;
+      notify(b.userId, 'rate', `How was your cut with ${get('staff', b.staffId)?.name || 'your barber'}? Rate your visit.`, '#/bookings', b.id, true);
+    }
+    // time for the next cut (once per cycle), only for people who have notifications on
+    for (const r of all('select distinct userId from bh_push')) syncDue(r.userId, true);
+  }
   const JOB_MS = +process.env.BH_JOB_MS || 600000;
-  setInterval(() => { try { runJobs(); } catch (e) { console.error('bh jobs:', e.message); } }, JOB_MS).unref(); setTimeout(() => { try { runJobs(); } catch { } }, Math.min(20000, JOB_MS)).unref();
+  setInterval(() => { try { runJobs(); } catch (e) { console.error('bh jobs:', e.message); } try { runPushJobs(); } catch (e) { console.error('bh push jobs:', e.message); } }, JOB_MS).unref(); setTimeout(() => { try { runJobs(); } catch { } try { runPushJobs(); } catch { } }, Math.min(20000, JOB_MS)).unref();
   const unreadOf = id => one('select count(*) n from bh_notifs where userId=? and readAt is null', id).n;
   const userOf = req => {
     const o = readToken((req.headers.authorization || '').replace(/^Bearer /, ''));
@@ -242,6 +291,27 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       }
       if (sub === '/me/' + kind && method === 'DELETE') { const u = needUser(req); dropImg(u[kind]); run(`update bh_users set ${kind}='' where id=?`, u.id); return send(res, 200, { ok: true }); }
     }
+    // ----- push notifications: the browser's public key, subscribing a phone, what to be told about, and a test button -----
+    if (sub === '/push/key' && method === 'GET') return send(res, 200, { key: vapidKeys().pub });
+    if (sub === '/push/prefs' && method === 'GET') { const u = needUser(req); return send(res, 200, { prefs: prefsOf(u), devices: one('select count(*) n from bh_push where userId=?', u.id).n }); }
+    if (sub === '/push/prefs' && method === 'PUT') { const u = needUser(req), b = await readBody(req, 2000); run('update bh_users set pushPrefs=? where id=?', JSON.stringify({ bookings: b.bookings !== false, community: b.community === true }), u.id); return send(res, 200, { ok: true }); }
+    if (sub === '/push/subscribe' && method === 'POST') {
+      const u = needUser(req); if (tooMany(ip, 'ps', 20, 3600e3)) bad(429, 'Too many tries. Please try again later.'); hit(ip, 'ps');
+      const b = await readBody(req, 20000), ep = String(b.endpoint || ''), k = b.keys || {}; let host = '';
+      try { const x = new URL(ep); host = x.hostname; if (x.protocol !== 'https:' && process.env.PUSH_ALLOW_ANY !== '1') throw 0; } catch { bad(400, 'This device cannot receive notifications'); }
+      if (process.env.PUSH_ALLOW_ANY !== '1' && !knownPushHost(host)) bad(400, 'This push service is not supported');
+      if (ep.length > 700 || Buffer.from(String(k.p256dh || ''), 'base64url').length !== 65 || Buffer.from(String(k.auth || ''), 'base64url').length < 16) bad(400, 'This device cannot receive notifications');
+      const mine = all('select id from bh_push where userId=? order by createdAt', u.id); if (mine.length >= 5 && !one('select 1 x from bh_push where endpoint=?', ep)) run('delete from bh_push where id=?', mine[0].id);   // at most 5 devices
+      run('insert into bh_push(id,userId,endpoint,p256dh,auth,createdAt) values(?,?,?,?,?,?) on conflict(endpoint) do update set userId=excluded.userId, p256dh=excluded.p256dh, auth=excluded.auth', uid(), u.id, ep, String(k.p256dh), String(k.auth), nowISO());
+      return send(res, 201, { ok: true });
+    }
+    if (sub === '/push/unsubscribe' && method === 'POST') { const u = needUser(req), b = await readBody(req, 4000); run('delete from bh_push where endpoint=? and userId=?', String(b.endpoint || ''), u.id); return send(res, 200, { ok: true }); }
+    if (sub === '/push/test' && method === 'POST') {
+      const u = needUser(req); if (tooMany(ip, 'pt', 6, 3600e3)) bad(429, 'Too many tests. Please try again later.'); hit(ip, 'pt');
+      const subs = all('select * from bh_push where userId=?', u.id); if (!subs.length) bad(409, 'Turn on notifications on this phone first');
+      const out = await Promise.all(subs.map(s => pushOne(s, { title: shopName || 'Brotherhood', body: 'This is a test. Notifications are working on this phone.', url: '/member#/notifications', tag: 'test', kind: 'test' }, { urgency: 'high', ttl: 300 })));
+      return send(res, 200, { sent: out.filter(x => x === 'sent').length, failed: out.filter(x => x === 'failed').length, gone: out.filter(x => x === 'gone').length });
+    }
     if (sub === '/loyalty' && method === 'GET') {   // visits and tier come from the POS loyalty tiers (1 paid visit = 1 point) for the customer record linked to this account's bookings
       const u = needUser(req), cid = u.customerId || one("select customerId c from bookings where userId=? and customerId<>'' order by createdAt desc", u.id)?.c || '';
       const visits = cid ? one("select count(*) n from orders where customerId=? and status='paid'", cid).n : 0;
@@ -278,7 +348,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       run('delete from bh_favorites where userId=?', u.id);
       run('delete from bh_notifs where userId=?', u.id); run('delete from bh_waitlist where userId=?', u.id);
       for (const t of ['bh_likes', 'bh_comments', 'bh_follows', 'bh_blocks', 'bh_reports', 'bh_saves']) run(`delete from ${t} where userId=?`, u.id);
-      run("delete from bh_promos where userId=?", u.id); run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
+      run("delete from bh_promos where userId=?", u.id); run('delete from bh_push where userId=?', u.id); run('delete from bh_follows where targetId=?', u.id); run('delete from bh_blocks where blockedId=?', u.id); run('delete from bh_likes where postId in (select id from bh_posts where userId=?)', u.id);
       run('delete from bh_comments where postId in (select id from bh_posts where userId=?)', u.id);
       for (const r of all('select imageUrl from bh_posts where userId=?', u.id)) { const im = /\/img\/(\w+)/.exec(r.imageUrl || ''); if (im) run('delete from images where id=?', im[1]); }
       run('delete from bh_posts where userId=?', u.id); dropImg(u.photo); dropImg(u.cover); run('delete from bh_users where id=?', u.id);
@@ -370,7 +440,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const make = date => {
         const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
         run('update bookings set userId=? where id=?', u.id, x.id); if (x.customerId && !u.customerId) { run('update bh_users set customerId=? where id=?', x.customerId, u.id); u.customerId = x.customerId; }
-        notify(u.id, 'booking', `Booked: ${x.date} ${x.time} with ${x.staffName || 'any barber'} at ${x.branchName}`, '#/bookings', 'bk-' + x.id);
+        notify(u.id, 'booking', `Booked: ${x.date} ${x.time} with ${x.staffName || 'any barber'} at ${x.branchName}`, '#/bookings', 'bk-' + x.id, false);
         log({ name: 'App: ' + u.name }, 'booking', 'bookings', x.id, `${x.date} ${x.time} ${x.branchName}`); return x;
       };
       const bk = make(String(b.date || '')); hit(ip, 'bk'); const series = [];

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Brotherhood feature graphic</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600&family=Oswald:wght@600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+html,body{width:1024px;height:500px;overflow:hidden;background:#09090a;font-family:Inter,sans-serif;color:#f4f4f6}
+.stage{position:relative;width:1024px;height:500px;background:radial-gradient(70% 110% at 82% 40%,rgba(59,130,246,.32),transparent 62%),#09090a}
+.left{position:absolute;left:64px;top:0;height:500px;display:flex;flex-direction:column;justify-content:center;width:520px}
+.brand{display:flex;align-items:center;gap:16px}
+.brand img{width:76px;height:76px}
+.brand span{font:700 52px Oswald;letter-spacing:7px;text-transform:uppercase}.brand b{color:#3b82f6}
+h1{font:700 60px/1.02 Oswald;text-transform:uppercase;margin-top:26px;letter-spacing:.5px}
+h1 em{font-style:normal;color:#3b82f6}
+p{margin-top:16px;font-size:21px;color:#a8a8b2;max-width:470px;line-height:1.4}
+.phone{position:absolute;right:92px;top:46px;width:288px;height:520px;background:#0d0d10;border:9px solid #202027;border-radius:42px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.65);transform:rotate(5deg)}
+.notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:84px;height:22px;background:#000;border-radius:14px}
+.scr{padding:46px 14px 0;font-size:12px}
+.bar{display:flex;align-items:center;gap:8px;margin-bottom:10px}.bar b{font:700 17px Oswald;letter-spacing:1px;text-transform:uppercase}
+.chips{display:flex;gap:6px;margin:8px 0}.chip{padding:5px 11px;border-radius:99px;background:#1a1a1f;border:1px solid #26262c;font-size:11px;color:#a0a0aa}.chip.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.row{display:flex;align-items:center;gap:10px;background:#121215;border:1px solid #26262c;border-radius:14px;padding:9px 10px;margin-bottom:8px}
+.av{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font:700 13px Oswald;color:#fff}.row small{display:block;color:#a0a0aa;font-size:10.5px}
+.slots{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}.slot{padding:8px 0;text-align:center;border-radius:9px;background:#1a1a1f;border:1px solid #26262c;font-size:11px}.slot.on{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:600}
+.cfm{margin-top:10px;background:#3b82f6;color:#fff;text-align:center;padding:10px;border-radius:11px;font-weight:600;font-size:12px}
+.card{position:absolute;background:#15151a;border:1px solid #2a2a31;border-radius:16px;padding:12px 16px;display:flex;gap:11px;align-items:center;font-size:15px;box-shadow:0 14px 40px rgba(0,0,0,.55)}
+.card small{display:block;color:#a0a0aa;font-size:12.5px}.card .ic{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:18px}
+.c1{left:560px;top:84px}.c2{left:600px;top:360px}
+</style></head><body>
+<div class="stage">
+  <div class="left">
+    <div class="brand"><img src="../bh-mark.png" alt=""><span>Brother<b>hood</b></span></div>
+    <h1>Book the cut.<br>Join the <em>brotherhood.</em></h1>
+    <p>Find your barber, book in seconds, earn rewards.</p>
+  </div>
+  <div class="phone"><div class="notch"></div><div class="scr">
+    <div class="bar"><img src="../bh-mark.png" width="22" height="22" alt=""><b>Book a cut</b></div>
+    <div class="chips"><span class="chip on">Any barber</span><span class="chip">Marco</span><span class="chip">Jun</span></div>
+    <div class="row"><div class="av" style="background:#3b82f6">M</div><div><b>Marco · Fade specialist</b><small>★ 4.9 · Next free 2:30 PM</small></div></div>
+    <div class="row"><div class="av" style="background:#8b6cf0">J</div><div><b>Jun · Classic cuts</b><small>★ 4.8 · Next free 3:00 PM</small></div></div>
+    <div class="slots"><div class="slot">1:30 PM</div><div class="slot on">2:30 PM</div><div class="slot">3:00 PM</div><div class="slot">3:30 PM</div><div class="slot">4:00 PM</div><div class="slot">4:30 PM</div></div>
+    <div class="cfm">Confirm booking</div>
+  </div></div>
+  <div class="card c1"><div class="ic" style="background:rgba(59,130,246,.2)">🔔</div><div><b>A slot just opened</b><small>You're next on the waitlist</small></div></div>
+  <div class="card c2"><div class="ic" style="background:rgba(245,185,66,.2)">🎁</div><div><b>Reward unlocked</b><small>Free haircut, ready to claim</small></div></div>
+</div>
+</body></html>
