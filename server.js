@@ -713,8 +713,8 @@ const REPORTS = {
         { label: 'Barber salaries', value: sal, t: 'peso', sub: 'Commission or allowance, whichever is higher' }, { label: 'Expenses', value: exp, t: 'peso' },
         { label: 'Shop net sales', value: net - sal - exp, t: 'peso', sub: 'Net sales − salaries − expenses' }],
       tables: [{
-        title: 'Transactions', cols: [['SI / Order'], ['Date / Time'], ['Branch'], ['Customer'], ['Barber'], ['Items'], ['Discount', 'peso'], ['Total', 'peso'], ['Tender']],
-        rows: os.map(o => ['SI-' + String(o.si).padStart(6, '0') + ' #ORD-' + o.ord, stamp(o.paidAt), o.branchName, o.customerName, o.barberName, o.items.map(i => i.name + (i.qty > 1 ? ' x' + i.qty : '')).join(', '), o.discountAmt, o.total, o.tenders.map(t => t.method).join('+')])
+        title: 'Finished services', cols: [['Visit'], ['Date / Time'], ['Branch'], ['Customer'], ['Barber'], ['Items'], ['Discount', 'peso'], ['Total', 'peso'], ['Paid with']],
+        rows: os.map(o => ['#' + o.no + ' · ' + o.date, stamp(o.paidAt), o.branchName, o.customerName, o.barberName, o.items.map(i => i.name + (i.qty > 1 ? ' x' + i.qty : '')).join(', '), o.discountAmt, o.total, o.tenders.map(t => t.method).join('+')])
       }]
     };
   },
@@ -787,10 +787,10 @@ const REPORTS = {
     return {
       cards: [{ label: 'Total discounts', value: tot, t: 'peso' }, { label: 'Discounted transactions', value: os.length, t: 'num', sub: 'of ' + all_.length }, { label: 'Average discount', value: os.length ? tot / os.length : 0, t: 'peso' }],
       tables: [{ title: 'By discount type', cols: [['Discount'], ['Times applied', 'num'], ['Amount', 'peso']], rows: Object.entries(m).map(([k, r]) => [k, r.n, r.a]) },
-        { title: 'Discounted transactions', cols: [['SI / Order'], ['Date / Time'], ['Branch'], ['Discount'], ['Customer'], ['Gross', 'peso'], ['Discount', 'peso'], ['Net', 'peso'], ['ID photo', 'idlink']],
-          rows: os.map(o => ['SI-' + String(o.si).padStart(6, '0'), stamp(o.paidAt), o.branchName, o.discountName, o.customerName, o.subtotal, o.discountAmt, o.total, o.idPhoto ? o.idType + '~' + o.idPhoto : '']) },
-        { title: 'Buddy / ID discount sales (with ID photo on file)', cols: [['SI / Order'], ['Date / Time'], ['Branch'], ['Customer'], ['Service'], ['Cashier'], ['ID photo', 'idlink']],
-          rows: all_.filter(o => o.idPhoto || o.items.some(i => i.needId)).map(o => ['SI-' + String(o.si).padStart(6, '0'), stamp(o.paidAt), o.branchName, o.customerName, o.items.map(i => i.name + (i.qty > 1 ? ' x' + i.qty : '')).join(', '), cashierName(o.cashierId), o.idPhoto ? o.idType + '~' + o.idPhoto : 'MISSING']) }]
+        { title: 'Discounted visits', cols: [['Visit'], ['Date / Time'], ['Branch'], ['Discount'], ['Customer'], ['Gross', 'peso'], ['Discount', 'peso'], ['Net', 'peso'], ['ID photo', 'idlink']],
+          rows: os.map(o => ['#' + o.no + ' · ' + o.date, stamp(o.paidAt), o.branchName, o.discountName, o.customerName, o.subtotal, o.discountAmt, o.total, o.idPhoto ? o.idType + '~' + o.idPhoto : '']) },
+        { title: 'Buddy / ID discount visits (with ID photo on file)', cols: [['Visit'], ['Date / Time'], ['Branch'], ['Customer'], ['Service'], ['Cashier'], ['ID photo', 'idlink']],
+          rows: all_.filter(o => o.idPhoto || o.items.some(i => i.needId)).map(o => ['#' + o.no + ' · ' + o.date, stamp(o.paidAt), o.branchName, o.customerName, o.items.map(i => i.name + (i.qty > 1 ? ' x' + i.qty : '')).join(', '), cashierName(o.cashierId), o.idPhoto ? o.idType + '~' + o.idPhoto : 'MISSING']) }]
     };
   },
   cash(f) {
@@ -868,7 +868,7 @@ const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
 });
-const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/brotherhood': 'bh.html', '/member': 'bh.html', '/bh.js': 'bh.js', '/bh.webmanifest': 'bh.webmanifest', '/bh-icon-192.png': 'bh-icon-192.png', '/bh-icon-512.png': 'bh-icon-512.png', '/bh-apple-touch.png': 'bh-apple-touch.png', '/bh-mark.png': 'bh-mark.png', '/barbershop': 'landing.html', '/privacy': 'site/privacy.html', '/terms': 'site/terms.html', '/delete-account': 'site/delete-account.html', '/': 'home.html','/app.js': 'app.js', '/pos': 'pos.html', '/pos.js': 'pos.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
+const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/brotherhood': 'bh.html', '/member': 'bh.html', '/bh.js': 'bh.js', '/bh.webmanifest': 'bh.webmanifest', '/bh-icon-192.png': 'bh-icon-192.png', '/bh-icon-512.png': 'bh-icon-512.png', '/bh-apple-touch.png': 'bh-apple-touch.png', '/bh-mark.png': 'bh-mark.png', '/barbershop': 'landing.html', '/privacy': 'site/privacy.html', '/terms': 'site/terms.html', '/delete-account': 'site/delete-account.html', '/': 'home.html','/app.js': 'app.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace(/:\d+$/, '').replace(/^www\./, '');
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST), LANDING_HOST = normHost(process.env.LANDING_HOST);
 // LANDING_HOST = a separate domain (e.g. brotherhoodbarberph.com) whose home page is the BrotherhoodBarber shop website. The public domain's home page is the Brotherhood product site, and the app is at /member.
@@ -937,6 +937,7 @@ async function handleIn(req, res) {
       if (SITE_HOST && method === 'GET' && (p === '/book' || p === '/book.js')) return go(SITE_HOST);
     }
   }
+  if (method === 'GET' && (p === '/pos' || p === '/pos/')) { res.writeHead(302, { Location: '/member#/pro' }); return res.end(); }   // the POS was retired: everything it did is in the Brotherhood app
   if (method === 'GET' && p === '/backend/') { res.writeHead(302, { Location: '/backend' }); return res.end(); }
   if (method === 'GET' && p === '/sw.js') { res.writeHead(200, { 'Content-Type': MIME.js, 'Cache-Control': 'no-cache' }); return res.end(`const VERSION=${JSON.stringify(APP_VERSION)};\n` + fs.readFileSync(path.join(DIR, 'sw.js'), 'utf8')); }
   if (method === 'GET' && p === '/api/version') return send(res, 200, { version: APP_VERSION });

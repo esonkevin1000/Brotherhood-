@@ -3,7 +3,7 @@
   "name": "Brotherhood POS",
   "short_name": "Brotherhood",
   "description": "Cashier app for Brotherhood Barbershop",
-  "start_url": "/pos",
+  "start_url": "/member#/pro",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

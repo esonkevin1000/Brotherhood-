@@ -29,9 +29,11 @@ The full system with the POS was saved before any change:
 
 ## Step by step (each step keeps the shops working)
 
-1. **Walk-ins and finished services in the app.** Barbers and the front desk add walk-ins, start and finish a service, and note the amount and how the customer paid, for tracking only. Commission, payroll, loyalty points and reports read from finished services instead of POS sales.
-2. **Move the other POS tools into the app.** Time in and out with selfie, expenses with receipts, daily cash count (instead of remittance and Z-reading), checklists, problem reports, leave, release pay, inbox.
-3. **Turn off the POS.** Remove /pos, rename BIR-like words in the back office (Sales readings, Tender, Cash management), clean up the old data screens. Existing sales stay in reports as history.
+Done so far: steps 1 to 3. /pos now opens the Brotherhood app (Pro tools). The POS files were removed from the project (kept in the archive above).
+
+1. ✅ **Walk-ins and finished services in the app.** Barbers and the front desk add walk-ins, start and finish a service, and note the amount and how the customer paid, for tracking only. Commission, payroll, loyalty points and reports read from finished services instead of POS sales.
+2. ✅ **Move the other POS tools into the app.** Time in and out with selfie, expenses with receipts, daily cash count (instead of remittance and Z-reading), checklists, problem reports, leave, release pay, inbox.
+3. ✅ **Turn off the POS.** Remove /pos, rename BIR-like words in the back office (Sales readings, Tender, Cash management), clean up the old data screens. Existing sales stay in reports as history.
 4. **"Tell us about you" onboarding** for the 5 user types, with the screens each one needs (chair rent, studio, student).
 5. **Commercial setup.** Self sign-up for new shops, plans and billing, Play Store listing, privacy policy, terms, NPC and BIR confirmation.
 6. **Growth features from SQUIRE.** SMS reminders and waitlist texts, gift cards and memberships, inventory, Reserve with Google, payments through a licensed gateway.

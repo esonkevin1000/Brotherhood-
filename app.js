@@ -1,4 +1,4 @@
-// Brotherhood — admin back office (reports + management). The cashier/barber POS talks to the same API.
+// Brotherhood — admin back office (reports + management). The Brotherhood app (front desk and barbers) talks to the same API.
 const peso = n => '₱' + Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pad = n => String(n).padStart(2, '0');
 const dstr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -86,7 +86,7 @@ const ICONS = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
-const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Tender Summary', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc'], ['scorecard', 'Barber Scorecard', 'star'], ['accountability', 'Cash Accountability', 'coin']];
+const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Payment Methods', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc'], ['scorecard', 'Barber Scorecard', 'star'], ['accountability', 'Cash Accountability', 'coin']];
 const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building'], ['equipment', 'Equipment & Maintenance', 'gear']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view === 'prob' ? 'Problem Reports' : ui.view === 'leave' ? 'Leave Requests' : ui.view === 'chk' ? 'Daily Checklists' : ui.view === 'slip' ? 'Payslips' : ui.view === 'inbox' ? 'Inbox' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 const inboxOpts = () => ({ token: () => token, isAdmin: true, meId: S.me ? S.me.id : 'owner' });
@@ -105,7 +105,7 @@ function renderBase() {
   }
   if (S.me.role === 'cashier') {
     nav.style.display = 'none';
-    view.innerHTML = `<div class="online card"><h2>Cashier account</h2><p>You are signed in as <b>${esc(S.me.name)}</b>. This back office is for admins. Use the cashier app (/pos) for the POS.</p><button class="btn" data-act="logout">Logout</button></div>`;
+    view.innerHTML = `<div class="online card"><h2>Cashier account</h2><p>You are signed in as <b>${esc(S.me.name)}</b>. This back office is for admins. Use the Brotherhood app instead: <a href="/member#/pro">open Pro tools</a> (Today and Tools).</p><button class="btn" data-act="logout">Logout</button></div>`;
     return;
   }
   nav.style.display = '';
@@ -176,7 +176,7 @@ function vReport() {
 const NAVG = [
   ['Overview', [['dashboard', 'Dashboard', 'grid']]],
   ['Booking & Calendar', [['bookings', 'Bookings', 'calendar'], ['reviews', 'Reviews', 'star']]],
-  ['POS & Sales', [['rep:sales'], ['rep:tender'], ['rep:discounts'], ['mgmt:items'], ['mgmt:categories'], ['mgmt:discounts'], ['mgmt:customers']]],
+  ['Sales & Services', [['rep:sales'], ['rep:tender'], ['rep:discounts'], ['mgmt:items'], ['mgmt:categories'], ['mgmt:discounts'], ['mgmt:customers']]],
   ['Attendance & Timekeeping', [['att', 'Attendance', 'clock'], ['rep:attendance']]],
   ['Release Pay & Payroll', [['adv', 'Release Pay', 'tag'], ['rep:payroll'], ['rep:commissions'], ['slip', 'Payslips', 'doc']]],
   ['Expenses & Receipts', [['exp', 'Expenses & Receipts', 'wallet']]],
@@ -187,7 +187,7 @@ const NAVG = [
   ['Daily Checklists', [['chk', 'Checklists', 'doc']]],
   ['Maintenance', [['mgmt:equipment']]],
   ['Branch Management', [['mgmt:branches'], ['mgmt:chairs'], ['mgmt:users']]],
-  ['Reports & Analytics', [['rep:items'], ['rep:readings'], ['rep:cash'], ['rep:accountability']]],
+  ['Reports & Analytics', [['rep:items'], ['rep:accountability']]],
   ['Settings & Permissions', [['settings', 'Settings', 'gear'], ['activity', 'Activity', 'activity']]]
 ];
 // ---------- notifications: red badges, the bell, a banner and desktop alerts ----------
@@ -329,7 +329,7 @@ function vRemit() {
   const sel = `<select id="rstatus" style="width:auto"><option value="">All statuses</option>${['PENDING', 'FLAGGED', 'VERIFIED', 'REJECTED'].map(s => `<option ${st === s ? 'selected' : ''}>${s}</option>`).join('')}</select>`;
   return `<h2>Daily Sales Remittance <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(sel)}
   ${r ? `<div class="grid"><div class="card stat"><span>Submissions</span><b>${r.totals.count}</b></div><div class="card stat"><span>Expected</span><b>${peso(r.totals.expected)}</b></div><div class="card stat"><span>Remitted</span><b>${peso(r.totals.actual)}</b></div><div class="card stat"><span>Net difference</span><b style="color:${Math.abs(r.totals.variance) >= 1 ? 'var(--bad)' : 'var(--ok)'}">${peso(r.totals.variance)}</b></div></div>
-  <div class="card overflow"><table><tr><th>Date</th><th>Branch</th><th>POS sales</th><th>Cash</th><th>GCash</th><th>Maya</th><th>Other</th><th>Cash expenses</th><th>Expected</th><th>Remitted</th><th>Difference</th><th>Responsible</th><th>Status</th><th>Proof</th><th></th></tr>
+  <div class="card overflow"><table><tr><th>Date</th><th>Branch</th><th>Services</th><th>Cash</th><th>GCash</th><th>Maya</th><th>Other</th><th>Cash expenses</th><th>Expected</th><th>Remitted</th><th>Difference</th><th>Responsible</th><th>Status</th><th>Proof</th><th></th></tr>
   ${r.rows.map(x => { const [c, bg] = tag(x.status); return `<tr><td>${esc(x.date)}</td><td>${esc(x.branchName)}</td><td>${peso(x.posSales)}</td><td>${peso(x.cashSales)}</td><td>${peso(x.gcashSales)}</td><td>${peso(x.mayaSales)}</td><td>${peso(x.otherSales)}</td><td>${peso(x.cashExpenses)}</td><td><b>${peso(x.expected)}</b></td><td><b>${peso(x.actual)}</b></td>
     <td style="color:${Math.abs(x.variance) >= 1 ? 'var(--bad)' : 'var(--ok)'};font-weight:700">${x.variance > 0 ? '+' : ''}${peso(x.variance)}</td><td>${esc(x.responsible)}<br><span class="mute" style="font-size:11px">by ${esc(x.submittedBy)}</span></td>
     <td><span class="tag" style="color:${c};background:${bg}">${x.status}</span></td><td><a href="#" data-act="viewfile" data-id="${x.proofId}">View photo</a></td>
@@ -406,7 +406,7 @@ function vCustomers() {
     <td>${esc(r.branchName) || '<span class="mute">—</span>'}</td><td>${r.consent ? '<span style="color:var(--ok);font-weight:700">✔ Subscribed</span>' : '<span class="mute">—</span>'}</td><td><button class="btn ghost sm" data-act="edit" data-kind="customers" data-id="${r.id}">Edit</button></td></tr>`).join('') || '<tr><td colspan="10" class="mute">No customers in the directory for this view.</td></tr>'}</table></div>
   <div class="row" style="margin-top:12px;justify-content:center"><button class="btn ghost sm" data-act="page" data-n="-1" ${c.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span class="mute">Page ${c.page} / ${pages}</span><button class="btn ghost sm" data-act="page" data-n="1" ${c.page >= pages ? 'disabled' : ''}>Next ›</button></div>`;
 }
-const MOD_LABEL = { dashboard: 'Dashboard', pos: 'Point of Sale (create sales, take payments)', bookings: 'Bookings (appointments)', queue: 'Walk-in Queue (seat customers)', expenses: 'Expenses', attendance: 'Barber Attendance (time in / out, breaks)', reading: 'Sales Reading (shift, cash, Z-reading)', customers: 'Customer Directory (look up points and tiers)' };
+const MOD_LABEL = { dashboard: 'Dashboard', pos: 'Front desk: walk-ins and finished services', bookings: 'Bookings (appointments)', queue: 'Walk-in line (start customers)', expenses: 'Expenses', attendance: 'Barber Attendance (time in / out, breaks)', reading: 'Old POS cash drawer (no longer used)', customers: 'Customer Directory (look up points and tiers)' };
 // partner shop banner, and the Brotherhood owner's list of partner shops
 function orgBar() {
   if (!S.org) return '';
@@ -475,7 +475,7 @@ function vSettings() {
       <label>Google reviews link (optional)</label><input id="bi-${b.id}-gurl" value="${esc(b.googleUrl || '')}" placeholder="https://g.page/r/.../review">
       <div class="row" style="margin-top:12px"><button class="btn sm" data-act="savebinfo" data-id="${b.id}">Save</button>${b.photo ? `<button class="btn ghost sm" data-act="rmbphoto" data-id="${b.id}">Remove picture</button>` : ''}<a class="btn ghost sm" href="/book" target="_blank" style="text-decoration:none">View booking site</a></div></div>`).join('')}</div></div>
 
-  <div class="card overflow" style="margin-top:14px"><h3>Access: what each role can open in the POS</h3>
+  <div class="card overflow" style="margin-top:14px"><h3>Access: what each role can open in the Brotherhood app</h3>
     <table><tr><th>Section</th><th>Cashier</th><th>Barber</th></tr>
     ${s.modules.map(m => `<tr><td>${esc(MOD_LABEL[m] || m)}</td>${['cashier', 'barber'].map(r => r === 'barber' && m === 'queue' ? '<td class="mute">—</td>' : `<td><input type="checkbox" data-perm="${r}:${m}" ${s.perms[r].includes(m) ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000"></td>`).join('')}</tr>`).join('')}</table>
     <p class="mute" style="font-size:12px;margin:10px 0">Owner and admin always have full access. Create barber and cashier logins under Management → Users. Changes apply right away.</p>
