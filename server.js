@@ -7,6 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
+import tls from 'node:tls';
+import net from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { mountBH } from './bh-api.js';
@@ -66,6 +68,7 @@ create table if not exists bookings(id text primary key, branchId text, staffId 
   itemIds text, status text, notes text, source text, orderId text, createdAt text);
 create index if not exists bookings_date on bookings(date, branchId);
 create table if not exists email_log(id text primary key, customerId text, toAddr text, kind text, subject text, html text, text text, status text, attempts integer, error text, createdAt text, sentAt text);
+create table if not exists campaigns(id text primary key, subject text, body text, btnText text, btnUrl text, audience text, total integer, createdBy text, createdAt text);
 create index if not exists orders_cust on orders(customerId);
 `);
 addCol('customers', 'noshowOk', 'integer'); addCol('customers', 'preferredCut', 'text'); addCol('customers', 'consent', 'integer'); addCol('customers', 'consentAt', 'text'); addCol('customers', 'welcomedAt', 'text');
@@ -111,6 +114,10 @@ create index if not exists reviews_branch on reviews(branchId, createdAt);
 db.exec("create table if not exists settings(k text primary key, v text)");
 db.exec("create unique index if not exists users_pin on users(pinKey) where pinKey is not null and pinKey<>''");
 mainDb.exec('create table if not exists orgs(id text primary key, code text unique, name text, ownerUser text, ownerHash text, active integer, createdAt text)');
+// self sign-up and plans: who signed up, what kind of user, free trial end and paid-until date
+for (const [c, t] of [['email', 'text'], ['phone', 'text'], ['ownerName', 'text'], ['kind', 'text'], ['plan', 'text'], ['trialEnds', 'text'], ['paidUntil', 'text'], ['source', 'text'], ['city', 'text']])
+  if (!mainDb.prepare('pragma table_info(orgs)').all().some(x => x.name === c)) mainDb.exec(`alter table orgs add column ${c} ${t}`);
+mainDb.exec('create table if not exists org_payments(id text primary key, orgId text, amount real, months integer, method text, ref text, invoiceNo text, note text, paidAt text, createdBy text)');
 const ORG_DBS = new Map(); let schemaReady = false;
 const orgRow = id => mainDb.prepare('select * from orgs where id=?').get(String(id || ''));
 const orgList = () => mainDb.prepare('select * from orgs order by createdAt').all();
@@ -408,6 +415,86 @@ We do not sell or share your information with other companies. We follow the Dat
 const getTerms = () => getSetting('terms') || DEFAULT_TERMS;
 const EMAIL = { key: process.env.RESEND_API_KEY || '', from: process.env.EMAIL_FROM || 'Brotherhood Barber <onboarding@resend.dev>', replyTo: process.env.EMAIL_REPLY_TO || '' };
 let lastOrigin = getSetting('origin') || '';
+addCol('email_log', 'campaignId', 'text');
+
+// ---------- plans for partner shops: self sign-up with a free trial, monthly fee recorded by Brotherhood ----------
+const mainGet = k => mainDb.prepare('select v from settings where k=?').get(k)?.v;
+const mainSet = (k, v) => mainDb.prepare('insert into settings(k,v) values(?,?) on conflict(k) do update set v=excluded.v').run(k, v);
+const TRIAL_DAYS = +process.env.TRIAL_DAYS || 30;
+const DEFAULT_PLANS = [
+  { id: 'solo', name: 'Solo', price: 299, desc: 'One barber: chair renter, own suite or student barber' },
+  { id: 'shop', name: 'Shop', price: 999, desc: 'One branch with your team' },
+  { id: 'multi', name: 'Multi-branch', price: 2499, desc: 'Two or more branches' }];
+const PLAN_IDS = DEFAULT_PLANS.map(x => x.id);
+const plansNow = () => { try { const s = JSON.parse(mainGet('plans') || 'null'); if (Array.isArray(s)) return DEFAULT_PLANS.map(d => ({ ...d, ...(s.find(x => x.id === d.id) || {}) })); } catch { } return DEFAULT_PLANS; };
+const payInfo = () => mainGet('payInfo') || '';
+const contactEmail = () => String(process.env.CONTACT_EMAIL || '').trim();
+const addDaysStr = (s, n) => { const d = new Date(s + 'T00:00'); d.setDate(d.getDate() + n); return dOf(d); };
+const addMonthsStr = (s, n) => { const d = new Date(s + 'T00:00'); d.setMonth(d.getMonth() + n); return dOf(d); };
+const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00') - new Date(a + 'T00:00')) / 864e5);
+// free = added by Brotherhood without a plan (no limits); trial / paid = until a date; expired = can log in and view, cannot add anything
+function orgStatus(o) {
+  const t = todayStr(), plan = plansNow().find(x => x.id === o.plan) || null;
+  const base = { plan: plan ? plan.id : '', planName: plan ? plan.name : '', price: plan ? plan.price : 0, trialEnds: o.trialEnds || '', paidUntil: o.paidUntil || '' };
+  if (!o.active) return { ...base, state: 'paused' };
+  if (o.paidUntil && o.paidUntil >= t) return { ...base, state: 'paid', until: o.paidUntil, daysLeft: daysBetween(t, o.paidUntil) };
+  if (o.trialEnds && o.trialEnds >= t) return { ...base, state: 'trial', until: o.trialEnds, daysLeft: daysBetween(t, o.trialEnds) };
+  if (!o.trialEnds && !o.paidUntil) return { ...base, state: 'free' };
+  return { ...base, state: 'expired', until: o.paidUntil || o.trialEnds };
+}
+const orgInfo = () => { const o = curOrg(); if (!o) return null; const f = orgRow(o.id) || o; return { name: f.name, code: f.code, kind: f.kind || '', email: f.email || '', status: orgStatus(f), plans: plansNow(), payInfo: payInfo(), contact: contactEmail() }; };
+const signupHits = new Map();
+const STARTER = [['Haircut', 150, 30], ['Haircut and shave', 250, 45], ['Beard trim', 100, 20]];   // a new shop starts with these; they change the names and prices in a minute
+const KIND_LABEL = { owner: 'Shop owner with barbers', renter: 'Chair renter', suite: 'Own suite or studio', student: 'Student barber' };
+
+// ---------- sending email: a Gmail account (or any SMTP account) first, else Resend ----------
+// Railway variables: GMAIL_USER = the Gmail address, GMAIL_APP_PASSWORD = a 16-letter App Password (Google Account, Security, App passwords).
+const SMTP = { host: process.env.SMTP_HOST || 'smtp.gmail.com', port: +process.env.SMTP_PORT || 465, secure: process.env.SMTP_SECURE !== '0',
+  user: String(process.env.GMAIL_USER || process.env.SMTP_USER || '').trim(), pass: String(process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS || '').replace(/\s+/g, '') };
+const mailProvider = () => SMTP.user && SMTP.pass ? 'gmail' : EMAIL.key ? 'resend' : '';
+const mailReady = () => !!mailProvider();
+const MAIL_LIMIT = +process.env.EMAIL_DAILY_LIMIT || (SMTP.user && SMTP.pass ? 450 : 3000);   // a normal Gmail account can send about 500 a day; we stop a little before
+const mailFrom = () => mailProvider() === 'gmail' ? SMTP.user : ((/<([^>]+)>/.exec(EMAIL.from) || [])[1] || EMAIL.from);
+const NO_MAIL = () => curOrg() ? 'Email is not turned on yet. Ask Brotherhood to connect it.' : 'Email is not connected yet. Add GMAIL_USER and GMAIL_APP_PASSWORD in the Railway variables.';
+// emails sent today, all shops together (kept in the main database so a restart does not reset it)
+const mailCount = () => { const [d, n] = String(mainGet('mailDay') || '').split(':'); return d === todayStr() ? +n || 0 : 0; };
+const mailBump = () => mainSet('mailDay', todayStr() + ':' + (mailCount() + 1));
+const b64 = s => Buffer.from(String(s), 'utf8').toString('base64');
+const wrap76 = s => s.replace(/.{1,76}/g, '$&\r\n');
+const dispName = n => /^[\x20-\x7e]*$/.test(n) ? '"' + n.replace(/["\\]/g, '') + '"' : '=?UTF-8?B?' + b64(n) + '?=';
+function mimeMessage({ from, fromName, to, subject, html, text, replyTo, unsub }) {
+  const bd = 'bh' + crypto.randomBytes(12).toString('hex'), sub = String(subject).replace(/[\r\n]+/g, ' ');
+  const h = [`From: ${fromName ? dispName(String(fromName).replace(/[\r\n]/g, '')) + ' ' : ''}<${from}>`, `To: <${to}>`, `Subject: ${/^[\x20-\x7e]*$/.test(sub) ? sub : '=?UTF-8?B?' + b64(sub) + '?='}`,
+    `Date: ${new Date().toUTCString()}`, `Message-ID: <${crypto.randomUUID()}@${from.split('@')[1] || 'brotherhood'}>`, 'MIME-Version: 1.0'];
+  if (replyTo) h.push(`Reply-To: <${replyTo}>`);
+  if (unsub) h.push(`List-Unsubscribe: <${unsub}>`);
+  h.push(`Content-Type: multipart/alternative; boundary="${bd}"`);
+  return h.join('\r\n') + '\r\n\r\n' + `--${bd}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrap76(b64(text || ' '))}`
+    + `--${bd}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrap76(b64(html || ' '))}--${bd}--\r\n`;
+}
+function smtpSend(msg, to) {
+  return new Promise(resolve => {
+    let done = false, buf = '', step = 0;
+    const sock = SMTP.secure ? tls.connect({ host: SMTP.host, port: SMTP.port, servername: SMTP.host }) : net.connect({ host: SMTP.host, port: SMTP.port });
+    const end = r => { if (done) return; done = true; clearTimeout(tm); try { sock.end(); } catch { } resolve(r); };
+    const tm = setTimeout(() => end({ ok: false, error: 'The mail server did not answer' }), 30000);
+    const say = l => sock.write(l + '\r\n');
+    const steps = [[220, () => say('EHLO brotherhood')], [250, () => say('AUTH LOGIN')], [334, () => say(b64(SMTP.user))], [334, () => say(b64(SMTP.pass))],
+      [235, () => say(`MAIL FROM:<${SMTP.user}>`)], [250, () => say(`RCPT TO:<${to}>`)], [250, () => say('DATA')],
+      [354, () => sock.write(msg.replace(/\r\n\./g, '\r\n..') + '\r\n.\r\n')], [250, () => { say('QUIT'); end({ ok: true }); }]];
+    sock.on('data', d => {
+      buf += d.toString('utf8'); const lines = buf.split(/\r?\n/); buf = lines.pop();
+      for (const ln of lines) {
+        if (done) return; if (/^\d{3}-/.test(ln)) continue;   // more lines of the same answer follow
+        const code = +ln.slice(0, 3), [want, next] = steps[step] || [];
+        if (code !== want) return end({ ok: false, error: (code === 535 || code === 534 ? 'Gmail did not accept the login. Use an App Password, not your normal password. ' : '') + ln.slice(0, 200) });
+        step++; next();
+      }
+    });
+    sock.on('error', e => end({ ok: false, error: String(e.message).slice(0, 200) }));
+    sock.on('close', () => end({ ok: false, error: 'The mail server closed the connection' }));
+  });
+}
 const baseUrl = () => process.env.PUBLIC_URL || lastOrigin || 'http://localhost:' + PORT;
 function rememberOrigin(req) {   // only called for authenticated admins, so the Host header can be trusted
   const host = req.headers.host || ''; if (!host || /^(localhost|127\.)/.test(host)) return;
@@ -494,7 +581,27 @@ function welcomeEmail(c) {
 </table></td></tr></table></body></html>`;
   const text = `Welcome, ${String(c.name).trim().split(/\s+/)[0] || 'there'}!\n\nThank you for joining Brotherhood Barber. You are now a Member of our loyalty program.\nEvery completed haircut = 1 point.\nMember 0-4 visits | Bronze 5-15 | Silver 16-25 | Gold 26-50 | VIP 51+\n\nJust give the cashier your mobile number or email on every visit so your points are added automatically.\n\nUnsubscribe: {{UNSUB}}`;
   return { subject: 'Welcome to Brotherhood Barber 💈', html, text };
-}function maybeWelcome(c) {
+}function shopWelcomeEmail({ shop, ownerName, code, user, trialEnds, kind, backend, app }) {
+  const first = String(ownerName || '').trim().split(/\s+/)[0] || 'there', solo = kind !== 'owner';
+  const steps = solo ? ['Open the app and log in with your shop code, username and password.', 'Set your services and prices (we added three to start).', 'Share your booking link with your clients.', 'Track every finished cut and your earnings in Today.']
+    : ['Open the back office and set your services and prices (we added three to start).', 'Add your barbers, then make a login for each one (Management, Users).', 'Your barbers and front desk use the app: walk-ins, the line, finished services, time in and out.', 'Share your booking page so clients book online.'];
+  const row = (k, v) => `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#666">${k}</td><td style="padding:8px 12px;border-bottom:1px solid #eee;font-weight:700">${esc2(v)}</td></tr>`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f2f3f5;font-family:Arial,Helvetica,sans-serif;color:#111"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#fff;border-radius:16px;overflow:hidden">
+<tr><td style="background:#0a0a0b;text-align:center;padding:26px 20px"><img src="${baseUrl()}/bh-mark.png" width="48" height="48" alt="" style="display:block;margin:0 auto 10px"><div style="color:#fff;font-size:22px;font-weight:700;letter-spacing:4px">BROTHERHOOD</div></td></tr>
+<tr><td style="height:4px;background:#1f7bff;font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td style="padding:28px 26px"><h1 style="margin:0 0 10px;font-size:22px">Welcome, ${esc2(first)}!</h1>
+<p style="line-height:1.6;margin:0 0 14px"><b>${esc2(shop)}</b> is ready on Brotherhood. Your free trial runs until <b>${trialEnds}</b>.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eee;border-radius:10px;border-collapse:separate;margin:0 0 18px">${row('Shop code', code)}${row('Username', user)}${row('Password', 'the one you chose')}</table>
+<ol style="line-height:1.7;margin:0 0 18px;padding-left:20px">${steps.map(s => `<li>${esc2(s)}</li>`).join('')}</ol>
+<p style="margin:0 0 10px"><a href="${esc2(solo ? app : backend)}" style="display:inline-block;background:#1f7bff;color:#fff;text-decoration:none;font-weight:700;padding:13px 26px;border-radius:999px">${solo ? 'Open the app' : 'Open the back office'}</a></p>
+<p style="margin:0 0 18px;font-size:13px;color:#555">${solo ? 'Back office' : 'The app'}: <a href="${esc2(solo ? backend : app)}">${esc2(solo ? backend : app)}</a></p>
+<p style="line-height:1.5;margin:0;font-size:12px;color:#777;border-top:1px solid #eee;padding-top:14px">Brotherhood is for bookings and tracking only. It does not issue receipts or invoices. Issue your BIR invoices from your own registered booklet or system.</p></td></tr>
+</table></td></tr></table></body></html>`;
+  const text = `Welcome, ${first}!\n\n${shop} is ready on Brotherhood. Your free trial runs until ${trialEnds}.\n\nShop code: ${code}\nUsername: ${user}\nPassword: the one you chose\n\n${steps.map((s, i) => (i + 1) + '. ' + s).join('\n')}\n\nThe app: ${app}\nBack office: ${backend}\n\nBrotherhood is for bookings and tracking only. It does not issue receipts or invoices. Issue your BIR invoices from your own registered booklet or system.`;
+  return { subject: `Welcome to Brotherhood, ${shop} is ready`, html, text };
+}
+function maybeWelcome(c) {
   if (curOrg()) return;
   if (!c.consent || !c.email || !validEmail(c.email) || c.welcomedAt) return;
   const m = welcomeEmail(c);
@@ -503,33 +610,101 @@ function welcomeEmail(c) {
   setTimeout(() => processEmails().catch(() => { }), 50);
 }
 function queueEmail({ customerId = '', to, kind, subject, html, text }) {   // transactional mail from the app (reminders, review requests); only queued when the email service is connected
-  if (curOrg() || !EMAIL.key || !validEmail(to)) return false;
+  if (curOrg() || !mailReady() || !validEmail(to)) return false;
   run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt) values(?,?,?,?,?,?,?,'pending',0,'',?)", uid(), customerId, to, kind, subject, html, text, nowISO());
   setTimeout(() => processEmails().catch(() => { }), 50); return true;
 }
-async function sendEmail({ to, subject, html, text }) {
-  if (!EMAIL.key) return { ok: false, error: 'Email service not configured' };
-  try {
-    const r = await fetch(process.env.RESEND_URL || 'https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + EMAIL.key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: EMAIL.from, to: [to], subject, html, text, ...(EMAIL.replyTo ? { reply_to: EMAIL.replyTo } : {}) }) });
-    const j = await r.json().catch(() => ({}));
-    return r.ok ? { ok: true } : { ok: false, error: String(j.message || j.error || r.status).slice(0, 300) };
-  } catch (e) { return { ok: false, error: String(e.message).slice(0, 300) }; }
+async function sendEmail({ to, subject, html, text, fromName = '', replyTo = '', unsub = '' }) {
+  const pv = mailProvider(); if (!pv) return { ok: false, error: 'Email service not configured' };
+  if (mailCount() >= MAIL_LIMIT) return { ok: false, limit: true, error: "Today's email limit is used up. The rest go out tomorrow." };
+  const name = String(fromName || (/^(.*?)\s*</.exec(EMAIL.from) || [])[1] || SHOP).replace(/[<>"\r\n]/g, '').trim(), rt = replyTo || EMAIL.replyTo;
+  let r;
+  if (pv === 'gmail') r = await smtpSend(mimeMessage({ from: SMTP.user, fromName: name, to, subject, html, text, replyTo: rt, unsub }), to);
+  else try {
+    const x = await fetch(process.env.RESEND_URL || 'https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + EMAIL.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: fromName ? `${name} <${mailFrom()}>` : EMAIL.from, to: [to], subject, html, text, ...(rt ? { reply_to: rt } : {}), ...(unsub ? { headers: { 'List-Unsubscribe': `<${unsub}>` } } : {}) }) });
+    const j = await x.json().catch(() => ({}));
+    r = x.ok ? { ok: true } : { ok: false, error: String(j.message || j.error || x.status).slice(0, 300) };
+  } catch (e) { r = { ok: false, error: String(e.message).slice(0, 300) }; }
+  if (r.ok) mailBump(); return r;
 }
 let sending = false;
+// sends what is waiting, for Brotherhood and every partner shop (a partner's emails go out with the shop's name and reply to the shop's email)
 async function processEmails() {
-  if (!EMAIL.key || sending) return; sending = true;
+  if (!mailReady() || sending) return; sending = true;
   try {
-    for (const r of all("select * from email_log where status='pending' order by createdAt limit 20")) {
-      const unsub = `${baseUrl()}/unsubscribe?c=${r.customerId}&t=${unsubSig(r.customerId)}`;
-      let m = r; if (r.kind === 'welcome') { const c = get('customers', r.customerId); if (c) m = welcomeEmail(c); }   // always sent in the current wording
-      const res = await sendEmail({ to: r.toAddr, subject: m.subject, html: m.html.replaceAll('{{UNSUB}}', unsub), text: m.text.replaceAll('{{UNSUB}}', unsub) });
-      if (res.ok) run("update email_log set status='sent', sentAt=?, error='', attempts=attempts+1 where id=?", nowISO(), r.id);
-      else run('update email_log set attempts=attempts+1, error=?, status=? where id=?', res.error, r.attempts + 1 >= 5 ? 'failed' : 'pending', r.id);
+    for (const g of [null, ...activeOrgs()]) {
+      const go = fn => g ? inOrg(g, fn) : inMain(fn);
+      for (const r of go(() => all("select * from email_log where status='pending' order by createdAt limit 20"))) {
+        const unsub = `${baseUrl()}/unsubscribe?c=${r.customerId}&t=${unsubSig(r.customerId)}${g ? '&o=' + g.id : ''}`;
+        let m = r; if (r.kind === 'welcome' && !g) { const c = inMain(() => get('customers', r.customerId)); if (c) m = inMain(() => welcomeEmail(c)); }   // always sent in the current wording
+        const res = await sendEmail({ to: r.toAddr, subject: m.subject, html: m.html.replaceAll('{{UNSUB}}', unsub), text: m.text.replaceAll('{{UNSUB}}', unsub), fromName: g ? g.name : '', replyTo: g ? g.email || '' : '', unsub: r.customerId ? unsub : '' });
+        if (res.limit) return;   // daily limit reached: the rest stay waiting until tomorrow
+        go(() => {
+          if (res.ok) run("update email_log set status='sent', sentAt=?, error='', attempts=attempts+1 where id=?", nowISO(), r.id);
+          else run('update email_log set attempts=attempts+1, error=?, status=? where id=?', res.error, r.attempts + 1 >= 5 ? 'failed' : 'pending', r.id);
+        });
+      }
     }
   } finally { sending = false; }
 }
 setInterval(() => processEmails().catch(() => { }), 60_000).unref();
+
+// ---------- email marketing: promos to customers who said yes to emails, and an automatic "we miss you" ----------
+const AUD_WHO = ['all', 'lapsed', 'new', 'regular', 'tier'];
+function audienceOf(a = {}) {
+  const seen = new Set();
+  let rows = all("select c.id, c.name, c.email, c.branchId, count(o.id) n, max(o.paidAt) last from customers c left join orders o on o.customerId=c.id and o.status='paid' where c.consent=1 and c.email is not null and c.email<>'' group by c.id")
+    .filter(c => { const e = String(c.email).toLowerCase(); if (!validEmail(e) || seen.has(e)) return false; seen.add(e); return true; });
+  if (a.branchId) rows = rows.filter(c => c.branchId === a.branchId);
+  const days = Math.max(7, Math.min(365, +a.days || 45));
+  if (a.who === 'lapsed') rows = rows.filter(c => c.last && Date.now() - new Date(c.last) > days * 864e5);
+  if (a.who === 'new') rows = rows.filter(c => !c.n);
+  if (a.who === 'regular') rows = rows.filter(c => c.n >= 5);
+  if (a.who === 'tier') rows = rows.filter(c => tierOf(c.n) === a.tier);
+  return rows;
+}
+function promoEmail({ name, subject, body, btnText, btnUrl }) {
+  const shop = shopName(), first = String(name || '').trim().split(/\s+/)[0] || 'there';
+  const fill = s => String(s || '').replaceAll('{name}', first).replaceAll('{shop}', shop);
+  const subj = fill(subject).replace(/[\r\n]+/g, ' ').slice(0, 150), paras = fill(body).split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+  const url = /^https?:\/\/\S+$/.test(String(btnUrl || '').trim()) ? String(btnUrl).trim() : baseUrl() + '/member', label = String(btnText || '').trim() || 'Book now';
+  const logo = curOrg() ? '' : `<img src="${baseUrl()}/bh-mark.png" width="44" height="44" alt="" style="display:block;margin:0 auto 10px">`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f2f3f5;font-family:Arial,Helvetica,sans-serif;color:#111"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#fff;border-radius:16px;overflow:hidden">
+<tr><td style="background:#0a0a0b;text-align:center;padding:26px 20px">${logo}<div style="color:#fff;font-size:22px;font-weight:700;letter-spacing:4px;text-transform:uppercase">${esc2(shop)}</div></td></tr>
+<tr><td style="height:4px;background:#1f7bff;font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td style="padding:28px 26px">${paras.map(p => `<p style="line-height:1.6;margin:0 0 14px;font-size:15px">${esc2(p).replace(/\n/g, '<br>')}</p>`).join('')}
+<p style="margin:22px 0 4px"><a href="${esc2(url)}" style="display:inline-block;background:#1f7bff;color:#fff;text-decoration:none;font-weight:700;padding:13px 26px;border-radius:999px">${esc2(label)}</a></p></td></tr>
+<tr><td style="padding:16px 26px 24px;color:#888;font-size:12px;border-top:1px solid #eee">You are getting this email because you agreed to receive news and promos from ${esc2(shop)}.<br><a href="{{UNSUB}}" style="color:#888">Unsubscribe</a></td></tr>
+</table></td></tr></table></body></html>`;
+  const text = `${paras.join('\n\n')}\n\n${label}: ${url}\n\n---\nYou are getting this email because you agreed to receive news and promos from ${shop}.\nUnsubscribe: {{UNSUB}}`;
+  return { subject: subj, html, text };
+}
+function queueMarketing(c, kind, msg, campaignId) {
+  const m = promoEmail({ name: c.name, ...msg });
+  run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt,campaignId) values(?,?,?,?,?,?,?,'pending',0,'',?,?)", uid(), c.id, c.email, kind, m.subject, m.html, m.text, nowISO(), campaignId || '');
+}
+const WINBACK = { on: false, days: 45, subject: 'We miss you, {name}', body: 'Hi {name},\n\nIt has been a while since your last cut at {shop}. Your barber is ready when you are.\n\nBook your next visit in the app and skip the wait.', btnText: 'Book my cut' };
+const winbackCfg = () => { try { return { ...WINBACK, ...JSON.parse(getSetting('winback') || '{}') }; } catch { return { ...WINBACK }; } };
+// once an hour: customers whose last visit was N days ago get one "we miss you" email (once per absence, never twice for the same last visit)
+function runWinback() {
+  if (!mailReady()) return 0; let total = 0;
+  for (const g of [null, ...activeOrgs()]) (g ? fn => inOrg(g, fn) : inMain)(() => {
+    const cfg = winbackCfg(); if (!cfg.on) return;
+    const now = Date.now(); let n = 0;
+    for (const c of audienceOf({})) {
+      if (n >= 100) break; if (!c.last) continue;
+      const age = (now - new Date(c.last)) / 864e5; if (age < cfg.days || age > cfg.days + 60) continue;
+      if (one("select 1 x from email_log where customerId=? and kind='winback' and createdAt>?", c.id, c.last)) continue;
+      queueMarketing(c, 'winback', cfg, ''); n++;
+    }
+    total += n;
+  });
+  if (total) setTimeout(() => processEmails().catch(() => { }), 50);
+  return total;
+}
+setInterval(() => { try { runWinback(); } catch { } }, 3600e3).unref();
 for (const c of all('select id,phone,email from customers where phoneKey is null and emailKey is null')) {
   const pk = normPhone(c.phone), ek = normEmail(c.email); if (pk || ek) run('update customers set phoneKey=?, emailKey=? where id=?', pk || null, ek || null, c.id);
 }
@@ -868,11 +1043,11 @@ const readBody = (req, max = 100_000) => new Promise((ok, no) => {
   let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
 });
-const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/brotherhood': 'bh.html', '/member': 'bh.html', '/bh.js': 'bh.js', '/bh.webmanifest': 'bh.webmanifest', '/bh-icon-192.png': 'bh-icon-192.png', '/bh-icon-512.png': 'bh-icon-512.png', '/bh-apple-touch.png': 'bh-apple-touch.png', '/bh-mark.png': 'bh-mark.png', '/barbershop': 'landing.html', '/privacy': 'site/privacy.html', '/terms': 'site/terms.html', '/delete-account': 'site/delete-account.html', '/': 'home.html','/app.js': 'app.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
+const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/brotherhood': 'bh.html', '/member': 'bh.html', '/bh.js': 'bh.js', '/bh.webmanifest': 'bh.webmanifest', '/bh-icon-192.png': 'bh-icon-192.png', '/bh-icon-512.png': 'bh-icon-512.png', '/bh-apple-touch.png': 'bh-apple-touch.png', '/bh-mark.png': 'bh-mark.png', '/barbershop': 'landing.html', '/privacy': 'site/privacy.html', '/terms': 'site/terms.html', '/delete-account': 'site/delete-account.html', '/signup': 'site/signup.html', '/shop-terms': 'site/shop-terms.html', '/': 'home.html','/app.js': 'app.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace(/:\d+$/, '').replace(/^www\./, '');
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST), LANDING_HOST = normHost(process.env.LANDING_HOST);
 // LANDING_HOST = a separate domain (e.g. brotherhoodbarberph.com) whose home page is the BrotherhoodBarber shop website. The public domain's home page is the Brotherhood product site, and the app is at /member.
-const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/brotherhood', '/member', '/bh.js', '/bh.webmanifest', '/bh-icon-192.png', '/bh-icon-512.png', '/bh-apple-touch.png', '/bh-mark.png', '/logo.png', '/logo-sm.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/barbershop', '/privacy', '/terms', '/delete-account', '/.well-known/assetlinks.json']);
+const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/brotherhood', '/member', '/bh.js', '/bh.webmanifest', '/bh-icon-192.png', '/bh-icon-512.png', '/bh-apple-touch.png', '/bh-mark.png', '/logo.png', '/logo-sm.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/barbershop', '/privacy', '/terms', '/delete-account', '/signup', '/shop-terms', '/.well-known/assetlinks.json']);
 // App version = hash of every file the apps load. It changes on each deploy, which is what makes phones offer the "Update app" button.
 const APP_VERSION = (() => { const h = crypto.createHash('sha1'); for (const f of Object.values(STATIC).filter((v, i, a) => a.indexOf(v) === i && v !== 'sw.js').sort()) { try { h.update(fs.readFileSync(path.join(DIR, f))); } catch { } } return h.digest('hex').slice(0, 12); })();
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', jpg: 'image/jpeg', json: 'application/json' };
@@ -920,6 +1095,8 @@ async function handle(req, res) {
   }
   if (!org) return handleIn(req, res);
   if (!org.active) return send(res, 403, { error: 'This shop account is paused. Please contact Brotherhood.' });
+  if (req.method !== 'GET' && pth !== '/api/login' && orgStatus(org).state === 'expired')
+    return send(res, 402, { error: `Your Brotherhood ${org.paidUntil ? 'plan' : 'free trial'} has ended. Your data is safe and you can still view it. To add bookings and services again, renew your plan${contactEmail() ? ' (' + contactEmail() + ')' : ''}.` });
   return inOrg(org, () => handleIn(req, res));
 }
 async function handleIn(req, res) {
@@ -959,13 +1136,58 @@ async function handleIn(req, res) {
     return res.end(Buffer.from(r.data));
   }
   if (p === '/unsubscribe' && method === 'GET') {
-    const c = q.c ? get('customers', String(q.c)) : null, ok = !!c && String(q.t || '') === unsubSig(c.id);
-    if (ok) { run('update customers set consent=0 where id=?', c.id); log({ name: 'Customer' }, 'unsubscribe', 'customers', c.id, c.name); }
+    const og = q.o ? orgRow(String(q.o)) : null, inIt = fn => og ? inOrg(og, fn) : fn();
+    const c = inIt(() => q.c ? get('customers', String(q.c)) : null), ok = !!c && String(q.t || '') === unsubSig(c.id);
+    if (ok) inIt(() => { run('update customers set consent=0 where id=?', c.id); log({ name: 'Customer' }, 'unsubscribe', 'customers', c.id, c.name); });
     const page = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Brotherhood Barber</title><body style="margin:0;font-family:Arial,Helvetica,sans-serif;background:#f5f5f6;display:grid;place-items:center;min-height:100vh"><div style="background:#fff;border-radius:16px;padding:32px;max-width:420px;text-align:center;box-shadow:0 8px 30px -14px rgba(0,0,0,.3)"><div style="font-size:24px;font-weight:700;letter-spacing:3px">BROTHERHOOD</div><p style="margin:18px 0 6px;font-size:18px"><b>${ok ? 'You are unsubscribed.' : 'This link is not valid.'}</b></p><p style="color:#666;margin:0">${ok ? 'You will no longer receive emails and promos from us. Your points and visits are kept.' : 'Please tell our cashier if you want to stop receiving emails.'}</p></div></body>`;
     return send(res, ok ? 200 : 400, page, 'text/html; charset=utf-8');
   }
   if (!p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
   if (p === '/api/public/terms' && method === 'GET') return send(res, 200, { terms: getTerms() });
+  // ----- public: plans and self sign-up for new shops (each gets its own separate database and a free trial) -----
+  if (p === '/api/public/plans' && method === 'GET') return send(res, 200, { plans: plansNow(), trialDays: TRIAL_DAYS, contact: contactEmail() });
+  const codeTaken = c => !!mainDb.prepare('select 1 x from orgs where code=?').get(c);
+  if (p === '/api/public/signup/check' && method === 'GET') { const c = String(q.code || '').trim().toLowerCase(); return send(res, 200, { ok: /^[a-z0-9-]{3,30}$/.test(c) && !codeTaken(c) }); }
+  if (p === '/api/public/signup' && method === 'POST') {
+    if (curOrg()) bad(404, 'Not found');
+    if (recent(signupHits, ip).length >= (+process.env.SIGNUP_LIMIT || 5)) bad(429, 'Too many sign-ups from this connection. Please try again in an hour.');
+    const b = await readBody(req), s = (k, n) => String(b[k] || '').trim().slice(0, n);
+    const kind = String(b.kind || ''); if (!KIND_LABEL[kind]) bad(400, 'Choose what describes you');
+    const shop = s('shopName', 60), ownerName = s('ownerName', 60), email = normEmail(b.email).slice(0, 120), phone = s('phone', 30), city = s('city', 60), user = s('username', 30).toLowerCase(), pw = String(b.password || '');
+    if (shop.length < 2) bad(400, kind === 'owner' ? 'Enter your shop name' : 'Enter the name your clients know you by');
+    if (ownerName.length < 2) bad(400, 'Enter your full name');
+    if (!validEmail(email)) bad(400, 'Enter a valid email address');
+    if (normPhone(phone).length < 10) bad(400, 'Enter a valid mobile number');
+    if (!/^[a-z0-9._-]{3,30}$/.test(user)) bad(400, 'Username: 3 to 30 letters, numbers, dot, dash or underscore');
+    if (pw.length < 8) bad(400, 'Password: at least 8 characters');
+    if (!b.agree) bad(400, 'Please agree to the Terms for shops and the Privacy Policy');
+    if (mainDb.prepare('select 1 x from orgs where lower(email)=?').get(email)) bad(409, 'This email already has a Brotherhood shop. Log in instead, or ask us to reset your password.');
+    let code = String(b.code || '').trim().toLowerCase();
+    if (code) { if (!/^[a-z0-9-]{3,30}$/.test(code)) bad(400, 'Shop code: 3 to 30 letters, numbers or dashes'); if (codeTaken(code)) bad(409, 'That shop code is taken. Try another one.'); }
+    else {
+      const base = shop.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'shop';
+      const root = base.length >= 3 ? base : base + '-shop'; code = root; for (let i = 2; codeTaken(code); i++) code = root + '-' + i;
+    }
+    const id = uid(), plan = kind === 'owner' ? 'shop' : 'solo', trialEnds = addDaysStr(todayStr(), TRIAL_DAYS);
+    mainDb.prepare('insert into orgs(id,code,name,ownerUser,ownerHash,active,createdAt,email,phone,ownerName,kind,plan,trialEnds,source,city) values(?,?,?,?,?,1,?,?,?,?,?,?,?,?,?)')
+      .run(id, code, shop, user, hashPw(pw), nowISO(), email, phone, ownerName, kind, plan, trialEnds, 'signup', city);
+    hitRate(signupHits, ip);
+    const g = orgRow(id);
+    inOrg(g, () => {
+      const bid = insert('branches', { name: city || shop, openTime: '09:00', closeTime: '21:00', graceMins: 10 }).id, chairs = [];
+      for (let i = 1; i <= (kind === 'owner' ? 3 : 1); i++) chairs.push(insert('chairs', { branchId: bid, name: 'Chair ' + i, sort: i, active: 1 }).id);
+      const cat = insert('categories', { name: 'Haircut', type: 'service' }).id;
+      for (const [n, pr, m] of STARTER) insert('items', { name: n, price: pr, categoryId: cat, type: 'service', mins: m, active: 1, bookable: 1 });
+      if (kind !== 'owner') insert('staff', { name: ownerName, branchId: bid, chairId: chairs[0], pct: 100, allowance: 0, active: 1 });   // one-person shop: the owner is the barber
+      log({ name: ownerName }, 'signup', 'shop', id, `${shop} (${KIND_LABEL[kind]})`);
+    });
+    inMain(() => log({ name: ownerName }, 'signup', 'orgs', id, `${shop} (${code}, ${KIND_LABEL[kind]}, ${email})`));
+    const links = { backend: baseUrl() + '/backend', app: baseUrl() + '/member#/pro' };
+    const w = shopWelcomeEmail({ shop, ownerName, code, user, trialEnds, kind, ...links });
+    sendEmail({ to: email, ...w }).catch(() => { });
+    if (contactEmail()) sendEmail({ to: contactEmail(), subject: `New shop sign-up: ${shop}`, html: `<p><b>${esc2(shop)}</b> signed up (${esc2(KIND_LABEL[kind])}).</p><p>${esc2(ownerName)} · ${esc2(email)} · ${esc2(phone)} · ${esc2(city)}</p><p>Shop code: <b>${esc2(code)}</b>. Free trial until ${trialEnds}.</p>`, text: `${shop} signed up (${KIND_LABEL[kind]}).\n${ownerName} · ${email} · ${phone} · ${city}\nShop code: ${code}. Free trial until ${trialEnds}.` }).catch(() => { });
+    return send(res, 201, { code, username: user, name: shop, trialEnds, token: makeToken('owner', String(g.ownerHash).slice(-8), id), ...links });
+  }
 
   // ----- public: Google reviews of a branch -----
   if (p === '/api/public/google' && method === 'GET') {
@@ -1157,9 +1379,9 @@ async function handleIn(req, res) {
   // ----- admin data -----
   if (p === '/api/state' && method === 'GET') {
     if (admin) rememberOrigin(req);
-    if (!admin) { const su = get('users', me.id), sp = su && su.staffId ? get('staff', su.staffId) : null; return send(res, 200, { shop: shopName(), org: curOrg() ? { name: curOrg().name, code: curOrg().code } : null, me: sp ? { ...me, photo: sp.photo || '' } : me, modules: modulesFor(me.role) }); }   // a barber's own profile picture
+    if (!admin) { const su = get('users', me.id), sp = su && su.staffId ? get('staff', su.staffId) : null; return send(res, 200, { shop: shopName(), org: orgInfo(), me: sp ? { ...me, photo: sp.photo || '' } : me, modules: modulesFor(me.role) }); }   // a barber's own profile picture
     return send(res, 200, {
-      shop: shopName(), org: curOrg() ? { name: curOrg().name, code: curOrg().code } : null, me, branches: all('select * from branches order by rowid'), chairs: all('select * from chairs order by branchId, sort'), staff: all('select * from staff order by name'),
+      shop: shopName(), org: orgInfo(), me, branches: all('select * from branches order by rowid'), chairs: all('select * from chairs order by branchId, sort'), staff: all('select * from staff order by name'),
       categories: all('select * from categories order by name'), items: all('select * from items order by name'), discounts: all('select * from discounts order by name'),
       users: all('select * from users order by name').map(strip), equipment: all('select * from equipment order by branchId, name')
     });
@@ -1243,7 +1465,7 @@ async function handleIn(req, res) {
   // ----- settings: terms, email (admin) -----
   if (p === '/api/settings' && method === 'GET') {
     adminOnly();
-    return send(res, 200, { payRules: payRules(), attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: !!EMAIL.key, from: EMAIL.from, replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+    return send(res, 200, { payRules: payRules(), attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: mailReady(), provider: mailProvider(), from: mailFrom(), replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
       log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
   }
   if (p === '/api/settings' && method === 'PUT') {
@@ -1299,9 +1521,16 @@ async function handleIn(req, res) {
   // ----- partner shops: only Brotherhood's owner can add, pause or open them -----
   if (p.startsWith('/api/orgs')) {
     if (curOrg() || me.role !== 'owner') bad(403, 'Only the Brotherhood owner can manage partner shops');
-    const om2 = p.match(/^\/api\/orgs(?:\/(\w+)(?:\/(enter|reset))?)?$/); if (!om2) bad(404, 'Not found');
+    if (p === '/api/orgs/plans' && method === 'PUT') {
+      const b = await readBody(req, 20_000);
+      if (Array.isArray(b.plans)) mainSet('plans', JSON.stringify(b.plans.filter(x => PLAN_IDS.includes(x?.id)).map(x => ({ id: x.id, price: Math.max(0, Math.round(+x.price || 0)), ...(x.desc ? { desc: String(x.desc).trim().slice(0, 120) } : {}) }))));
+      if ('payInfo' in b) mainSet('payInfo', String(b.payInfo || '').trim().slice(0, 600));
+      log(me, 'settings', 'orgs', '', 'plans'); return send(res, 200, { plans: plansNow(), payInfo: payInfo() });
+    }
+    if (p === '/api/orgs/plans' && method === 'GET') return send(res, 200, { plans: plansNow(), payInfo: payInfo(), trialDays: TRIAL_DAYS });
+    const om2 = p.match(/^\/api\/orgs(?:\/(\w+)(?:\/(enter|reset|payments))?)?$/); if (!om2) bad(404, 'Not found');
     const temp = () => crypto.randomBytes(9).toString('base64url').replace(/[-_]/g, 'x').slice(0, 10), since = dOf(new Date(Date.now() - 30 * 864e5));
-    if (!om2[1] && method === 'GET') return send(res, 200, orgList().map(({ ownerHash, ...o }) => inOrg(o, () => ({ ...o, active: !!o.active,
+    if (!om2[1] && method === 'GET') return send(res, 200, orgList().map(({ ownerHash, ...o }) => inOrg(o, () => ({ ...o, active: !!o.active, status: orgStatus(o), paid: r2(mainDb.prepare('select coalesce(sum(amount),0) t from org_payments where orgId=?').get(o.id).t),
       branches: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n, users: one('select count(*) n from users where active=1').n,
       sales30: r2(one("select coalesce(sum(total),0) t from orders where status='paid' and date>=?", since).t) }))));
     if (!om2[1] && method === 'POST') {
@@ -1321,15 +1550,68 @@ async function handleIn(req, res) {
       const b = await readBody(req);
       if ('name' in b) { const n = String(b.name || '').trim().slice(0, 60); if (n.length < 2) bad(400, 'Enter the shop name'); mainDb.prepare('update orgs set name=? where id=?').run(n, g.id); }
       if ('active' in b) mainDb.prepare('update orgs set active=? where id=?').run(b.active ? 1 : 0, g.id);
+      if ('plan' in b) { if (b.plan && !PLAN_IDS.includes(b.plan)) bad(400, 'Unknown plan'); mainDb.prepare('update orgs set plan=? where id=?').run(b.plan || null, g.id); }
+      for (const k of ['trialEnds', 'paidUntil']) if (k in b) { const v = String(b[k] || ''); if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) bad(400, 'Use a date like 2026-12-31'); mainDb.prepare(`update orgs set ${k}=? where id=?`).run(v || null, g.id); }
+      for (const k of ['email', 'phone', 'ownerName']) if (k in b) { const v = String(b[k] || '').trim().slice(0, 120); if (k === 'email' && v && !validEmail(normEmail(v))) bad(400, 'Invalid email address'); mainDb.prepare(`update orgs set ${k}=? where id=?`).run(k === 'email' ? normEmail(v) : v, g.id); }
       log(me, 'update', 'orgs', g.id, JSON.stringify(b).slice(0, 200)); return send(res, 200, { ok: true });
     }
     if (om2[2] === 'reset' && method === 'POST') { const pw = temp(); mainDb.prepare('update orgs set ownerHash=? where id=?').run(hashPw(pw), g.id); log(me, 'reset-password', 'orgs', g.id, g.name); return send(res, 200, { ownerUser: g.ownerUser, password: pw }); }
+    if (om2[2] === 'payments' && method === 'GET') return send(res, 200, mainDb.prepare('select * from org_payments where orgId=? order by paidAt desc').all(g.id));
+    if (om2[2] === 'payments' && method === 'POST') {
+      // Brotherhood records a monthly fee the shop paid (cash, GCash, bank). It moves "paid until" forward. Brotherhood issues its own BIR invoice for it.
+      const b = await readBody(req), amount = r2(b.amount), months = Math.round(+b.months);
+      if (!(amount > 0)) bad(400, 'Enter the amount paid'); if (!(months >= 1 && months <= 24)) bad(400, 'Months paid: 1 to 24');
+      const start = g.paidUntil && g.paidUntil >= todayStr() ? g.paidUntil : todayStr(), until = addMonthsStr(start, months), pid = uid();
+      mainDb.prepare('insert into org_payments(id,orgId,amount,months,method,ref,invoiceNo,note,paidAt,createdBy) values(?,?,?,?,?,?,?,?,?,?)')
+        .run(pid, g.id, amount, months, String(b.method || '').slice(0, 30), String(b.ref || '').slice(0, 60), String(b.invoiceNo || '').slice(0, 40), String(b.note || '').slice(0, 200), nowISO(), me.name);
+      mainDb.prepare('update orgs set paidUntil=?, active=1, plan=? where id=?').run(until, PLAN_IDS.includes(b.plan) ? b.plan : (g.plan || 'shop'), g.id);
+      log(me, 'payment', 'orgs', g.id, `${g.name}: ${amount} for ${months} month(s), paid until ${until}`);
+      if (g.email && validEmail(g.email)) sendEmail({ to: g.email, subject: `Brotherhood: payment received, active until ${until}`,
+        html: `<p>Hi ${esc2(String(g.ownerName || '').split(' ')[0] || g.name)},</p><p>We received your payment of <b>PHP ${amount.toFixed(2)}</b> for <b>${months} month${months === 1 ? '' : 's'}</b>. <b>${esc2(g.name)}</b> is active until <b>${until}</b>.</p><p style="color:#666;font-size:13px">This email is a confirmation only. Your official invoice for the subscription is issued separately.</p><p>Salamat!<br>Brotherhood</p>`,
+        text: `We received your payment of PHP ${amount.toFixed(2)} for ${months} month(s). ${g.name} is active until ${until}.\nThis email is a confirmation only. Your official invoice for the subscription is issued separately.` }).catch(() => { });
+      return send(res, 201, { id: pid, paidUntil: until });
+    }
     if (om2[2] === 'enter' && method === 'POST') { log(me, 'open', 'orgs', g.id, g.name); return send(res, 200, { token: makeToken('owner', String(g.ownerHash).slice(-8), g.id), name: g.name }); }
+    bad(404, 'Not found');
+  }
+  // ----- email marketing: promos and the automatic "we miss you" email -----
+  if (p.startsWith('/api/marketing')) {
+    adminOnly();
+    const msgOf = b => { const subject = String(b.subject || '').trim().slice(0, 150), body = String(b.body || '').trim().slice(0, 5000); if (subject.length < 3) bad(400, 'Write a subject'); if (body.length < 10) bad(400, 'Write the message'); return { subject, body, btnText: String(b.btnText || '').trim().slice(0, 40), btnUrl: String(b.btnUrl || '').trim().slice(0, 300) }; };
+    const audOf = b => { const a = b.audience || {}; return { who: AUD_WHO.includes(a.who) ? a.who : 'all', days: Math.max(7, Math.min(365, +a.days || 45)), tier: String(a.tier || ''), branchId: String(a.branchId || '') }; };
+    if (p === '/api/marketing' && method === 'GET') {
+      const camps = all('select * from campaigns order by createdAt desc limit 50').map(c => ({ ...c, audience: (() => { try { return JSON.parse(c.audience); } catch { return {}; } })(), stats: Object.fromEntries(all('select status, count(*) n from email_log where campaignId=? group by status', c.id).map(r => [r.status, r.n])) }));
+      return send(res, 200, { provider: mailProvider(), from: mailFrom(), limit: MAIL_LIMIT, sentToday: mailCount(), pending: one("select count(*) n from email_log where status='pending'").n,
+        subscribers: audienceOf({}).length, campaigns: camps, winback: winbackCfg(), winbackSent: one("select count(*) n from email_log where kind='winback' and status='sent'").n, tiers: TIERS.map(x => x[1]).reverse(), isOrg: !!curOrg() });
+    }
+    if (p === '/api/marketing/count' && method === 'POST') { const r = audienceOf(audOf(await readBody(req))); return send(res, 200, { count: r.length, sample: r.slice(0, 5).map(c => c.name) }); }
+    if (p === '/api/marketing/test' && method === 'POST') {
+      const b = await readBody(req, 50_000), to = normEmail(b.to), msg = msgOf(b); if (!validEmail(to)) bad(400, 'Type your email address for the test');
+      if (!mailReady()) bad(409, NO_MAIL());
+      const m = promoEmail({ name: me.name, ...msg }), unsub = baseUrl() + '/unsubscribe?test=1';
+      const r = await sendEmail({ to, subject: 'TEST: ' + m.subject, html: m.html.replaceAll('{{UNSUB}}', unsub), text: m.text.replaceAll('{{UNSUB}}', unsub), fromName: curOrg() ? curOrg().name : '', replyTo: curOrg() ? curOrg().email || '' : '' });
+      if (!r.ok) bad(502, r.error); log(me, 'test-email', 'campaigns', '', to); return send(res, 200, { ok: true });
+    }
+    if (p === '/api/marketing/send' && method === 'POST') {
+      const b = await readBody(req, 50_000), msg = msgOf(b), aud = audOf(b); if (!mailReady()) bad(409, NO_MAIL());
+      const rows = audienceOf(aud); if (!rows.length) bad(400, 'Nobody in this group has an email and said yes to promos');
+      const id = uid(); run('insert into campaigns(id,subject,body,btnText,btnUrl,audience,total,createdBy,createdAt) values(?,?,?,?,?,?,?,?,?)', id, msg.subject, msg.body, msg.btnText, msg.btnUrl, JSON.stringify(aud), rows.length, me.name, nowISO());
+      for (const c of rows) queueMarketing(c, 'campaign', msg, id);
+      log(me, 'create', 'campaigns', id, `${msg.subject} (${rows.length} people)`); setTimeout(() => processEmails().catch(() => { }), 50);
+      return send(res, 201, { id, total: rows.length, days: Math.ceil((rows.length + mailCount()) / MAIL_LIMIT) });
+    }
+    if (p === '/api/marketing/winback' && method === 'PUT') {
+      const b = await readBody(req, 50_000), cur = winbackCfg();
+      const next = { on: !!b.on, days: Math.max(14, Math.min(180, Math.round(+b.days || cur.days))), subject: String(b.subject ?? cur.subject).trim().slice(0, 150) || cur.subject, body: String(b.body ?? cur.body).trim().slice(0, 5000) || cur.body, btnText: String(b.btnText ?? cur.btnText).trim().slice(0, 40) };
+      if (next.on && !mailReady()) bad(409, NO_MAIL());
+      setSetting('winback', JSON.stringify(next)); log(me, 'settings', 'campaigns', '', 'we-miss-you email ' + (next.on ? 'on, ' + next.days + ' days' : 'off'));
+      if (next.on) runWinback(); return send(res, 200, next);
+    }
     bad(404, 'Not found');
   }
   if (p === '/api/settings/test-email' && method === 'POST') {
     adminOnly(); const to = normEmail((await readBody(req)).to); if (!validEmail(to)) bad(400, 'Invalid email address');
-    if (!EMAIL.key) bad(409, 'The email service is not connected yet (add RESEND_API_KEY in the Railway variables).');
+    if (!mailReady()) bad(409, NO_MAIL());
     const w = welcomeEmail({ name: me.name }), unsub = baseUrl() + '/unsubscribe?test=1';
     const r = await sendEmail({ to, subject: 'TEST: ' + w.subject, html: w.html.replaceAll('{{UNSUB}}', unsub), text: w.text.replaceAll('{{UNSUB}}', unsub) });
     if (!r.ok) bad(502, r.error); log(me, 'test-email', 'settings', '', to); return send(res, 200, { ok: true });

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Start free · Brotherhood</title>
+<meta name="description" content="Put your barbershop on Brotherhood: bookings, walk-ins, your team, earnings and clients in one app. Free trial, no card needed.">
+<meta name="theme-color" content="#0a0a0b">
+<link rel="icon" type="image/png" href="/bh-icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0a0b;--card:#121215;--card2:#18181c;--line:#26262c;--fg:#f2f2f4;--mute:#9b9ba5;--blue:#1f7bff;--blue2:#4d97ff;--bad:#ff5d6c;--ok:#3ecf8e}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh}
+a{color:var(--blue2)}
+.top{display:flex;align-items:center;justify-content:space-between;max-width:1080px;margin:0 auto;padding:18px 16px}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--fg);font:26px/1 'Bebas Neue',Inter,sans-serif;letter-spacing:1.5px}
+.logo img{width:34px;height:34px}.logo b{color:var(--blue)}
+.top .in{font-size:14px;color:var(--mute)}.top .in a{color:var(--fg);font-weight:600}
+.wrap{max-width:1080px;margin:0 auto;padding:8px 16px 64px;display:grid;grid-template-columns:1fr;gap:28px}
+@media(min-width:900px){.wrap{grid-template-columns:1.15fr .85fr;align-items:start;padding-top:24px}}
+.mono{font:600 12px/1 'JetBrains Mono',monospace;letter-spacing:2px;text-transform:uppercase;color:var(--blue2)}
+h1{font:clamp(44px,8vw,72px)/.92 'Bebas Neue',Inter,sans-serif;letter-spacing:.5px;margin:12px 0 10px}
+h1 em{font-style:normal;color:var(--blue)}
+.lead{color:var(--mute);margin:0 0 22px;max-width:560px}
+.steps{display:flex;gap:8px;margin:0 0 18px}.steps span{height:4px;flex:1;border-radius:4px;background:var(--line)}.steps span.on{background:var(--blue)}
+.kinds{display:grid;grid-template-columns:1fr;gap:10px}
+@media(min-width:560px){.kinds{grid-template-columns:1fr 1fr}}
+.kind{display:flex;gap:14px;align-items:flex-start;text-align:left;width:100%;padding:16px;border-radius:16px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer;font:inherit;transition:border-color .15s,transform .15s}
+.kind:hover{border-color:#3a3a44;transform:translateY(-1px)}.kind:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.kind .ic{flex:none;width:42px;height:42px;border-radius:12px;background:rgba(31,123,255,.14);display:grid;place-items:center;color:var(--blue2)}
+.kind .ic svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.kind b{display:block;font-size:16px;margin-bottom:2px}.kind small{color:var(--mute);font-size:13px;line-height:1.4;display:block}
+.kind.cust{background:transparent;border-style:dashed}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px}
+.grid2{display:grid;grid-template-columns:1fr;gap:0 14px}@media(min-width:560px){.grid2{grid-template-columns:1fr 1fr}}
+label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px;color:#d6d6dc}
+label .opt{color:var(--mute);font-weight:500}
+input{width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--fg);font:inherit;font-size:16px}
+input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(31,123,255,.2)}
+.hint{font-size:12px;color:var(--mute);margin-top:6px;min-height:16px}.hint.ok{color:var(--ok)}.hint.bad{color:var(--bad)}
+.pw{position:relative}.pw button{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--mute);font:600 13px Inter,sans-serif;cursor:pointer;padding:6px}
+.agree{display:flex;gap:10px;align-items:flex-start;margin:18px 0 6px;font-size:14px;color:var(--mute)}.agree input{width:20px;height:20px;flex:none;margin-top:2px;accent-color:var(--blue)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:999px;padding:14px 22px;font:700 15px Inter,sans-serif;cursor:pointer;text-decoration:none;background:var(--blue);color:#fff}
+.btn:hover{background:#3a8bff}.btn[disabled]{opacity:.6;cursor:wait}.btn.block{width:100%}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}.btn.ghost:hover{border-color:#44444e}
+.back{background:none;border:0;color:var(--mute);font:600 14px Inter,sans-serif;cursor:pointer;padding:0;margin:0 0 12px}
+.err{color:var(--bad);font-size:14px;min-height:20px;margin:10px 0}
+.side{display:grid;gap:14px}
+.plan{border:1px solid var(--line);border-radius:18px;padding:18px;background:linear-gradient(160deg,#121a2b 0%,var(--card) 60%)}
+.plan .price{font:44px/1 'Bebas Neue',Inter,sans-serif;letter-spacing:.5px;margin:6px 0 2px}.plan .price small{font:500 14px Inter,sans-serif;color:var(--mute)}
+.plan ul{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:8px;font-size:14px}.plan li{display:flex;gap:8px}.plan li:before{content:'';flex:none;width:16px;height:16px;margin-top:3px;border-radius:50%;background:var(--blue) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") center/12px no-repeat}
+.note{border:1px solid var(--line);border-radius:16px;padding:14px 16px;font-size:13px;color:var(--mute);background:var(--card)}
+.note b{color:var(--fg)}
+.done{text-align:center}.done .big{font:56px/1 'Bebas Neue',Inter,sans-serif;color:var(--blue);letter-spacing:1px;margin:6px 0}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;text-align:left;max-width:360px;margin:16px auto;font-size:15px}.facts dt{color:var(--mute)}.facts dd{margin:0;font-weight:700;word-break:break-all}
+.cta{display:grid;gap:10px;max-width:360px;margin:18px auto 0}
+[hidden]{display:none!important}
+
+footer{max-width:1080px;margin:0 auto;padding:0 16px 40px;color:var(--mute);font-size:13px;display:flex;gap:16px;flex-wrap:wrap}footer a{color:var(--mute)}
+</style>
+</head>
+<body>
+<header class="top"><a class="logo" href="/"><img src="/bh-mark.png" alt=""><span>Brother<b>hood</b></span></a><span class="in">Have an account? <a href="/backend">Log in</a></span></header>
+
+<main class="wrap">
+  <section>
+    <div class="mono">Start free · No card needed</div>
+    <h1>Put your shop on <em>Brotherhood</em></h1>
+    <p class="lead">Bookings, walk-ins, your barbers, earnings and clients in one app. Set it up in a few minutes and try everything free.</p>
+    <div class="steps" aria-hidden="true"><span id="st1" class="on"></span><span id="st2"></span><span id="st3"></span></div>
+
+    <!-- step 1: who are you -->
+    <div id="s1">
+      <h2 style="font:30px/1 'Bebas Neue',Inter,sans-serif;letter-spacing:.5px;margin:4px 0 12px">Tell us about you</h2>
+      <div class="kinds">
+        <button class="kind" data-kind="owner"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/></svg></span><span><b>I run a shop with barbers</b><small>Branches, team, bookings and walk-ins, commission and payroll, reports.</small></span></button>
+        <button class="kind" data-kind="renter"><span class="ic"><svg viewBox="0 0 24 24"><path d="M5 11V7a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v4M3 13a2 2 0 0 1 4 0v3h10v-3a2 2 0 0 1 4 0v5H3zM6 21v-3M18 21v-3"/></svg></span><span><b>I rent a chair in a shop</b><small>My own booking link, my clients and my earnings.</small></span></button>
+        <button class="kind" data-kind="suite"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16M2 21h20M14 12h.01"/></svg></span><span><b>I'm in my own suite or studio</b><small>A one-person shop: services, hours, bookings, clients.</small></span></button>
+        <button class="kind" data-kind="student"><span class="ic"><svg viewBox="0 0 24 24"><path d="M22 10 12 5 2 10l10 5 10-5zM6 12v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/></svg></span><span><b>I'm a student barber</b><small>Profile, portfolio and model bookings while you learn.</small></span></button>
+        <a class="kind cust" href="/member#/discover" style="text-decoration:none"><span class="ic"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span><span><b>I'm looking for a barber</b><small>Find a barber near you and book. Free for customers.</small></span></a>
+      </div>
+    </div>
+
+    <!-- step 2: details -->
+    <form id="s2" class="card" hidden novalidate>
+      <button type="button" class="back" id="back">← Change</button>
+      <div class="mono" id="kindlbl"></div>
+      <div class="grid2">
+        <div><label for="shopName" id="shopLbl">Shop name</label><input id="shopName" name="shopName" autocomplete="organization" maxlength="60" required></div>
+        <div><label for="city">Branch or town</label><input id="city" name="city" placeholder="e.g. San Pablo" maxlength="60"></div>
+        <div><label for="ownerName">Your full name</label><input id="ownerName" name="ownerName" autocomplete="name" maxlength="60" required></div>
+        <div><label for="phone">Mobile number</label><input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="09XX XXX XXXX" maxlength="30" required></div>
+      </div>
+      <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" maxlength="120" required>
+      <div class="hint">We send your shop code and login links here.</div>
+      <div class="grid2">
+        <div><label for="username">Username</label><input id="username" name="username" autocapitalize="none" autocomplete="username" maxlength="30" required><div class="hint">Letters, numbers, dot, dash or underscore.</div></div>
+        <div><label for="password">Password</label><div class="pw"><input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required><button type="button" id="showpw">Show</button></div><div class="hint">At least 8 characters.</div></div>
+      </div>
+      <label for="code">Shop code <span class="opt">(your team types this to log in)</span></label><input id="code" name="code" autocapitalize="none" maxlength="30" placeholder="e.g. kingsman-cuts">
+      <div class="hint" id="codeHint"></div>
+      <label class="agree"><input type="checkbox" id="agree" name="agree"><span>I agree to the <a href="/shop-terms" target="_blank">Terms for shops</a> and the <a href="/privacy" target="_blank">Privacy Policy</a>. I understand Brotherhood is for bookings and tracking, and I issue my own BIR invoices.</span></label>
+      <div class="err" id="err" role="alert"></div>
+      <button class="btn block" id="go">Create my shop</button>
+    </form>
+
+    <!-- step 3: done -->
+    <div id="s3" class="card done" hidden>
+      <div class="mono">You're in</div>
+      <h2 style="font:34px/1 'Bebas Neue',Inter,sans-serif;margin:10px 0 0" id="dname"></h2>
+      <p style="color:var(--mute);margin:6px 0 0">Free trial until <b id="dtrial" style="color:var(--fg)"></b></p>
+      <div style="margin-top:18px;color:var(--mute);font-size:13px">Your shop code</div><div class="big" id="dcode"></div>
+      <dl class="facts"><dt>Username</dt><dd id="duser"></dd><dt>Password</dt><dd style="font-weight:500;color:var(--mute)">the one you chose</dd></dl>
+      <p style="color:var(--mute);font-size:14px;max-width:420px;margin:0 auto">We also emailed these to you. Your team logs in with the same shop code.</p>
+      <div class="cta"><a class="btn" id="goA" href="/backend">Open the back office</a><a class="btn ghost" id="goB" href="/member#/pro">Open the app</a></div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <div class="plan"><div class="mono" id="pname">Free trial</div><div class="price" id="pprice">₱0 <small>for 30 days</small></div><div style="color:var(--mute);font-size:14px" id="pafter"></div>
+      <ul><li>Online booking page and your own booking link</li><li>Walk-ins, the line, and finished services</li><li>Barbers, commission, payroll and time in with selfie</li><li>Clients, reviews, rewards and promo emails</li><li>Back office on the web, app on the phone</li></ul></div>
+    <div class="note"><b>Tracking, not receipts.</b> Brotherhood helps you book and track your services and earnings. It does not issue receipts or invoices, so you keep issuing your BIR invoices from your own registered booklet or system.</div>
+    <div class="note"><b>Your data is yours.</b> Each shop has its own separate data. You can export it or ask us to delete it any time.</div>
+  </aside>
+</main>
+<footer><span>© Brotherhood</span><a href="/shop-terms">Terms for shops</a><a href="/terms">Terms of use</a><a href="/privacy">Privacy</a><span id="contact"></span></footer>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const LBL = { owner: ['Shop owner with barbers', 'Shop name', 'shop'], renter: ['Chair renter', 'Your barber name or brand', 'solo'], suite: ['Own suite or studio', 'Studio or barber name', 'solo'], student: ['Student barber', 'Your barber name', 'solo'] };
+  let kind = '', plans = [], trialDays = 30, codeTouched = false, timer;
+  const step = n => { ['s1', 's2', 's3'].forEach((id, i) => { $('#' + id).hidden = i !== n - 1; $('#st' + (i + 1)).className = i < n ? 'on' : ''; }); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const peso = n => '₱' + Number(n || 0).toLocaleString('en-PH');
+  const showPlan = () => {
+    const id = kind ? LBL[kind][2] : 'shop', p = plans.find(x => x.id === id);
+    $('#pprice').innerHTML = `₱0 <small>for ${trialDays} days</small>`;
+    $('#pafter').textContent = p ? `Then ${p.name} plan: ${peso(p.price)} a month. ${p.desc}. Cancel any time.` : '';
+  };
+  fetch('/api/public/plans').then(r => r.json()).then(j => { plans = j.plans || []; trialDays = j.trialDays || 30; showPlan(); if (j.contact) { const a = document.createElement('a'); a.href = 'mailto:' + j.contact; a.textContent = j.contact; $('#contact').append('Help: ', a); } }).catch(() => { });
+  document.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => {
+    kind = b.dataset.kind; $('#kindlbl').textContent = LBL[kind][0]; $('#shopLbl').textContent = LBL[kind][1]; showPlan(); step(2); setTimeout(() => $('#shopName').focus(), 300);
+  }));
+  $('#back').onclick = () => step(1);
+  $('#showpw').onclick = () => { const i = $('#password'); i.type = i.type === 'password' ? 'text' : 'password'; $('#showpw').textContent = i.type === 'password' ? 'Show' : 'Hide'; };
+  const slug = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+  const check = () => {
+    clearTimeout(timer); const c = $('#code').value.trim().toLowerCase(), h = $('#codeHint');
+    if (!c) { h.className = 'hint'; h.textContent = 'Leave blank and we make one from your shop name.'; return; }
+    if (!/^[a-z0-9-]{3,30}$/.test(c)) { h.className = 'hint bad'; h.textContent = '3 to 30 letters, numbers or dashes.'; return; }
+    timer = setTimeout(() => fetch('/api/public/signup/check?code=' + encodeURIComponent(c)).then(r => r.json()).then(j => { if ($('#code').value.trim().toLowerCase() !== c) return; h.className = 'hint ' + (j.ok ? 'ok' : 'bad'); h.textContent = j.ok ? '✓ Available' : 'Taken. Try another one.'; }).catch(() => { }), 350);
+  };
+  $('#shopName').addEventListener('input', () => { if (!codeTouched) { $('#code').value = slug($('#shopName').value); check(); } });
+  $('#code').addEventListener('input', () => { codeTouched = true; $('#code').value = $('#code').value.toLowerCase().replace(/\s+/g, '-'); check(); });
+  check();
+  $('#s2').addEventListener('submit', async e => {
+    e.preventDefault(); const f = new FormData(e.target), body = Object.fromEntries(f); body.kind = kind; body.agree = $('#agree').checked; body.username = String(body.username || '').trim().toLowerCase();
+    const err = $('#err'); err.textContent = '';
+    if (!body.agree) { err.textContent = 'Please tick the box to agree to the terms.'; return; }
+    const go = $('#go'); go.disabled = true; go.textContent = 'Creating your shop…';
+    try {
+      const r = await fetch('/api/public/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Something went wrong. Please try again.');
+      try { localStorage.setItem('bp.token', j.token); localStorage.setItem('bp.org', j.code); localStorage.setItem('bh_pro', j.token); localStorage.setItem('bh_org', j.code); } catch (x) { }
+      $('#dname').textContent = j.name; $('#dtrial').textContent = new Date(j.trialEnds + 'T00:00').toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
+      $('#dcode').textContent = j.code; $('#duser').textContent = j.username;
+      if (kind !== 'owner') { $('#goA').href = '/member#/pro'; $('#goA').textContent = 'Open the app'; $('#goB').href = '/backend'; $('#goB').textContent = 'Open the back office'; }
+      step(3);
+    } catch (x) { err.textContent = x.message; }
+    go.disabled = false; go.textContent = 'Create my shop';
+  });
+})();
+</script>
+</body>
+</html>

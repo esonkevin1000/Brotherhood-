@@ -42,8 +42,9 @@ async function loadView() {
     else if (v === 'exp') ui.exp = await api('GET', `/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}`);
     else if (v === 'remit') ui.remit = await api('GET', `/api/remittances?${qs()}&status=${ui.rstatus || ''}`);
     else if (v === 'activity') ui.audit = await api('GET', '/api/audit');
-    else if (v === 'settings') { ui.settings = await api('GET', '/api/settings'); ui.orgs = S.me?.role === 'owner' && !S.org ? await api('GET', '/api/orgs').catch(() => []) : null; }
+    else if (v === 'settings') { ui.settings = await api('GET', '/api/settings'); ui.orgs = S.me?.role === 'owner' && !S.org ? await api('GET', '/api/orgs').catch(() => []) : null; ui.plans = ui.orgs ? await api('GET', '/api/orgs/plans').catch(() => null) : null; }
     else if (v === 'reviews') ui.reviews = await api('GET', '/api/reviews');
+    else if (v === 'mkt') ui.mkt = await api('GET', '/api/marketing');
     else if (v === 'bookings') ui.bk = await api('GET', `/api/bookings?${qs()}`);
   } catch (e) { if (loggedIn) alert(e.message); }
 }
@@ -83,11 +84,12 @@ const ICONS = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   star: '<path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Payment Methods', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc'], ['scorecard', 'Barber Scorecard', 'star'], ['accountability', 'Cash Accountability', 'coin']];
-const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building'], ['equipment', 'Equipment & Maintenance', 'gear']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view === 'prob' ? 'Problem Reports' : ui.view === 'leave' ? 'Leave Requests' : ui.view === 'chk' ? 'Daily Checklists' : ui.view === 'slip' ? 'Payslips' : ui.view === 'inbox' ? 'Inbox' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
+const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building'], ['equipment', 'Equipment & Maintenance', 'gear']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'mkt' ? 'Email Marketing' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view === 'prob' ? 'Problem Reports' : ui.view === 'leave' ? 'Leave Requests' : ui.view === 'chk' ? 'Daily Checklists' : ui.view === 'slip' ? 'Payslips' : ui.view === 'inbox' ? 'Inbox' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 const inboxOpts = () => ({ token: () => token, isAdmin: true, meId: S.me ? S.me.id : 'owner' });
 const render = (() => { const base = renderBase; return function () { base(); const h = document.getElementById('inbox-host'); if (h && window.Inbox && loggedIn) Inbox.mount(h, inboxOpts()); }; })();
@@ -116,13 +118,13 @@ function renderBase() {
     <div id="navgroups">${navGroups(on)}</div>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { mb.textContent = ui.notif && ui.notif.total ? '🔔 ' + ui.notif.total : '🔔'; mb.style.color = ui.notif && ui.notif.total ? '#e5384a' : ''; }
-  view.innerHTML = orgBar() + branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
+  view.innerHTML = orgBar() + branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'mkt' ? vMkt() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
   paginateTables();
 }
 // Branch picker shown at the top of every page (not only in the side menu), so it is one tap on phones too
 const DATE_VIEWS = ['bookings', 'chk', 'slip', 'att', 'exp', 'remit'];
 function branchBar() {
-  if (['settings', 'activity', 'inbox'].includes(ui.view)) return '';
+  if (['settings', 'activity', 'inbox', 'mkt'].includes(ui.view)) return '';
   const dated = DATE_VIEWS.includes(ui.view) || ui.view.startsWith('rep:');
   const date = dated ? `<label for="dpreset" style="margin-left:8px">Date</label><select id="dpreset">${PRESETS.map(([k, l]) => `<option value="${k}" ${ui.rp === k ? 'selected' : ''}>${l}</option>`).join('')}</select>${ui.rp === 'custom' ? `<input type="date" id="rfrom" value="${ui.from}"><span class="mute">to</span><input type="date" id="rto" value="${ui.to}">` : `<span class="mute">${ui.rp === 'all' ? 'Everything' : ui.from === ui.to ? ui.from : ui.from + ' → ' + ui.to}</span>`}` : '';
   return `<div class="pagebar"><label for="branchsel2">Branch</label><select id="branchsel2"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>${date}</div>`;
@@ -176,6 +178,7 @@ function vReport() {
 const NAVG = [
   ['Overview', [['dashboard', 'Dashboard', 'grid']]],
   ['Booking & Calendar', [['bookings', 'Bookings', 'calendar'], ['reviews', 'Reviews', 'star']]],
+  ['Marketing', [['mkt', 'Email Marketing', 'mail']]],
   ['Sales & Services', [['rep:sales'], ['rep:tender'], ['rep:discounts'], ['mgmt:items'], ['mgmt:categories'], ['mgmt:discounts'], ['mgmt:customers']]],
   ['Attendance & Timekeeping', [['att', 'Attendance', 'clock'], ['rep:attendance']]],
   ['Release Pay & Payroll', [['adv', 'Release Pay', 'tag'], ['rep:payroll'], ['rep:commissions'], ['slip', 'Payslips', 'doc']]],
@@ -410,15 +413,16 @@ const MOD_LABEL = { dashboard: 'Dashboard', pos: 'Front desk: walk-ins and finis
 // partner shop banner, and the Brotherhood owner's list of partner shops
 function orgBar() {
   if (!S.org) return '';
-  return `<div class="card row" style="margin-bottom:12px;align-items:center;gap:10px;border-color:#c7d7fe;background:#f3f6ff"><span style="font-size:20px">🤝</span><div style="flex:1;min-width:180px"><b>${esc(S.org.name)}</b> <span class="mute">· partner shop · code <b>${esc(S.org.code)}</b></span><div class="mute" style="font-size:12px">${masterToken() ? 'You are viewing this partner shop as the Brotherhood owner. Its data is separate from Brotherhood.' : 'Your data is private to your shop.'}</div></div>${masterToken() ? '<button class="btn sm" data-act="leaveorg">Back to Brotherhood</button>' : ''}</div>`;
+  return `<div class="card row" style="margin-bottom:12px;align-items:center;gap:10px;border-color:#c7d7fe;background:#f3f6ff"><span style="font-size:20px">🤝</span><div style="flex:1;min-width:180px"><b>${esc(S.org.name)}</b> <span class="mute">· partner shop · code <b>${esc(S.org.code)}</b></span><div class="mute" style="font-size:12px">${masterToken() ? 'You are viewing this partner shop as the Brotherhood owner. Its data is separate from Brotherhood.' : 'Your data is private to your shop.'}</div>${planLine(S.org)}</div>${masterToken() ? '<button class="btn sm" data-act="leaveorg">Back to Brotherhood</button>' : ''}</div>`;
 }
 function partnersCard() {
   if (S.org || S.me.role !== 'owner') return '';
   const rows = ui.orgs || [];
   return `<div class="card overflow" style="margin-bottom:14px"><h3>Partner shops</h3>
     <p class="mute" style="font-size:13px;margin:0 0 10px">Other barbershops that use the system. Each partner has its <b>own separate data</b>: they never see Brotherhood's sales, staff or customers, and you never mix their numbers into yours. They log in with their <b>shop code</b>, their owner username and password.</p>
-    ${rows.length ? `<table><tr><th>Shop</th><th>Code</th><th>Owner login</th><th>Branches</th><th>Barbers</th><th>Sales (30 days)</th><th>Status</th><th></th></tr>${rows.map(o => `<tr><td><b>${esc(o.name)}</b></td><td>${esc(o.code)}</td><td>${esc(o.ownerUser)}</td><td>${o.branches}</td><td>${o.barbers}</td><td>${peso(o.sales30)}</td><td>${o.active ? '<span class="tag done">Active</span>' : '<span class="tag">Paused</span>'}</td>
-      <td style="white-space:nowrap"><button class="btn sm" data-act="orgenter" data-id="${o.id}">Open back office</button> <button class="btn ghost sm" data-act="orgreset" data-id="${o.id}">New password</button> <button class="btn ghost sm" data-act="orgpause" data-id="${o.id}" data-on="${o.active ? 0 : 1}">${o.active ? 'Pause' : 'Resume'}</button></td></tr>`).join('')}</table>` : '<p class="mute">No partner shops yet.</p>'}
+    ${rows.length ? `<table><tr><th>Shop</th><th>Code</th><th>Owner</th><th>Branches</th><th>Barbers</th><th>Services (30 days)</th><th>Plan</th><th></th></tr>${rows.map(o => `<tr><td><b>${esc(o.name)}</b></td><td>${esc(o.code)}</td><td>${esc(o.ownerName || o.ownerUser)}<br><span class="mute" style="font-size:12px">${esc(o.email || '')}${o.phone ? ' · ' + esc(o.phone) : ''}</span></td><td>${o.branches}</td><td>${o.barbers}</td><td>${peso(o.sales30)}</td><td>${planTag(o.status)}${o.source === 'signup' ? '<br><span class="mute" style="font-size:11px">signed up ' + esc(String(o.createdAt).slice(0, 10)) + '</span>' : ''}</td>
+      <td style="white-space:nowrap"><button class="btn sm" data-mk="bill" data-id="${o.id}">Plan &amp; payments</button> <button class="btn ghost sm" data-act="orgenter" data-id="${o.id}">Open back office</button> <button class="btn ghost sm" data-act="orgreset" data-id="${o.id}">New password</button> <button class="btn ghost sm" data-act="orgpause" data-id="${o.id}" data-on="${o.active ? 0 : 1}">${o.active ? 'Pause' : 'Resume'}</button></td></tr>`).join('')}</table>` : '<p class="mute">No partner shops yet.</p>'}
+    ${plansEditor()}
     <h4 style="margin:16px 0 6px">Add a partner shop</h4>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
       <div><label>Shop name</label><input id="og-name" placeholder="e.g. Kingsman Cuts"></div>
@@ -426,7 +430,7 @@ function partnersCard() {
       <div><label>First branch name</label><input id="og-branch" placeholder="e.g. Calamba"></div>
       <div><label>Owner username</label><input id="og-user" placeholder="e.g. juan" autocapitalize="none" autocomplete="off"></div>
     </div>
-    <p class="mute" style="font-size:12px;margin:8px 0 10px">A temporary password is made for the owner and shown once. Give it to them privately; they can change it in their Settings.</p>
+    <p class="mute" style="font-size:12px;margin:8px 0 10px">New shops can also sign up by themselves at <b>${esc(location.origin)}/signup</b> (free trial). A temporary password is made for the owner and shown once. Give it to them privately; they can change it in their Settings.</p>
     <button class="btn" data-act="neworg">Add partner shop</button></div>`;
 }
 function vSettings() {
@@ -449,7 +453,7 @@ function vSettings() {
       <button class="btn sm" data-act="saveowner">Save username</button>${S.org ? `<h4 style="margin:18px 0 6px">Change password</h4>
       <label>Current password</label><input id="op-cur" type="password" autocomplete="current-password"><label>New password (8+ characters)</label><input id="op-new" type="password" autocomplete="new-password">
       <button class="btn sm" data-act="saveownerpw" style="margin-top:10px">Change password</button>` : ''}</div>` : ''}
-    <div class="card" style="${S.org ? 'display:none' : ''}"><h3>Email (welcome and promos)</h3>
+    <div class="card" style="${S.org ? 'display:none' : ''}"><h3>Email (welcome and promos)</h3><p class="mute" style="font-size:12px;margin:-4px 0 8px">Promos and the automatic "we miss you" email are in <a href="#" data-view="mkt">Marketing → Email Marketing</a>.</p>
       <p style="margin:0 0 8px">${e.configured ? '<b style="color:var(--ok)">● Email service is connected</b>' : '<b style="color:var(--bad)">● Email service is not connected yet</b>'}</p>
       <p class="mute" style="font-size:13px;margin:0 0 10px">${e.configured ? `Sending from: <b>${esc(e.from)}</b><br>Unsubscribe links point to: ${esc(e.baseUrl)}` : 'Until it is connected, welcome emails wait in the queue (nothing is lost) and are sent once it is set up. Add RESEND_API_KEY and EMAIL_FROM in the Railway variables.'}</p>
       <label>Send a test email</label><div class="row" style="flex-wrap:nowrap"><input id="testto" type="email" placeholder="your email" style="flex:1"><button class="btn" data-act="testmail">Send test</button></div></div>
@@ -840,3 +844,134 @@ setInterval(() => { if (!document.hidden) pollNotif(false); }, 15000);
 setTimeout(() => pollNotif(true), 2500);
 load().then(() => setInterval(() => { if (loggedIn && !modal.open && ui.view === 'dashboard' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) load(); }, 15000));
 render();
+
+
+// ---------- partner shop plans (Brotherhood owner) ----------
+const fmtD = s => s ? new Date(s + 'T00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+function planTag(st) {
+  if (!st) return '';
+  const [c, bg, t] = { paid: ['var(--ok)', 'rgba(62,207,142,.13)', 'Paid until ' + fmtD(st.until)], trial: ['#1f6feb', 'rgba(31,123,255,.12)', 'Free trial · ' + st.daysLeft + ' day' + (st.daysLeft === 1 ? '' : 's') + ' left'],
+    expired: ['var(--bad)', 'rgba(255,93,108,.13)', 'Ended ' + fmtD(st.until)], free: ['var(--mute)', 'var(--s3)', 'No plan (free)'], paused: ['var(--mute)', 'var(--s3)', 'Paused'] }[st.state] || ['var(--mute)', 'var(--s3)', st.state];
+  return `<span class="tag" style="color:${c};background:${bg}">${esc(t)}</span>${st.planName ? ` <span class="mute" style="font-size:12px">${esc(st.planName)}</span>` : ''}`;
+}
+function planLine(o) {
+  const st = o && o.status; if (!st || st.state === 'free' || st.state === 'paused') return '';
+  const p = (o.plans || []).find(x => x.id === st.plan), price = p ? `${esc(p.name)} plan, ${peso(p.price)} a month` : 'your plan';
+  const how = o.payInfo ? `<div style="white-space:pre-line;margin-top:4px">${esc(o.payInfo)}</div>` : (o.contact ? ` Contact <a href="mailto:${esc(o.contact)}">${esc(o.contact)}</a> to pay.` : '');
+  const msg = st.state === 'trial' ? `<b>Free trial:</b> ${st.daysLeft} day${st.daysLeft === 1 ? '' : 's'} left (until ${fmtD(st.until)}). After that, ${price}.${st.daysLeft <= 7 ? how : ''}`
+    : st.state === 'paid' ? `<b>${p ? esc(p.name) + ' plan' : 'Plan'}</b> paid until ${fmtD(st.until)}.${st.daysLeft <= 7 ? how : ''}`
+    : `<b style="color:var(--bad)">Your ${st.paidUntil ? 'plan' : 'free trial'} ended on ${fmtD(st.until)}.</b> You can still view everything, but you cannot add bookings or services until you renew (${price}).${how}`;
+  return `<div style="font-size:13px;margin-top:6px">${msg}</div>`;
+}
+function plansEditor() {
+  const P = ui.plans; if (!P) return '';
+  return `<details style="margin:16px 0 4px"><summary style="cursor:pointer;font-weight:700">Plans, prices and how shops pay you</summary>
+    <p class="mute" style="font-size:12px;margin:8px 0">New shops get a ${P.trialDays}-day free trial. Prices are per month. Shops see these on the sign-up page and in their back office.</p>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">${P.plans.map(p => `<div><label>${esc(p.name)} (₱ a month)</label><input type="number" min="0" id="pl-${p.id}" value="${p.price}"><input id="pd-${p.id}" value="${esc(p.desc)}" style="margin-top:6px;font-size:12px"></div>`).join('')}</div>
+    <label>How shops pay you (shown to shops near the end of their trial)</label><textarea id="pl-info" rows="3" placeholder="e.g. GCash 09XX XXX XXXX (Juan D.) or BPI 1234-5678-90. Send the screenshot to our email.">${esc(P.payInfo)}</textarea>
+    <button class="btn sm" data-mk="saveplans" style="margin-top:8px">Save plans</button></details>`;
+}
+async function billModal(id) {
+  const o = (ui.orgs || []).find(x => x.id === id); if (!o) return;
+  let pays = []; try { pays = await api('GET', `/api/orgs/${id}/payments`); } catch (x) { }
+  const P = (ui.plans && ui.plans.plans) || [], KIND = { owner: 'Shop owner with barbers', renter: 'Chair renter', suite: 'Own suite or studio', student: 'Student barber' };
+  openModal(`<h2 style="margin-top:0">${esc(o.name)}</h2><p class="mute" style="margin:-6px 0 10px">${planTag(o.status)}</p>
+    <table data-nopg><tr><td class="mute">Owner</td><td>${esc(o.ownerName || o.ownerUser)}</td></tr><tr><td class="mute">Email</td><td>${esc(o.email || '—')}</td></tr><tr><td class="mute">Mobile</td><td>${esc(o.phone || '—')}</td></tr>
+      <tr><td class="mute">Type</td><td>${esc(KIND[o.kind] || '—')}</td></tr><tr><td class="mute">Shop code</td><td><b>${esc(o.code)}</b></td></tr><tr><td class="mute">Joined</td><td>${esc(String(o.createdAt).slice(0, 10))}${o.source === 'signup' ? ' (self sign-up)' : ''}</td></tr><tr><td class="mute">Total paid</td><td>${peso(o.paid)}</td></tr></table>
+    <h3 style="margin:16px 0 4px">Record a payment</h3><p class="mute" style="font-size:12px;margin:0 0 6px">This moves "paid until" forward and emails the shop a confirmation. Issue your own BIR invoice for it and write its number here.</p>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+      <div><label>Amount (₱)</label><input type="number" min="0" step="any" id="bp-amount" value="${(P.find(x => x.id === (o.plan || 'shop')) || {}).price || ''}"></div>
+      <div><label>Months</label><input type="number" min="1" max="24" id="bp-months" value="1"></div>
+      <div><label>Plan</label><select id="bp-plan">${P.map(p => `<option value="${p.id}" ${(o.plan || 'shop') === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
+      <div><label>Paid with</label><select id="bp-method">${['GCash', 'Maya', 'Bank transfer', 'Cash', 'Other'].map(m => `<option>${m}</option>`).join('')}</select></div>
+      <div><label>Reference no.</label><input id="bp-ref"></div><div><label>Your BIR invoice no.</label><input id="bp-inv"></div></div>
+    <p id="bp-err" style="color:var(--bad);min-height:18px"></p><button class="btn" data-mk="pay" data-id="${o.id}">Save payment</button>
+    <details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Change plan or dates by hand</summary>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:6px">
+        <div><label>Plan</label><select id="bo-plan"><option value="">No plan (free)</option>${P.map(p => `<option value="${p.id}" ${o.plan === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
+        <div><label>Free trial until</label><input type="date" id="bo-trial" value="${esc(o.trialEnds || '')}"></div><div><label>Paid until</label><input type="date" id="bo-paid" value="${esc(o.paidUntil || '')}"></div></div>
+      <p class="mute" style="font-size:12px">Leave both dates blank for a free shop with no end date.</p><button class="btn sm" data-mk="planset" data-id="${o.id}">Save</button></details>
+    <h3 style="margin:16px 0 4px">Payments</h3>${pays.length ? `<table data-nopg><tr><th>Date</th><th>Amount</th><th>Months</th><th>Paid with</th><th>Ref</th><th>Invoice</th></tr>${pays.map(x => `<tr><td>${esc(String(x.paidAt).slice(0, 10))}</td><td>${peso(x.amount)}</td><td>${x.months}</td><td>${esc(x.method)}</td><td>${esc(x.ref)}</td><td>${esc(x.invoiceNo)}</td></tr>`).join('')}</table>` : '<p class="mute">No payments yet.</p>'}
+    <div class="row" style="margin-top:14px"><button class="btn ghost" data-act="close">Close</button></div>`);
+}
+
+// ---------- email marketing ----------
+const MK_WHO = [['all', 'Everyone who said yes to emails'], ['lapsed', "Haven't come back in a while"], ['new', 'Signed up, no visit yet'], ['regular', 'Regulars (5 or more visits)'], ['tier', 'A loyalty tier']];
+const MK_TPL = {
+  promo: ['This week only at {shop}', 'Hi {name},\n\nThis week only, get 20% off any haircut from Monday to Thursday. Just show this email at the shop.\n\nSee you soon!', 'Book now'],
+  service: ['New at {shop}', 'Hi {name},\n\nWe now offer a new service: hair color and highlights by our senior barbers.\n\nBook a slot in the app and try it this month.', 'See services'],
+  hours: ['Holiday hours at {shop}', 'Hi {name},\n\nHeads up: we close early at 5 PM on December 24 and we are closed on December 25. We are back to normal hours on December 26.\n\nBook ahead so you look sharp for the holidays.', 'Book ahead'],
+  miss: ['We miss you, {name}', 'Hi {name},\n\nIt has been a while since your last cut at {shop}. Your barber is ready when you are.\n\nBook your next visit in the app and skip the wait.', 'Book my cut']
+};
+function vMkt() {
+  const m = ui.mkt; if (!m) return '<p class="mute">Loading…</p>';
+  const w = m.winback, ready = !!m.provider;
+  const conn = ready ? `<p style="margin:0"><b style="color:var(--ok)">● Connected</b> · sending ${m.provider === 'gmail' ? 'through Gmail' : 'through Resend'} as <b>${esc(m.from)}</b></p>
+      <p class="mute" style="font-size:13px;margin:6px 0 0">Today: <b>${m.sentToday}</b> of ${m.limit} sent${m.pending ? ` · <b>${m.pending}</b> waiting (sent a few every minute)` : ''}. ${m.provider === 'gmail' ? 'A Gmail account can send about 500 emails a day, so big lists are sent over several days automatically.' : ''}</p>`
+    : (m.isOrg ? '<p style="margin:0"><b style="color:var(--bad)">● Email is not turned on yet.</b> Ask Brotherhood to connect it.</p>'
+      : `<p style="margin:0 0 6px"><b style="color:var(--bad)">● Not connected yet.</b> Connect a Gmail account (5 minutes):</p><ol style="margin:0;padding-left:20px;font-size:13px;line-height:1.7">
+        <li>Use a Gmail just for the shop (e.g. brotherhoodbarber.ph@gmail.com). Turn on <b>2-Step Verification</b> in its Google Account.</li>
+        <li>Google Account → Security → <b>App passwords</b> → make one named "Brotherhood". Copy the 16 letters.</li>
+        <li>Railway → your service → <b>Variables</b>: add <code>GMAIL_USER</code> = the Gmail address and <code>GMAIL_APP_PASSWORD</code> = the 16 letters. Railway restarts by itself.</li></ol>`);
+  return `<h2>Email Marketing</h2>
+  <div class="card" style="margin-bottom:14px">${conn}<p class="mute" style="font-size:12px;margin:10px 0 0"><b>${m.subscribers}</b> customer${m.subscribers === 1 ? '' : 's'} said yes to emails. Only they get promos, and every email has an unsubscribe link (Data Privacy Act).</p></div>
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));align-items:start">
+  <div class="card"><h3>New email</h3>
+    <label>Send to</label><select id="mk-who">${MK_WHO.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+    <div id="mk-days-w" hidden><label>No visit in the last (days)</label><input type="number" id="mk-days" min="7" max="365" value="45"></div>
+    <div id="mk-tier-w" hidden><label>Tier</label><select id="mk-tier">${m.tiers.map(t => `<option>${esc(t)}</option>`).join('')}</select></div>
+    ${S.branches.length > 1 ? `<label>Branch</label><select id="mk-branch"><option value="">All branches</option>${S.branches.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select>` : ''}
+    <p style="margin:8px 0 0;font-weight:700" id="mk-count">…</p>
+    <label style="margin-top:14px">Start from</label><div class="row" style="gap:6px">${[['promo', 'Promo'], ['service', 'New service'], ['hours', 'Holiday hours'], ['miss', 'We miss you']].map(([k, l]) => `<button class="btn ghost sm" data-mk="tpl" data-k="${k}">${l}</button>`).join('')}</div>
+    <label>Subject</label><input id="mk-subject" maxlength="150" placeholder="e.g. This week only at {shop}">
+    <label>Message</label><textarea id="mk-body" rows="8" placeholder="Hi {name}, ..."></textarea>
+    <p class="mute" style="font-size:12px;margin:4px 0 0">{name} becomes the customer's first name, {shop} your shop name. Leave a blank line between paragraphs.</p>
+    <div class="grid" style="grid-template-columns:1fr 1.4fr;gap:8px"><div><label>Button text</label><input id="mk-btn" maxlength="40" placeholder="Book now"></div><div><label>Button link <span class="mute">(optional)</span></label><input id="mk-url" placeholder="Booking app (default)"></div></div>
+    <label>Send a test first</label><div class="row" style="flex-wrap:nowrap"><input id="mk-to" type="email" placeholder="your email" style="flex:1"><button class="btn ghost" data-mk="test">Send test</button></div>
+    <p id="mk-err" style="color:var(--bad);min-height:18px"></p>
+    <button class="btn" data-mk="send" style="width:100%;justify-content:center;padding:12px" ${ready ? '' : 'disabled'}>Send</button></div>
+  <div class="card"><h3>Automatic: "We miss you"</h3>
+    <p class="mute" style="font-size:13px;margin:0 0 8px">When a customer has not come back for some days, they get this email once. It is checked every hour.</p>
+    <label class="chk" style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);font-weight:600"><input type="checkbox" id="wb-on" ${w.on ? 'checked' : ''} style="width:20px;height:20px;accent-color:#000">Turn on</label>
+    <label>Send after no visit for (days)</label><input type="number" id="wb-days" min="14" max="180" value="${w.days}">
+    <label>Subject</label><input id="wb-subject" maxlength="150" value="${esc(w.subject)}">
+    <label>Message</label><textarea id="wb-body" rows="6">${esc(w.body)}</textarea>
+    <label>Button text</label><input id="wb-btn" maxlength="40" value="${esc(w.btnText || '')}">
+    <p class="mute" style="font-size:12px">Sent so far: ${m.winbackSent}</p><button class="btn sm" data-mk="wbsave">Save</button></div>
+  </div>
+  <div class="card overflow" style="margin-top:14px"><h3>Sent emails</h3>${m.campaigns.length ? `<table><tr><th>Date</th><th>Subject</th><th>Sent to</th><th>People</th><th>Sent</th><th>Waiting</th><th>Failed</th></tr>${m.campaigns.map(c => `<tr><td>${new Date(c.createdAt).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td><b>${esc(c.subject)}</b><br><span class="mute" style="font-size:12px">by ${esc(c.createdBy)}</span></td>
+    <td>${esc((MK_WHO.find(x => x[0] === c.audience.who) || ['', ''])[1])}${c.audience.who === 'lapsed' ? ' (' + c.audience.days + ' days)' : c.audience.who === 'tier' ? ' (' + esc(c.audience.tier) + ')' : ''}${c.audience.branchId ? ' · ' + esc(brName(c.audience.branchId)) : ''}</td><td>${c.total}</td><td>${c.stats.sent || 0}</td><td>${c.stats.pending || 0}</td><td>${c.stats.failed ? '<b style="color:var(--bad)">' + c.stats.failed + '</b>' : 0}</td></tr>`).join('')}</table>` : '<p class="mute">Nothing sent yet.</p>'}</div>`;
+}
+const mkAud = () => ({ who: document.getElementById('mk-who')?.value || 'all', days: +(document.getElementById('mk-days')?.value || 45), tier: document.getElementById('mk-tier')?.value || '', branchId: document.getElementById('mk-branch')?.value || '' });
+const mkMsg = () => ({ subject: document.getElementById('mk-subject').value, body: document.getElementById('mk-body').value, btnText: document.getElementById('mk-btn').value, btnUrl: document.getElementById('mk-url').value, audience: mkAud() });
+let mkTimer;
+function mkCount() {
+  const el = document.getElementById('mk-count'); if (!el) return; const a = mkAud();
+  document.getElementById('mk-days-w').hidden = a.who !== 'lapsed'; document.getElementById('mk-tier-w').hidden = a.who !== 'tier';
+  clearTimeout(mkTimer); mkTimer = setTimeout(async () => { try { const r = await api('POST', '/api/marketing/count', { audience: a }); ui.mkCount = r.count; el.textContent = `→ ${r.count} ${r.count === 1 ? 'person' : 'people'}`; } catch (x) { el.textContent = ''; } }, 250);
+}
+new MutationObserver(() => { if (ui.view === 'mkt' && document.getElementById('mk-count') && document.getElementById('mk-count').textContent === '…') mkCount(); }).observe(document.getElementById('view'), { childList: true });
+document.addEventListener('change', e => { if (/^mk-(who|days|tier|branch)$/.test(e.target.id)) mkCount(); });
+document.addEventListener('input', e => { if (e.target.id === 'mk-days') mkCount(); });
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-mk]'); if (!el || el.disabled) return; e.preventDefault();
+  const k = el.dataset.mk, err = document.getElementById('mk-err'); if (err) err.textContent = '';
+  if (k === 'tpl') { const [s, b, btn] = MK_TPL[el.dataset.k]; document.getElementById('mk-subject').value = s; document.getElementById('mk-body').value = b; document.getElementById('mk-btn').value = btn; if (el.dataset.k === 'miss') { document.getElementById('mk-who').value = 'lapsed'; mkCount(); } return; }
+  if (k === 'test') { const to = document.getElementById('mk-to').value.trim(); el.disabled = true; try { await api('POST', '/api/marketing/test', { ...mkMsg(), to }); alert('Test sent to ' + to + '. Check the inbox (and the Spam folder).'); } catch (x) { err.textContent = x.message; } el.disabled = false; return; }
+  if (k === 'send') {
+    const msg = mkMsg(), n = ui.mkCount; if (!n) { err.textContent = 'Nobody in this group yet. Choose another group.'; return; }
+    if (!confirm(`Send "${msg.subject}" to ${n} ${n === 1 ? 'person' : 'people'}? This cannot be undone.`)) return;
+    el.disabled = true; try { const r = await api('POST', '/api/marketing/send', msg); ui.mkt = await api('GET', '/api/marketing'); render(); alert(`Sending to ${r.total} people.${r.days > 1 ? ` Because of the daily limit it takes about ${r.days} days.` : ' It takes a few minutes.'}`); } catch (x) { err.textContent = x.message; el.disabled = false; } return;
+  }
+  if (k === 'wbsave') { const v = id => document.getElementById(id).value; try { await api('PUT', '/api/marketing/winback', { on: document.getElementById('wb-on').checked, days: +v('wb-days'), subject: v('wb-subject'), body: v('wb-body'), btnText: v('wb-btn') }); ui.mkt = await api('GET', '/api/marketing'); render(); alert('Saved.'); } catch (x) { alert(x.message); } return; }
+  if (k === 'saveplans') { const P = ui.plans.plans.map(p => ({ id: p.id, price: +document.getElementById('pl-' + p.id).value, desc: document.getElementById('pd-' + p.id).value })); try { ui.plans = { ...ui.plans, ...(await api('PUT', '/api/orgs/plans', { plans: P, payInfo: document.getElementById('pl-info').value })) }; alert('Plans saved.'); } catch (x) { alert(x.message); } return; }
+  if (k === 'bill') return billModal(el.dataset.id);
+  if (k === 'pay') {
+    const v = id => document.getElementById(id).value, body = { amount: +v('bp-amount'), months: +v('bp-months'), plan: v('bp-plan'), method: v('bp-method'), ref: v('bp-ref'), invoiceNo: v('bp-inv') };
+    try { const r = await api('POST', `/api/orgs/${el.dataset.id}/payments`, body); ui.orgs = await api('GET', '/api/orgs'); await billModal(el.dataset.id); render(); alert('Saved. Paid until ' + fmtD(r.paidUntil) + '.'); } catch (x) { document.getElementById('bp-err').textContent = x.message; } return;
+  }
+  if (k === 'planset') {
+    const v = id => document.getElementById(id).value;
+    try { await api('PUT', `/api/orgs/${el.dataset.id}`, { plan: v('bo-plan'), trialEnds: v('bo-trial'), paidUntil: v('bo-paid') }); ui.orgs = await api('GET', '/api/orgs'); await billModal(el.dataset.id); render(); } catch (x) { alert(x.message); } return;
+  }
+});
