@@ -46,7 +46,7 @@ async function loadMe() {
 async function loadBookings() { if (!S.token) { S.mine = null; return; } try { S.mine = (await api('/bookings')).bookings; } catch { S.mine = []; } }
 
 // ---------- views ----------
-const header = (title, back) => `<div class="bar">${back ? `<button class="btn sec sm" data-go="${back}" aria-label="Back">${ic('back')}</button>` : ''}<div class="${title ? '' : 'logo'}">${title ? `<h2 style="font-size:20px">${esc(title)}</h2>` : logoText()}</div><span class="sp"></span>${S.user ? `<button class="btn sec sm bellb" data-go="/notifications" aria-label="Notifications">${ic('bell')}${S.unread ? `<span class="badge">${S.unread > 9 ? '9+' : S.unread}</span>` : ''}</button><button class="btn sec sm" data-go="/me">${esc(S.user.name.split(' ')[0])}</button>` : `<button class="btn sm" data-go="/auth">Log in</button>`}</div>`;
+const header = (title, back) => `<div class="bar">${back ? `<button class="btn sec sm" data-go="${back}" aria-label="Back">${ic('back')}</button>` : ''}<div class="${title ? '' : 'logo'}">${title ? `<h2 style="font-size:20px">${esc(title)}</h2>` : logoText()}</div><span class="sp"></span>${S.user ? `<button class="btn sec sm bellb" data-go="/notifications" aria-label="Notifications">${ic('bell')}${S.unread ? `<span class="badge">${S.unread > 9 ? '9+' : S.unread}</span>` : ''}</button><button class="btn sec sm" data-go="/profile">${esc(S.user.name.split(' ')[0])}</button>` : `<button class="btn sm" data-go="/auth">Log in</button>`}</div>`;
 const barberRow = b => `<button class="bcard" data-go="/barber/${b.id}">${pic(b.photo, b.name)}<div class="sp"><div class="nm">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</div>
   <div class="sm mute">${esc(b.headline || b.specialties.join(' · ') || 'Barber')} · ${esc(b.branchName)}</div><div class="sm row" style="margin-top:3px;flex-wrap:wrap;gap:6px">${rate(b.rating, b.reviews)}${b.years ? `<span class="mute">· ${b.years} yrs</span>` : ''}${b.slotsToday ? `<span class="tag ok">${b.slotsToday} slots today</span>` : ''}</div></div></button>`;
 const shopCard = s => `<button class="shop" data-shop="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="${esc(s.name)}" loading="lazy">` : ''}<div class="in"><div class="nm">${esc(s.name)}</div>
@@ -65,19 +65,20 @@ const untilTxt = b => {
 };
 const ticket = (b, extra = '') => { const d = new Date(b.date + 'T00:00:00'); return `<div class="tkt2 pop"><div class="tk-d"><span>${d.toLocaleDateString('en-PH', { month: 'short' })}</span><b>${d.getDate()}</b><span>${d.toLocaleDateString('en-PH', { weekday: 'short' })}</span></div><div class="tk-b"><div class="row"><span class="tk-pill">${esc(untilTxt(b))}</span><span class="sp"></span><b class="num" style="font-size:17px">${t12(b.time)}</b></div><div class="nm" style="margin-top:7px">${esc((b.items || []).map(i => i.name).join(' + ') || 'Haircut')}</div><div class="sm mute">${esc(b.staffName || 'Any barber')} · ${esc(b.branchName || '')}</div>${extra}</div></div>`; };
 const emptyBox = (icon, title, sub, cta = '') => `<div class="ebox pop"><span class="eic">${ic(icon)}</span><b>${title}</b><span class="sm mute">${sub}</span>${cta}</div>`;
-const quickActions = () => `<div class="quick pop">${[['search', 'Find a barber', 'data-go="/discover"'], ['cal', 'Bookings', 'data-go="/bookings"'], ['star', 'Rewards', S.token && S.loyal ? 'data-rewards' : 'data-go="/me"'], ['scissors', 'Find your cut', 'data-go="/style"']].map(([i, l, a]) => `<button class="qa" ${a}><span>${ic(i)}</span><small>${l}</small></button>`).join('')}</div>`;
+const quickActions = () => `<div class="quick pop">${[['search', 'Find a barber', 'data-go="/discover"'], ['cal', 'Bookings', 'data-go="/bookings"'], ['star', 'Rewards', S.token && S.loyal ? 'data-rewards' : 'data-go="/auth"'], ['scissors', 'Find your cut', 'data-go="/style"']].map(([i, l, a]) => `<button class="qa" ${a}><span>${ic(i)}</span><small>${l}</small></button>`).join('')}</div>`;
 function vHome() {
   const D = S.D, up = (S.mine || []).filter(b => b.status === 'booked' && b.date >= ymd(new Date())).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
   const first = S.user ? esc(S.user.name.split(' ')[0]) : '';
   return header() + (S.user ? `<div class="greet pop"><div class="sm mute">${greet()}</div><h1>Hey, ${first}</h1></div>` : '')
   + `<div class="hero ph pop"><div class="hero-bg"></div><div class="hero-in"><span class="kicker">More than a haircut</span><h1>Your next cut,<br>booked in seconds.</h1><p>Find your barber, pick a time, and pay at the shop. Always free for customers.</p><button class="btn" data-go="/discover">${ic('search')} Find a barber</button></div></div>
   ${up ? `<div class="sec-h"><h2>Your next cut</h2><button class="link" data-go="/bookings">Manage</button></div>${ticket(up)}` : ''}
-  ${quickActions()}${installCard()}${loyaltyCard()}
+  ${quickActions()}${installCard()}
   <div class="sec-h"><h2>Top barbers</h2><button class="link" data-go="/discover">See all</button></div>
   ${D ? (D.barbers.length ? `<div class="hscroll">${D.barbers.slice(0, 12).map(b => barberTile(b)).join('')}</div>` : emptyBox('team', 'No barbers yet', 'Check back soon.')) : skelList()}
   <div class="sec-h"><h2>Our shops</h2><button class="link" data-go="/map">View map</button></div>${D ? `<div class="hscroll">${D.shops.map(shopTile).join('')}</div>` : ''}`;
 }
 // ----- Discover: a marketplace of barbers and haircuts -----
+Object.assign(ICON, { gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>' });
 Object.assign(ICON, { filter: '<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>' });
 const SORTS = [['best', 'Best match'], ['cheapest', 'Lowest price'], ['soonest', 'Soonest available'], ['trending', 'Trending this week'], ['rating', 'Top rated'], ['nearest', 'Nearest to me'], ['experience', 'Most experienced'], ['name', 'A to Z']];
 const discoverActive = () => !!(S.q || S.branch || S.style || S.pkg || S.avail || S.minRating || S.verified || S.sort !== 'best' || S.tab === 'shops');
@@ -316,15 +317,15 @@ const memberPhotos = u => `<div class="card" style="padding:0;overflow:hidden"><
   <div style="margin-top:8px"><b style="font-size:17px">${esc(u.name)}</b><div class="sm mute">${esc(u.email)}</div></div>
   <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px"><label class="btn sec sm" style="cursor:pointer">${u.photo ? 'Change profile photo' : 'Add profile photo'}<input type="file" id="mavatar" accept="image/*" hidden></label><label class="btn sec sm" style="cursor:pointer">${u.cover ? 'Change cover photo' : 'Add cover photo'}<input type="file" id="mcoverf" accept="image/*" hidden></label>${u.cover ? '<button class="btn danger sm" data-mcovdel>Remove cover</button>' : ''}${u.photo ? '<button class="btn ghost sm" data-mphotodel>Remove photo</button>' : ''}</div>
   <div class="sm mute" style="margin-top:8px">Your photo, cover and bio are visible to other members. Your phone number and email are never shown.</div></div></div>`;
-async function vMember(id) {
+async function vMember(id, self) {
   if (!S.mem || S.mem.member.id !== id) {
     try { S.mem = await api('/members/' + id, {}, S.token); } catch (e) { S.mem = null; return header('', '/community') + `<div class="err">${esc(e.message)}</div>`; }
     S.feed = { posts: S.mem.posts, more: false };   // lets like / save / comment on these cards work like in the feed
   }
   const j = S.mem, m = j.member;
   return `<div class="pcover" style="background-image:linear-gradient(180deg,rgba(9,9,10,.2),rgba(9,9,10,.88))${m.cover ? `,url('${esc(m.cover)}')` : ''}"></div>
-  <div class="bar" style="margin-top:-150px;background:none"><button class="btn sec sm" data-go="/community" aria-label="Back">${ic('back')}</button><span class="sp"></span></div>
-  <div class="phead">${pic(m.photo, m.name, 'av lg')}<span class="sp"></span>${m.mine ? `<button class="btn sec sm" style="margin-bottom:6px" data-go="/me">Edit profile</button>` : S.user ? `<button class="btn ${m.following ? 'sec' : 'white'} sm" style="margin-bottom:6px;min-width:104px" data-mfollow="${m.id}" data-on="${m.following ? 1 : 0}">${m.following ? '✓ Following' : '+ Follow'}</button>` : `<button class="btn white sm" style="margin-bottom:6px;min-width:104px" data-go="/auth">+ Follow</button>`}</div>
+  <div class="bar" style="margin-top:-150px;background:none;border:0;-webkit-backdrop-filter:none;backdrop-filter:none">${self ? '' : `<button class="btn sec sm" data-go="/community" aria-label="Back">${ic('back')}</button>`}<span class="sp"></span>${self ? `<button class="btn sec sm" data-go="/notifications" aria-label="Notifications">${ic('bell')}</button><button class="btn sec sm" data-go="/me" aria-label="Settings">${ic('gear')}</button>` : ''}</div>
+  <div class="phead">${pic(m.photo, m.name, 'av lg')}<span class="sp"></span>${m.mine ? `<button class="btn sec sm" style="margin-bottom:6px" data-go="/me">${ic('gear')} Edit profile</button>` : S.user ? `<button class="btn ${m.following ? 'sec' : 'white'} sm" style="margin-bottom:6px;min-width:104px" data-mfollow="${m.id}" data-on="${m.following ? 1 : 0}">${m.following ? '✓ Following' : '+ Follow'}</button>` : `<button class="btn white sm" style="margin-bottom:6px;min-width:104px" data-go="/auth">+ Follow</button>`}</div>
   <h1 style="font-size:26px;margin-top:10px">${esc(m.name)}</h1>${m.bio ? `<p class="mute" style="margin:6px 0 0;white-space:pre-wrap">${esc(m.bio)}</p>` : ''}<div class="mute sm" style="margin-top:4px">Member since ${new Date(m.joined).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' })}</div>
   <div class="stats5" style="grid-template-columns:repeat(3,1fr)"><div><b class="num">${m.posts}</b><span>Posts</span></div><div><b class="num">${m.likes}</b><span>Likes</span></div><div><b class="num">${m.followers}</b><span>Followers</span></div></div>
   <div class="sec-h"><h2>Posts</h2></div><div class="list">${j.posts.map(postCard).join('') || '<div class="card empty">No posts yet.</div>'}</div>`;
@@ -332,7 +333,7 @@ async function vMember(id) {
 function vMe() {
   if (!S.user) { setTimeout(() => nav('/auth')); return ''; }
   const u = S.user, favs = S.D ? S.D.barbers.filter(b => S.favs.includes(b.id)) : [];
-  return header('Profile', '/') + `${memberPhotos(u)}${loyaltyCard()}${pushCard()}
+  return header('Settings', '/profile') + `${memberPhotos(u)}<div class="sec-h"><h2>Rewards</h2></div>${loyaltyCard()}${pushCard()}
   <div class="sec-h"><h2>Barbers you follow</h2></div><div class="list">${favs.map(barberRow).join('') || emptyBox('heart', 'No barbers yet', 'Tap Follow on a barber to keep them here.', '<button class="btn sm" data-go="/discover">Browse barbers</button>')}</div>
   <div class="sec-h"><h2>Saved styles</h2><button class="link" data-go="/style">Style finder</button></div><div class="pill-row">${(u.styles || []).map(id => cutById(id)).filter(Boolean).map(c => `<span class="tag">${esc(c.name)}</span>`).join('') || '<span class="mute sm">None yet. Try the Style finder.</span>'}</div>
   <div class="sec-h"><h2>My details</h2></div><form id="mef">${S.meMsg ? `<div class="${S.meMsg.ok ? 'ok' : 'err'}">${esc(S.meMsg.t)}</div>` : ''}<label class="f">Name<input name="name" value="${esc(u.name)}" required></label><label class="f">Mobile<input name="phone" type="tel" value="${esc(u.phone)}" required></label><label class="f">City<input name="city" value="${esc(u.city)}" placeholder="e.g. San Pablo"></label><button class="btn block" style="margin-top:14px">Save</button></form>
@@ -907,6 +908,45 @@ function vMod() {
     <div class="sm mute" style="margin:6px 0">${esc(x.reasons || '')}</div>${x.kind === 'user' ? '<div class="sm mute">Account reports are reviewed manually.</div>' : `<div class="row">${x.hidden ? `<button class="btn sec sm" data-mod="restore" data-mkind="${x.kind}" data-mid="${x.targetId}">Restore</button>` : ''}<button class="btn danger sm" data-mod="remove" data-mkind="${x.kind}" data-mid="${x.targetId}">Remove</button></div>`}</div>`).join('') || '<div class="card empty">Nothing to review.</div>'}</div>`;
 }
 async function loadReports() { try { S.reports = (await api('/pro/reports', {}, S.proToken)).reports; } catch (e) { S.reports = []; toast(e.message); } render(); }
+
+// ----- photo cropper: drag to position and pinch or slide to zoom before a cover or profile photo is saved -----
+function cropImage(file, aspect, outW, round) {
+  return new Promise(async resolve => {
+    let url; try { url = URL.createObjectURL(file); } catch { return resolve(null); }
+    const img = new Image();
+    try { await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = url; }); } catch { URL.revokeObjectURL(url); toast('This photo could not be opened. Try a JPG or PNG.'); return resolve(null); }
+    const o = sheet(`<h3>${round ? 'Adjust your photo' : 'Adjust your cover'}</h3><div class="sm mute" style="text-align:center;margin:-4px 0 12px">Drag to move. Use the slider to zoom.</div>
+      <div class="crop ${round ? 'round' : ''}" style="aspect-ratio:${aspect}"><img alt="" draggable="false"></div>
+      <div class="row" style="gap:12px;margin:14px 2px 4px"><span class="sm mute">−</span><input type="range" id="czoom" min="1" max="3" step="0.01" value="1" style="padding:0;border:0;background:none;box-shadow:none"><span class="sm mute">+</span></div>
+      <div class="row" style="margin-top:14px;gap:10px"><button class="btn ghost sp" data-cx>Cancel</button><button class="btn sp" id="csave">Save photo</button></div>`);
+    const fr = o.querySelector('.crop'), im = fr.querySelector('img'); im.src = url; im.style.width = img.naturalWidth + 'px'; im.style.height = img.naturalHeight + 'px';
+    let W = 0, H = 0, base = 1, z = 1, x = 0, y = 0;
+    const clamp = () => { const s = base * z, w = img.naturalWidth * s, h = img.naturalHeight * s; x = Math.min(0, Math.max(W - w, x)); y = Math.min(0, Math.max(H - h, y)); };
+    const draw = () => { clamp(); im.style.transform = `translate(${x}px,${y}px) scale(${base * z})`; };
+    const setup = () => { W = fr.clientWidth; H = fr.clientHeight; base = Math.max(W / img.naturalWidth, H / img.naturalHeight); x = (W - img.naturalWidth * base) / 2; y = (H - img.naturalHeight * base) / 2; draw(); };
+    setup(); requestAnimationFrame(() => { if (fr.clientWidth !== W) setup(); });
+    const pts = new Map(); let last = null, pinch = 0;
+    fr.addEventListener('pointerdown', e => { fr.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); last = { x: e.clientX, y: e.clientY }; if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = Math.hypot(a.x - b.x, a.y - b.y); } });
+    fr.addEventListener('pointermove', e => {
+      if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) { const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch) zoomTo(z * d / pinch); pinch = d; return; }
+      x += e.clientX - last.x; y += e.clientY - last.y; last = { x: e.clientX, y: e.clientY }; draw();
+    });
+    const up = e => { pts.delete(e.pointerId); pinch = 0; const p = [...pts.values()][0]; if (p) last = { ...p }; };
+    fr.addEventListener('pointerup', up); fr.addEventListener('pointercancel', up);
+    const zoomTo = nz => { nz = Math.max(1, Math.min(3, nz)); const cx = W / 2, cy = H / 2, k = nz / z; x = cx - (cx - x) * k; y = cy - (cy - y) * k; z = nz; o.querySelector('#czoom').value = z; draw(); };
+    o.querySelector('#czoom').addEventListener('input', e => zoomTo(+e.target.value));
+    fr.addEventListener('wheel', e => { e.preventDefault(); zoomTo(z * (e.deltaY < 0 ? 1.06 : 0.94)); }, { passive: false });
+    const done = v => { URL.revokeObjectURL(url); o.remove(); resolve(v); };
+    o.addEventListener('click', e => { if (e.target === o || e.target.closest('[data-cx]')) done(null); });
+    o.querySelector('#csave').onclick = () => {
+      const s = base * z, outH = Math.round(outW / aspect), cv = document.createElement('canvas'); cv.width = outW; cv.height = outH;
+      cv.getContext('2d').drawImage(img, -x / s, -y / s, W / s, H / s, 0, 0, outW, outH);
+      for (const q of [0.86, 0.76, 0.64, 0.5]) { const d = cv.toDataURL('image/jpeg', q); if (d.length * 0.75 < 650_000) return done(d); }
+      toast('Photo is too large'); done(null);
+    };
+  });
+}
 async function compressImg(file) { return compress(file); }
 async function compress(file) {
   const bmp = await createImageBitmap(file), sc = Math.min(1, 1080 / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas');
@@ -920,11 +960,11 @@ let rendering = 0;
 async function render() {
   const my = ++rendering, r = route(); let html = '';
   if (r.a === 'home') html = vHome(); else if (r.a === 'discover') html = vDiscover(); else if (r.a === 'barber') html = await vBarber(r.b);
-  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else if (r.a === 'member') html = await vMember(r.b); else if (r.a === 'style') html = vStyle(); else if (r.a === 'shop') html = await vShop(r.b); else if (r.a === 'map') html = vMap(); else html = vHome();
+  else if (r.a === 'book') html = vBook(); else if (r.a === 'bookings') html = vBookings(); else if (r.a === 'auth') html = vAuth(); else if (r.a === 'me') html = vMe(); else if (r.a === 'pro') html = vPro(); else if (r.a === 'community') html = vCommunity(); else if (r.a === 'notifications') html = vNotifs(); else if (r.a === 'member') html = await vMember(r.b); else if (r.a === 'profile') html = S.user ? await vMember(S.user.id, true) : (S.token ? skelList() : (setTimeout(() => nav('/auth')), '')); else if (r.a === 'style') html = vStyle(); else if (r.a === 'shop') html = await vShop(r.b); else if (r.a === 'map') html = vMap(); else html = vHome();
   if (my !== rendering) return;
   const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart, sy = window.scrollY;
-  const showNav = !['barber', 'book', 'auth', 'pro', 'notifications', 'style', 'shop', 'member'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['me', 'Profile', 'user']];
-  app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'home' && r.a === 'home') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
+  const showNav = !['barber', 'book', 'auth', 'pro', 'notifications', 'style', 'shop', 'member'].includes(r.a), tabs = [['home', 'Home', 'home'], ['discover', 'Discover', 'search'], ['community', 'Community', 'team'], ['bookings', 'Bookings', 'cal'], ['profile', 'Profile', 'user']];
+  app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'profile' && r.a === 'me') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
   if (focus === 'q' || focus === 'cq') { const el = document.getElementById(focus); if (el) el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
   if (r.a === 'map') mountMap();
   if (r.a === 'discover') afterDiscover();
@@ -937,7 +977,7 @@ async function onRoute() {
   if (r.a === 'discover') { if (!S.fresh) loadFresh().then(() => { if (route().a === 'discover') render(); }); if (discoverActive() && !S.R) loadResults().then(render); }
   if (['discover', 'home', 'book', 'barber', 'shop', 'map', 'community', 'me', 'member'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
-  if (['home', 'me', 'book'].includes(r.a) && S.token && !S.loyal) api('/loyalty').then(j => { S.loyal = j; render(); }).catch(() => { });
+  if (['home', 'me', 'book', 'profile'].includes(r.a) && S.token && !S.loyal) api('/loyalty').then(j => { S.loyal = j; render(); }).catch(() => { });
   if (['me', 'book'].includes(r.a) && S.token && !S.push) loadPush();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } loadDash(); }
   if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
@@ -962,11 +1002,13 @@ app.addEventListener('change', async e => {
   if (e.target.id === 'cfile') { const f = e.target.files[0]; e.target.value = ''; if (f) { try { S.comp.img = await compress(f); S.comp.err = ''; } catch (x) { S.comp.err = x.message; } render(); } }
   if (e.target.id === 'pcoverf' || e.target.id === 'pavatar') {
     const f = e.target.files[0], isCover = e.target.id === 'pcoverf'; e.target.value = ''; if (!f) return;
-    try { await api(isCover ? '/pro/cover' : '/pro/photo', { method: 'POST', body: { staffId: S.proSel, data: await compress(f) } }, S.proToken); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.D = null; S.cur = null; await loadPro(); render(); } catch (x) { toast(x.message); }
+    const data = await cropImage(f, isCover ? 2.6 : 1, isCover ? 1400 : 800, !isCover); if (!data) return;
+    try { await api(isCover ? '/pro/cover' : '/pro/photo', { method: 'POST', body: { staffId: S.proSel, data } }, S.proToken); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.D = null; S.cur = null; await loadPro(); render(); } catch (x) { toast(x.message); }
   }
   if (e.target.id === 'mcoverf' || e.target.id === 'mavatar') {
     const f = e.target.files[0], isCover = e.target.id === 'mcoverf'; e.target.value = ''; if (!f) return;
-    try { await api(isCover ? '/me/cover' : '/me/photo', { method: 'POST', body: { data: await compress(f) } }); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.mem = null; S.feed = null; await loadMe(); render(); } catch (x) { toast(x.message); }
+    const data = await cropImage(f, isCover ? 2.6 : 1, isCover ? 1400 : 800, !isCover); if (!data) return;
+    try { await api(isCover ? '/me/cover' : '/me/photo', { method: 'POST', body: { data } }); toast(isCover ? 'Cover photo saved' : 'Profile photo saved'); S.mem = null; S.feed = null; await loadMe(); render(); } catch (x) { toast(x.message); }
   }
   if (e.target.dataset && e.target.dataset.opk) { const inp = document.querySelector(`[data-opp="${e.target.dataset.opk}"]`); inp.disabled = !e.target.checked; if (e.target.checked) inp.focus(); }
   if (e.target.dataset && e.target.dataset.rwfile) {
