@@ -202,6 +202,39 @@ input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 
 /* scrollbars stay hidden, focus is visible for keyboards */
 :focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ----- phase 2: greeting, photo hero, quick actions, tickets, empty states, booking steps ----- */
+.greet{margin:6px 0 14px}.greet h1{font-size:31px;letter-spacing:-.04em;margin-top:2px}
+.hero.ph{padding:0;min-height:320px;display:flex;align-items:flex-end;background:#0b0c0e}
+.hero .hero-bg{position:absolute;inset:0;background:url(/site/home-work2.jpg) center 28%/cover;opacity:.62;transform:scale(1.04)}
+.hero.ph:before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(6,6,7,.05) 10%,rgba(6,6,7,.55) 45%,rgba(6,6,7,.96) 92%);z-index:1}
+.hero .hero-in{position:relative;z-index:2;padding:24px 20px 22px}
+.hero.ph h1{font-size:34px}
+.kicker{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#d6e6ff;background:rgba(60,141,255,.2);border:1px solid rgba(110,170,255,.35);padding:5px 11px;border-radius:99px;margin-bottom:12px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:18px 0 6px}
+.qa{display:grid;justify-items:center;gap:8px;background:none;border:0;padding:0;color:var(--text)}
+.qa span{width:60px;height:60px;border-radius:20px;display:grid;place-items:center;background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
+.qa span svg{width:23px;height:23px}
+.qa:first-child span{background:linear-gradient(180deg,#4a97ff,#2f7df5);border-color:transparent;box-shadow:0 10px 24px rgba(47,125,245,.35),inset 0 1px 0 rgba(255,255,255,.25)}
+.qa small{font-size:11.5px;font-weight:500;color:#c9ccd3;text-align:center;line-height:1.2}
+.qa:active span{transform:scale(.94)}
+.tkt2{display:flex;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.01)),var(--s1);box-shadow:0 14px 34px rgba(0,0,0,.35)}
+.tk-d{width:80px;flex:none;display:grid;place-items:center;align-content:center;padding:14px 0;background:linear-gradient(180deg,#4a97ff,#2f7df5);color:#fff;text-transform:uppercase;font-size:10.5px;font-weight:700;letter-spacing:.12em;border-right:2px dashed rgba(6,6,7,.5)}
+.tk-d b{font:800 34px/1 var(--disp);letter-spacing:-.04em;margin:3px 0}
+.tk-b{flex:1;padding:14px 16px;min-width:0}
+.tk-pill{font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px;background:rgba(34,197,139,.15);color:#5fe0b0}
+.ebox{display:grid;justify-items:center;text-align:center;gap:6px;padding:30px 20px;border:1px dashed rgba(255,255,255,.1);border-radius:22px;background:rgba(255,255,255,.015)}
+.ebox .eic{width:54px;height:54px;border-radius:18px;display:grid;place-items:center;background:rgba(60,141,255,.12);color:#7fb2ff;margin-bottom:6px}
+.ebox .eic svg{width:24px;height:24px}
+.ebox b{font:700 17px var(--disp);letter-spacing:-.02em}.ebox .btn{margin-top:10px}
+.steps{margin:2px 0 6px}.steps .sm{display:block;margin-top:8px}
+.stp{height:6px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden}.stp i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#6aa9ff,#2f7df5);transition:width .45s var(--ease)}
+.tg2{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin:14px 0 8px}.tg2:first-child{margin-top:4px}
+.done{text-align:center;padding:18px 0 16px}
+.done h1{font-size:30px;letter-spacing:-.04em;margin:14px 0 4px}
+.ckc{width:76px;height:76px;margin:6px auto 0;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 30% 30%,#3ee0a5,#16a777);color:#fff;box-shadow:0 0 0 10px rgba(34,197,139,.12),0 16px 40px rgba(34,197,139,.35);animation:pop2 .55s cubic-bezier(.2,1.4,.4,1)}
+.ckc svg{width:36px;height:36px;stroke-width:3}
+@keyframes pop2{0%{transform:scale(.4);opacity:0}100%{transform:scale(1);opacity:1}}
 </style>
 </head>
 <body>
