@@ -413,12 +413,12 @@ function vAccount() {
 async function loadPro() { try { S.pro = await api('/pro/me', {}, S.proToken); S.proErr = ''; } catch (e) { S.pro = null; S.proErr = e.message; if (e.code === 401) { S.proToken = null; store.set('bh_pro', null); } } }
 function vPro() {
   if (!S.proToken || !S.pro) return header('Pro tools', '/') + `<p class="mute">Sign in with your Brotherhood staff username and password (same as the POS / back office).</p><form id="prolf">${S.proPin ? '<label class="f">6-digit PIN<input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label>' : '<label class="f">Username (owners may leave this blank)<input name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label><label class="f">Password<input name="password" type="password" autocomplete="current-password" required></label>'}<label class="f">Shop code (partner shops only)<input name="org" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Leave blank for Brotherhood" value="${esc(store.get('bh_org') || '')}"></label>${S.proErr ? `<div class="err">${esc(S.proErr)}</div>` : ''}<button class="btn block" style="margin-top:14px">Sign in</button><p class="mute sm" style="text-align:center"><button type="button" class="link" data-proPin>${S.proPin ? 'Use username and password instead' : 'Barber or cashier? Sign in with your 6-digit PIN'}</button></p></form>`;
-  if (S.pro.desk) { if (!S.td) loadToday(true); return header('Front desk', '/') + vToday() + '<button class="btn ghost block" style="margin-top:22px" data-prologout>Sign out</button>'; }   // front desk: the day board only
+  if (S.pro.desk) { if (!S.td) loadToday(true); if (!['today', 'tools'].includes(S.proTab)) S.proTab = 'today'; return header('Front desk', '/') + `<div class="tabs"><button class="${S.proTab === 'today' ? 'on' : ''}" data-ptab="today">Today</button><button class="${S.proTab === 'tools' ? 'on' : ''}" data-ptab="tools">Tools</button></div>` + (S.proTab === 'tools' ? vTools() : vToday()) + '<button class="btn ghost block" style="margin-top:22px" data-prologout>Sign out</button>'; }   // front desk: the day board only
   const sel = S.pro.staff.find(s => s.id === S.proSel) || S.pro.staff[0]; S.proSel = sel?.id;
   if (!sel) return header('Pro tools', '/') + '<div class="empty">No barbers found.</div>';
   return header('Pro tools', '/') + `${S.pro.admin && !['shop', 'mod', 'ins'].includes(S.proTab) ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
-  <div class="tabs scroll"><button class="${S.proTab === 'today' ? 'on' : ''}" data-ptab="today">Today</button>${S.pro.admin ? `<button class="${S.proTab === 'shop' ? 'on' : ''}" data-ptab="shop">Shop</button><button class="${S.proTab === 'ins' ? 'on' : ''}" data-ptab="ins">Insights</button>` : ''}<button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">${S.pro.admin ? 'Barber' : 'Dashboard'}</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
-  ${S.proTab === 'today' ? vToday() : ''}${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'ins' && S.pro.admin ? vInsights() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}${linkCard(sel)}${offersEditor(sel)}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
+  <div class="tabs scroll"><button class="${S.proTab === 'today' ? 'on' : ''}" data-ptab="today">Today</button><button class="${S.proTab === 'tools' ? 'on' : ''}" data-ptab="tools">Tools</button>${S.pro.admin ? `<button class="${S.proTab === 'shop' ? 'on' : ''}" data-ptab="shop">Shop</button><button class="${S.proTab === 'ins' ? 'on' : ''}" data-ptab="ins">Insights</button>` : ''}<button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">${S.pro.admin ? 'Barber' : 'Dashboard'}</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
+  ${S.proTab === 'today' ? vToday() : ''}${S.proTab === 'tools' ? vTools() : ''}${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'ins' && S.pro.admin ? vInsights() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}${linkCard(sel)}${offersEditor(sel)}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
   <label class="f">Years of experience<input name="years" type="number" min="0" max="60" value="${sel.years || ''}"></label><label class="f">Specialties (comma separated)<input name="specialties" value="${esc(sel.specialties.join(', '))}" placeholder="Skin Fade, Taper, Pompadour"></label>
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
@@ -1036,6 +1036,7 @@ async function render() {
   app.innerHTML = html + (showNav ? `<nav class="nav"><div>${tabs.map(([k, n, i]) => `<button class="${r.a === k || (k === 'profile' && r.a === 'me') ? 'on' : ''}" data-go="/${k === 'home' ? '' : k}">${ic(i)}${n}</button>`).join('')}</div></nav>` : '');
   if (focus === 'q' || focus === 'cq') { const el = document.getElementById(focus); if (el) el.focus(); try { el.setSelectionRange(pos, pos); } catch { } }
   if (r.a === 'map') mountMap();
+  if (r.a === 'pro' && typeof afterPro === 'function') afterPro();
   if (r.a === 'discover') afterDiscover();
   if (r.a === 'barber' || r.a === 'book' || r.a === 'shop') window.scrollTo(0, r.a === 'book' ? sy : 0);
 }
@@ -1290,7 +1291,7 @@ app.addEventListener('click', async e => {
   if (D.blockadd != null) return openBlock();
   if (D.blockdel) { if (!confirm('Remove this blocked time?')) return; try { await api('/pro/blocks/' + D.blockdel, { method: 'DELETE' }, S.proToken); await loadBlocks(); toast('Removed'); } catch (x) { toast(x.message); } return render(); }
   if (D.propin != null) { S.proPin = !S.proPin; S.proErr = ''; return render(); }
-  if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'today') { S.td = null; loadToday(); } if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); if (D.ptab === 'ins') { S.health = null; S.ret = null; loadInsights(); } return render(); }
+  if (D.ptab) { S.proTab = D.ptab; if (D.ptab === 'today') { S.td = null; loadToday(); } if (D.ptab === 'tools') { S.tool = ''; S.tlData = null; if (!S.td) loadToday(true); } if (D.ptab === 'mod') loadReports(); if (D.ptab === 'shop') loadShopOwner(); if (D.ptab === 'ins') { S.health = null; S.ret = null; loadInsights(); } return render(); }
   if (D.drange) { S.dashRange = D.drange; render(); return loadDash(); }
   if (D.prologout != null) { S.proToken = null; S.pro = null; store.set('bh_pro', null); return render(); }
 });
@@ -1433,6 +1434,248 @@ document.addEventListener('click', async e => {
   if (t.dataset.tarrive) { try { await sapi(`/bookings/${t.dataset.tarrive}/arrive`, { method: 'POST', body: {} }); toast('Checked in'); loadToday(); } catch (z) { toast(z.message); } }
 });
 document.addEventListener('change', e => { if (e.target.id === 'tdbranch') { S.tdBranch = e.target.value; S.td = null; render(); loadToday(); } });
+
+// ----- Tools: the rest of what the POS did, now in the app (time clock, expenses, end-of-day cash, release pay, checklist, problems, leave, inbox) -----
+Object.assign(ICON, { clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', wallet: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2z"/><circle cx="16" cy="14.5" r="1.2"/>', cash: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v5M18 9.5v5"/>' });
+const TOOLS = [
+  ['clock', 'Time clock', 'Time in and out with a selfie, breaks', 'clock', null],
+  ['exp', 'Expenses', 'Shop spending with receipt photos', 'wallet', 'expenses'],
+  ['cash', 'End-of-day cash', 'Count and turn over the day\'s cash', 'cash', 'remittance'],
+  ['rel', 'Release pay', 'Cash advances and salary releases', 'heart', 'release'],
+  ['chk', 'Daily checklist', 'Opening and closing tasks', 'check', 'checklist'],
+  ['prob', 'Report a problem', 'Broken equipment, complaints and more', 'info', 'problems'],
+  ['leave', 'Leave requests', 'Vacation, sick and emergency leave', 'cal', 'leave'],
+  ['inbox', 'Inbox', 'Chat with the owner and the team', 'chat', 'inbox']
+];
+const EXP_CATS = ['Supplies', 'Utilities', 'Repairs & Maintenance', 'Food & Meals', 'Transportation', 'Marketing', 'Equipment', 'Staff Welfare', 'Other'], EXP_PAY = ['Cash', 'GCash', 'Maya', 'Bank Transfer', 'Card', 'Other'];
+const ADV_TYPES = ['Cash Advance', 'Salary Advance', 'Partial Salary Release', 'Emergency Assistance', 'Other Authorized Deduction'];
+const PROB_CATS = ['Equipment malfunction', 'Air conditioning', 'Electrical', 'Internet', 'Maintenance', 'Customer complaint', 'Employee concern', 'Inventory shortage', 'Other'], PRIOS = ['Low', 'Normal', 'High', 'Urgent'];
+const toolOk = m => { const d = S.td; if (!d) return false; return !m || d.role === 'owner' || d.role === 'admin' || (d.modules || []).includes(m); };
+const stTag = s => { const k = String(s || '').toUpperCase(); const c = ['APPROVED', 'VERIFIED', 'RELEASED', 'RESOLVED', 'CLOSED'].includes(k) ? 'ok' : ['REJECTED', 'FLAGGED', 'CANCELLED'].includes(k) ? 'bad' : ''; return `<span class="tag ${c}">${esc(k.charAt(0) + k.slice(1).toLowerCase())}</span>`; };
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2));
+async function upPhoto(file, kind, max = 1100) { const data = await shrinkPhoto(file, max); const r = await sapi('/files', { method: 'POST', body: { data, kind, branchId: S.td.branch.id } }); return { id: r.id, preview: data }; }
+async function loadTool() {
+  const k = S.tool, d = S.td; if (!k || !d) return;
+  const br = d.branches.length ? 'branch=' + encodeURIComponent(d.branch.id) : '';
+  try {
+    if (k === 'exp') S.tlData = await sapi('/expense-claims?range=' + (S.expRange || 'today') + (br ? '&' + br : ''));
+    if (k === 'cash') { const [pv, hist] = await Promise.all([sapi('/remittances/preview?date=' + d.date + (br ? '&' + br : '')), sapi('/remittances?from=' + ymd(new Date(Date.now() - 30 * 864e5)) + (br ? '&' + br : ''))]); S.tlData = { pv, hist }; }
+    if (k === 'rel') S.tlData = await sapi('/advances' + (br ? '?' + br : ''));
+    if (k === 'chk') S.tlData = await sapi('/checklists/today' + (br ? '?' + br : ''));
+    if (k === 'prob') S.tlData = await sapi('/problems' + (br ? '?' + br : ''));
+    if (k === 'leave') S.tlData = await sapi('/leaves' + (br ? '?' + br : ''));
+    if (k === 'inbox') S.tlData = await sapi('/state');
+    S.tlErr = '';
+  } catch (e) { S.tlErr = e.message; }
+  render();
+}
+function vTools() {
+  const d = S.td; if (!d) return `<div>${S.tdErr ? `<div class="card sm">${esc(S.tdErr)}</div>` : skelList()}</div>`;
+  if (!S.tool) return `<div class="tgrid">${TOOLS.filter(t => toolOk(t[4])).map(([k, n, s, i]) => `<button class="card tcard" data-tool="${k}">${ic(i)}<b>${esc(n)}</b><span class="sm mute">${esc(s)}</span></button>`).join('')}</div>`;
+  const t = TOOLS.find(x => x[0] === S.tool);
+  const head = `<div class="row" style="margin:4px 0 12px;gap:10px"><button class="btn sec sm" data-tool="">${ic('back')} All tools</button><b class="sp" style="font-size:18px">${esc(t[1])}</b></div>`;
+  if (S.tool === 'clock') return head + vClock();
+  if (S.tlErr) return head + `<div class="card sm">${esc(S.tlErr)}</div>`;
+  if (!S.tlData) return head + skelList();
+  return head + ({ exp: vExp, cash: vCash, rel: vRel, chk: vChk, prob: vProb, leave: vLeave, inbox: () => '<div id="app-inbox"></div>' })[S.tool]();
+}
+function afterPro() { if (S.proTab === 'tools' && S.tool === 'inbox' && window.Inbox && S.tlData?.me) { const h = document.getElementById('app-inbox'); if (h) Inbox.mount(h, { token: () => S.proToken, isAdmin: ['owner', 'admin'].includes(S.tlData.me.role), meId: S.tlData.me.id }); } }
+// --- time clock ---
+function vClock() {
+  const d = S.td, me = d.role === 'barber', list = me ? d.staff.filter(s => s.id === d.myStaffId) : d.staff;
+  const label = s => ({ none: 'Not in yet', present: 'In', late: 'In (late)', break: 'On break', out: 'Out for the day', off: 'Day off' })[s.state] || s.state;
+  return `<div class="list">${list.map(s => {
+    const acts = ['none', 'out'].includes(s.state) ? `<button class="btn sm sp" data-clk="in" data-sid="${s.id}">Time in</button>` : ['present', 'late'].includes(s.state) ? `<button class="btn sec sm sp" data-clk="break_start" data-sid="${s.id}">Break</button><button class="btn sm sp" data-clk="out" data-sid="${s.id}">Time out</button>` : s.state === 'break' ? `<button class="btn sm sp" data-clk="break_end" data-sid="${s.id}">Back from break</button>` : '';
+    return `<div class="card"><div class="row" style="gap:12px">${s.photo ? `<img src="${esc(s.photo)}" alt="" class="av" style="width:46px;height:46px;object-fit:cover">` : `<span class="av" style="width:46px;height:46px;font-size:15px">${esc(initials(s.name))}</span>`}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${esc(label(s))}${s.timeIn ? ' · since ' + new Date(s.timeIn).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' }) : ''}${s.lateMins ? ' · ' + s.lateMins + ' min late' : ''}</div></div></div>${acts ? `<div class="row" style="gap:8px;margin-top:12px">${acts}</div>` : ''}</div>`;
+  }).join('') || '<div class="card sm mute">No barbers to show.</div>'}</div>
+  ${me && !d.myStaffId ? '<div class="card sm">Your login is not linked to your barber profile yet. Ask the owner.</div>' : ''}
+  <p class="sm mute" style="margin:12px 2px 0">${d.attPhoto ? 'A selfie is needed to time in and out. ' : ''}The time is taken from this phone when you tap.</p>`;
+}
+function openClock(staffId, action) {
+  const d = S.td, s = d.staff.find(x => x.id === staffId), word = { in: 'Time in', out: 'Time out', break_start: 'Start break', break_end: 'Back from break' }[action];
+  const needPic = d.attPhoto && ['in', 'out'].includes(action), W = { data: '', busy: false, err: '' }, at = new Date().toISOString();
+  const o = sheet('<div id="clk"></div>'), box = o.querySelector('#clk');
+  const draw = () => { box.innerHTML = `<div class="row"><h3 style="margin:0" class="sp">${word} · ${esc(s.name)}</h3><button class="btn sec sm" data-x>Cancel</button></div>
+    ${needPic ? `${W.data ? `<img src="${W.data}" alt="Selfie" style="width:100%;max-height:300px;object-fit:cover;border-radius:16px;margin-top:12px">` : '<div class="card sm mute" style="margin-top:12px">Take a quick selfie to confirm it is really you.</div>'}
+    <label class="btn sec block" style="margin-top:10px;cursor:pointer">${W.data ? 'Retake selfie' : 'Take selfie'}<input type="file" accept="image/*" capture="user" data-clkfile hidden></label>` : ''}
+    ${W.err ? `<div class="err" style="margin-top:10px">${esc(W.err)}</div>` : ''}
+    <button class="btn block" style="margin-top:14px" data-clkgo ${W.busy || (needPic && !W.data) ? 'disabled' : ''}>${W.busy ? 'Please wait…' : word + ' now'}</button>`; };
+  o.addEventListener('change', async e => { if (e.target.matches('[data-clkfile]') && e.target.files[0]) { try { W.data = await shrinkPhoto(e.target.files[0], 720); } catch (x) { W.err = 'Could not read that photo. Please try again.'; } draw(); } });
+  o.addEventListener('click', async e => {
+    if (!e.target.closest('[data-clkgo]')) return; W.busy = true; W.err = ''; draw();
+    try {
+      let photoId = ''; if (needPic) photoId = (await sapi('/files', { method: 'POST', body: { data: W.data, kind: 'attendance', branchId: d.branch.id } })).id;
+      const r = await sapi('/attendance', { method: 'POST', body: { staffId, action, photoId, clientId: uuid(), deviceAt: at } }); o.remove(); toast(word + (r.flagged ? ' (flagged for the owner to check)' : '')); loadToday();
+    } catch (x) { W.busy = false; W.err = x.message; draw(); }
+  });
+  draw();
+}
+// --- expenses ---
+function vExp() {
+  const x = S.tlData, rng = S.expRange || 'today';
+  return `<div class="row" style="gap:10px"><div class="chips sp" style="padding:0">${[['today', 'Today'], ['month', 'This month']].map(([k, n]) => `<button class="chip ${rng === k ? 'on' : ''}" data-exr="${k}">${n}</button>`).join('')}</div><button class="btn sm" data-expnew>${ic('plus')} Add</button></div>
+  <div class="card" style="margin-top:12px"><div class="sm mute">Total ${rng === 'today' ? 'today' : 'this month'}</div><div class="num" style="font-size:26px">${peso(x.total)}</div>${x.noReceipt ? `<div class="sm" style="color:var(--bad)">${x.noReceipt} without receipt</div>` : ''}</div>
+  <div class="list" style="margin-top:12px">${x.rows.map(e => `<div class="card"><div class="row" style="gap:10px"><div class="sp"><div class="nm">${esc(e.description)}</div><div class="sm mute">${esc(e.category)} · ${esc(e.method)} · ${esc(fmtDate(e.date))} · ${esc(e.submittedBy)}</div></div><b class="num" style="font-size:18px">${peso(e.amount)}</b></div><div class="row" style="gap:6px;margin-top:8px">${stTag(e.status)}${e.noReceipt ? '<span class="tag bad">No receipt</span>' : `<span class="tag">${(e.receipts || []).length} receipt photo${(e.receipts || []).length === 1 ? '' : 's'}</span>`}</div></div>`).join('') || '<div class="card sm mute">No expenses yet.</div>'}</div>`;
+}
+function openExpense() {
+  const W = { category: '', desc: '', amount: '', method: 'Cash', receipts: [], reason: '', busy: false, err: '' }, o = sheet('<div id="ex"></div>'), box = o.querySelector('#ex');
+  const draw = () => { box.innerHTML = `<div class="row"><h3 style="margin:0" class="sp">Add an expense</h3><button class="btn sec sm" data-x>Cancel</button></div>
+    <label class="f">Category<select id="ex-cat"><option value="">Choose</option>${EXP_CATS.map(c => `<option ${W.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+    <label class="f">What was it for?<input id="ex-desc" value="${esc(W.desc)}" placeholder="e.g. Alcohol and cotton"></label>
+    <label class="f">Amount (₱)<input id="ex-amt" type="number" inputmode="decimal" min="0" value="${esc(W.amount)}"></label>
+    <div class="sm mute" style="margin:12px 0 6px">Paid with</div><div class="chips wrap">${EXP_PAY.map(m => `<button class="chip ${W.method === m ? 'on' : ''}" data-exm="${m}">${m}</button>`).join('')}</div>
+    <div class="sm mute" style="margin:12px 0 6px">Receipt photos</div>${W.receipts.length ? `<div class="row wrap" style="gap:8px">${W.receipts.map((r, i) => `<div style="position:relative"><img src="${r.preview}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:12px"><button class="btn sec sm" style="position:absolute;right:-6px;top:-6px;padding:2px 7px" data-exrm="${i}">✕</button></div>`).join('')}</div>` : ''}
+    <label class="btn sec block" style="margin-top:8px;cursor:pointer">${ic('plus')} Add receipt photo<input type="file" accept="image/*" capture="environment" data-exfile hidden></label>
+    ${W.receipts.length ? '' : `<label class="f">No receipt? Tell the owner why<input id="ex-why" value="${esc(W.reason)}" placeholder="Required when there is no receipt"></label>`}
+    ${W.err ? `<div class="err" style="margin-top:10px">${esc(W.err)}</div>` : ''}<button class="btn block" style="margin-top:14px" data-exsave ${W.busy ? 'disabled' : ''}>${W.busy ? 'Please wait…' : 'Save expense'}</button>`; };
+  o.addEventListener('input', e => { const m = { 'ex-desc': 'desc', 'ex-amt': 'amount', 'ex-why': 'reason' }[e.target.id]; if (m) W[m] = e.target.value; });
+  o.addEventListener('change', async e => { if (e.target.id === 'ex-cat') W.category = e.target.value; if (e.target.matches('[data-exfile]') && e.target.files[0]) { W.busy = true; draw(); try { W.receipts.push(await upPhoto(e.target.files[0], 'receipt')); } catch (x) { W.err = x.message; } W.busy = false; draw(); } });
+  o.addEventListener('click', async e => {
+    const t = e.target.closest('[data-exm],[data-exrm],[data-exsave]'); if (!t) return;
+    if (t.dataset.exm) { W.method = t.dataset.exm; return draw(); }
+    if (t.dataset.exrm) { W.receipts.splice(+t.dataset.exrm, 1); return draw(); }
+    W.busy = true; W.err = ''; draw();
+    try { await sapi('/expense-claims', { method: 'POST', body: { branchId: S.td.branch.id, category: W.category, description: W.desc, amount: W.amount, method: W.method, receipts: W.receipts.map(r => r.id), noReceiptReason: W.reason } }); o.remove(); toast('Expense saved'); loadTool(); }
+    catch (x) { W.busy = false; W.err = x.message; draw(); }
+  });
+  draw();
+}
+// --- end-of-day cash (cash turnover to the owner; not a BIR reading) ---
+function vCash() {
+  const { pv, hist } = S.tlData, sent = (pv.existing || []).length;
+  const row = (l, v, b) => `<div class="row sm" style="padding:6px 0;border-top:1px solid var(--line)"><span class="sp ${b ? '' : 'mute'}">${l}</span>${b ? `<b>${v}</b>` : `<span>${v}</span>`}</div>`;
+  return `<div class="card"><div class="sm mute">${esc(fmtDate(pv.date))} · ${pv.orders} finished service${pv.orders === 1 ? '' : 's'}</div>
+    ${row('Cash collected', peso(pv.cashSales))}${row('GCash', peso(pv.gcashSales))}${row('Maya', peso(pv.mayaSales))}${row('Other ways', peso(pv.otherSales))}${row('Cash expenses paid from the drawer', '−' + peso(pv.cashExpenses))}${pv.cashIn ? row('Cash added', peso(pv.cashIn)) : ''}${row('Cash you should turn over', peso(pv.expected), true)}</div>
+  ${sent ? `<div class="card sm" style="margin-top:10px">Today's cash was already turned over. ${stTag(pv.existing[0].status)}</div>` : `<button class="btn block" style="margin-top:12px" data-cashnew>Turn over today's cash</button>`}
+  <p class="sm mute" style="margin:10px 2px 0">This is the shop's own cash count for the owner. It is not a BIR sales reading.</p>
+  <div class="sec-h"><h2>Last 30 days</h2></div><div class="list">${hist.rows.map(r => `<div class="card"><div class="row"><div class="sp"><div class="nm">${esc(fmtDate(r.date))}</div><div class="sm mute">${esc(r.responsible)} · expected ${peso(r.expected)}</div></div><b class="num" style="font-size:18px">${peso(r.actual)}</b></div><div class="row" style="gap:6px;margin-top:8px">${stTag(r.status)}${Math.abs(r.variance) >= 1 ? `<span class="tag ${r.variance < 0 ? 'bad' : ''}">${r.variance < 0 ? 'Short' : 'Over'} ${peso(Math.abs(r.variance))}</span>` : ''}</div></div>`).join('') || '<div class="card sm mute">Nothing turned over yet.</div>'}</div>`;
+}
+function openCash() {
+  const pv = S.tlData.pv, W = { actual: '', resp: S.pro?.name || '', notes: '', proof: null, busy: false, err: '' }, o = sheet('<div id="ca"></div>'), box = o.querySelector('#ca');
+  const draw = () => { const v = W.actual === '' ? null : +W.actual - pv.expected; box.innerHTML = `<div class="row"><h3 style="margin:0" class="sp">Turn over today's cash</h3><button class="btn sec sm" data-x>Cancel</button></div>
+    <div class="card" style="margin-top:12px"><div class="sm mute">Cash you should turn over</div><div class="num" style="font-size:26px">${peso(pv.expected)}</div></div>
+    <label class="f">Cash actually turned over (₱)<input id="ca-amt" type="number" inputmode="decimal" min="0" value="${esc(W.actual)}"></label>
+    ${v !== null && Math.abs(v) >= 1 ? `<div class="sm" style="margin-top:6px;color:var(--bad)">${v < 0 ? 'Short' : 'Over'} by ${peso(Math.abs(v))}. The owner will be told.</div>` : ''}
+    <label class="f">Person responsible<input id="ca-resp" value="${esc(W.resp)}"></label><label class="f">Notes (optional)<input id="ca-notes" value="${esc(W.notes)}"></label>
+    ${W.proof ? `<img src="${W.proof.preview}" alt="" style="width:100%;max-height:200px;object-fit:contain;border-radius:12px;margin-top:12px;background:#000">` : ''}
+    <label class="btn sec block" style="margin-top:10px;cursor:pointer">${W.proof ? 'Retake the photo' : 'Photo of the deposit slip or turnover proof'}<input type="file" accept="image/*" capture="environment" data-cafile hidden></label>
+    ${W.err ? `<div class="err" style="margin-top:10px">${esc(W.err)}</div>` : ''}<button class="btn block" style="margin-top:14px" data-casave ${W.busy ? 'disabled' : ''}>${W.busy ? 'Please wait…' : 'Submit'}</button>`; };
+  o.addEventListener('input', e => { const m = { 'ca-amt': 'actual', 'ca-resp': 'resp', 'ca-notes': 'notes' }[e.target.id]; if (m) { W[m] = e.target.value; if (m === 'actual') { draw(); const el = document.getElementById('ca-amt'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } });
+  o.addEventListener('change', async e => { if (e.target.matches('[data-cafile]') && e.target.files[0]) { W.busy = true; draw(); try { W.proof = await upPhoto(e.target.files[0], 'remit', 1300); } catch (x) { W.err = x.message; } W.busy = false; draw(); } });
+  o.addEventListener('click', async e => {
+    if (!e.target.closest('[data-casave]')) return; W.busy = true; W.err = ''; draw();
+    try { await sapi('/remittances', { method: 'POST', body: { branchId: S.td.branch.id, date: pv.date, actual: W.actual === '' ? NaN : +W.actual, responsible: W.resp, notes: W.notes, proofId: W.proof?.id } }); o.remove(); toast('Cash turnover submitted'); loadTool(); }
+    catch (x) { W.busy = false; W.err = x.message; draw(); }
+  });
+  draw();
+}
+// --- release pay ---
+function vRel() {
+  const x = S.tlData;
+  return `<button class="btn block" data-relnew>${ic('plus')} New request</button>
+  <div class="list" style="margin-top:12px">${x.rows.map(r => `<div class="card"><div class="row" style="gap:10px"><div class="sp"><div class="nm">${esc(r.staffName)} · ${esc(r.type)}</div><div class="sm mute">${esc(r.reason)}</div><div class="sm mute">${r.installments} installment${r.installments === 1 ? '' : 's'} · requested by ${esc(r.requestedBy)}</div></div><b class="num" style="font-size:18px">${peso(r.amount)}</b></div><div class="row" style="gap:6px;margin-top:8px">${stTag(r.status)}${r.balance ? `<span class="tag">Balance ${peso(r.balance)}</span>` : ''}</div></div>`).join('') || '<div class="card sm mute">No requests yet.</div>'}</div>`;
+}
+function openRel() {
+  const d = S.td, W = { staffId: d.role === 'barber' ? d.myStaffId : '', type: 'Cash Advance', amount: '', inst: 1, reason: '', consent: false, busy: false, err: '' }, o = sheet('<div id="rl"></div>'), box = o.querySelector('#rl');
+  const draw = () => { box.innerHTML = `<div class="row"><h3 style="margin:0" class="sp">Release pay request</h3><button class="btn sec sm" data-x>Cancel</button></div>
+    ${d.role === 'barber' ? '' : `<label class="f">Employee<select id="rl-staff"><option value="">Choose</option>${d.staff.map(s => `<option value="${s.id}" ${W.staffId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`}
+    <label class="f">Type<select id="rl-type">${ADV_TYPES.map(t => `<option ${W.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+    <label class="f">Amount (₱)<input id="rl-amt" type="number" inputmode="decimal" min="0" value="${esc(W.amount)}"></label>
+    <label class="f">Pay back in<select id="rl-inst">${[1, 2, 3, 4, 6, 8, 10, 12].map(n => `<option value="${n}" ${+W.inst === n ? 'selected' : ''}>${n} payroll${n === 1 ? '' : 's'}</option>`).join('')}</select></label>
+    <label class="f">Reason<input id="rl-why" value="${esc(W.reason)}"></label>
+    <label class="f row" style="gap:10px;align-items:flex-start"><input type="checkbox" id="rl-ok" style="width:auto;margin-top:3px" ${W.consent ? 'checked' : ''}><span style="margin:0">The employee agrees that this amount will be deducted from their pay.</span></label>
+    ${W.err ? `<div class="err" style="margin-top:10px">${esc(W.err)}</div>` : ''}<button class="btn block" style="margin-top:14px" data-relsave ${W.busy ? 'disabled' : ''}>${W.busy ? 'Please wait…' : 'Send request to the owner'}</button>`; };
+  o.addEventListener('input', e => { const m = { 'rl-amt': 'amount', 'rl-why': 'reason' }[e.target.id]; if (m) W[m] = e.target.value; });
+  o.addEventListener('change', e => { const m = { 'rl-staff': 'staffId', 'rl-type': 'type', 'rl-inst': 'inst' }[e.target.id]; if (m) W[m] = e.target.value; if (e.target.id === 'rl-ok') W.consent = e.target.checked; });
+  o.addEventListener('click', async e => {
+    if (!e.target.closest('[data-relsave]')) return; W.busy = true; W.err = ''; draw();
+    try { await sapi('/advances', { method: 'POST', body: { branchId: d.branch.id, staffId: W.staffId, type: W.type, amount: W.amount, installments: +W.inst, reason: W.reason, consent: W.consent } }); o.remove(); toast('Request sent'); loadTool(); }
+    catch (x) { W.busy = false; W.err = x.message; draw(); }
+  });
+  draw();
+}
+// --- daily checklist ---
+function vChk() {
+  const x = S.tlData, kind = S.chkKind || 'opening', run = (x.runs || []).find(r => r.kind === kind), tpl = x.template[kind] || [];
+  const C = S.chkDraft && S.chkDraft.kind === kind ? S.chkDraft : (S.chkDraft = { kind, items: tpl.map(() => ({ done: false, note: '', photoId: '', preview: '', doneAt: '' })), busy: false, err: '' });
+  const tabs = `<div class="chips" style="padding:0">${[['opening', 'Opening'], ['closing', 'Closing']].map(([k, n]) => `<button class="chip ${kind === k ? 'on' : ''}" data-chkk="${k}">${n}${(x.runs || []).some(r => r.kind === k) ? ' ✓' : ''}</button>`).join('')}</div>`;
+  if (run) return tabs + `<div class="card" style="margin-top:12px"><b>Submitted</b><div class="sm mute">by ${esc(run.submittedBy || '')}</div></div><div class="list" style="margin-top:10px">${(run.items || []).map(i => `<div class="card sm"><b>${i.done ? '✓' : '✗'}</b> ${esc(i.text)}${i.note ? `<div class="mute">${esc(i.note)}</div>` : ''}</div>`).join('')}</div>`;
+  return tabs + `<div class="list" style="margin-top:12px">${tpl.map((t, i) => { const it = C.items[i]; return `<div class="card"><label class="row" style="gap:12px;align-items:flex-start;margin:0"><input type="checkbox" data-chki="${i}" ${it.done ? 'checked' : ''} style="width:22px;height:22px;margin-top:2px"><span class="sp">${esc(t.text)}${t.photo ? ' <span class="tag">Photo</span>' : ''}</span></label>
+    ${t.photo ? `${it.preview ? `<img src="${it.preview}" alt="" style="width:100%;max-height:160px;object-fit:cover;border-radius:12px;margin-top:10px">` : ''}<label class="btn sec sm block" style="margin-top:8px;cursor:pointer">${it.preview ? 'Retake photo' : 'Take photo'}<input type="file" accept="image/*" capture="environment" data-chkf="${i}" hidden></label>` : ''}
+    ${it.done ? '' : `<input data-chkn="${i}" value="${esc(it.note)}" placeholder="Not done? Write why" style="margin-top:10px">`}</div>`; }).join('')}</div>
+    ${C.err ? `<div class="err" style="margin-top:10px">${esc(C.err)}</div>` : ''}<button class="btn block" style="margin-top:14px" data-chksave ${C.busy ? 'disabled' : ''}>${C.busy ? 'Please wait…' : 'Submit ' + kind + ' checklist'}</button>`;
+}
+// --- problems ---
+function vProb() {
+  const x = S.tlData;
+  return `<button class="btn block" data-probnew>${ic('plus')} Report a problem</button>
+  <div class="list" style="margin-top:12px">${x.rows.map(r => `<div class="card"><div class="row" style="gap:8px"><b class="sp">${esc(r.category)}</b>${stTag(r.status)}<span class="tag ${['High', 'Urgent'].includes(r.priority) ? 'bad' : ''}">${esc(r.priority)}</span></div><p style="margin:6px 0 0">${esc(r.description)}</p><div class="sm mute" style="margin-top:6px">${esc(r.submittedBy)} · ${new Date(r.createdAt).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div></div>`).join('') || '<div class="card sm mute">No problems reported.</div>'}</div>`;
+}
+function openProb() {
+  const W = { category: '', priority: 'Normal', desc: '', photos: [], busy: false, err: '' }, o = sheet('<div id="pb"></div>'), box = o.querySelector('#pb');
+  const draw = () => { box.innerHTML = `<div class="row"><h3 style="margin:0" class="sp">Report a problem</h3><button class="btn sec sm" data-x>Cancel</button></div>
+    <label class="f">What kind of problem?<select id="pb-cat"><option value="">Choose</option>${PROB_CATS.map(c => `<option ${W.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+    <div class="sm mute" style="margin:12px 0 6px">How urgent?</div><div class="chips wrap">${PRIOS.map(p => `<button class="chip ${W.priority === p ? 'on' : ''}" data-pbp="${p}">${p}</button>`).join('')}</div>
+    <label class="f">What happened?<textarea id="pb-desc" rows="3">${esc(W.desc)}</textarea></label>
+    ${W.photos.length ? `<div class="row wrap" style="gap:8px;margin-top:10px">${W.photos.map(r => `<img src="${r.preview}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:12px">`).join('')}</div>` : ''}
+    <label class="btn sec block" style="margin-top:10px;cursor:pointer">${ic('plus')} Add photo<input type="file" accept="image/*" capture="environment" data-pbfile hidden></label>
+    ${W.err ? `<div class="err" style="margin-top:10px">${esc(W.err)}</div>` : ''}<button class="btn block" style="margin-top:14px" data-pbsave ${W.busy ? 'disabled' : ''}>${W.busy ? 'Please wait…' : 'Send to the owner'}</button>`; };
+  o.addEventListener('input', e => { if (e.target.id === 'pb-desc') W.desc = e.target.value; });
+  o.addEventListener('change', async e => { if (e.target.id === 'pb-cat') W.category = e.target.value; if (e.target.matches('[data-pbfile]') && e.target.files[0]) { W.busy = true; draw(); try { W.photos.push(await upPhoto(e.target.files[0], 'problem', 1300)); } catch (x) { W.err = x.message; } W.busy = false; draw(); } });
+  o.addEventListener('click', async e => {
+    const t = e.target.closest('[data-pbp],[data-pbsave]'); if (!t) return; if (t.dataset.pbp) { W.priority = t.dataset.pbp; return draw(); }
+    W.busy = true; W.err = ''; draw();
+    try { await sapi('/problems', { method: 'POST', body: { branchId: S.td.branch.id, category: W.category, priority: W.priority, description: W.desc, photos: W.photos.map(p => p.id) } }); o.remove(); toast('Sent to the owner'); loadTool(); }
+    catch (x) { W.busy = false; W.err = x.message; draw(); }
+  });
+  draw();
+}
+// --- leave ---
+function vLeave() {
+  const x = S.tlData;
+  return `<button class="btn block" data-lvnew>${ic('plus')} Request leave</button>
+  <div class="list" style="margin-top:12px">${x.rows.map(r => `<div class="card"><div class="row" style="gap:8px"><b class="sp">${esc(r.staffName)} · ${esc(r.type)}</b>${stTag(r.status)}</div><div class="sm mute" style="margin-top:4px">${esc(fmtDate(r.from_date))}${r.to_date !== r.from_date ? ' to ' + esc(fmtDate(r.to_date)) : ''} · ${esc(r.reason)}</div>${r.reviewNote ? `<div class="sm" style="margin-top:4px">Owner: ${esc(r.reviewNote)}</div>` : ''}</div>`).join('') || '<div class="card sm mute">No leave requests yet.</div>'}</div>`;
+}
+function openLeave() {
+  const d = S.td, x = S.tlData, W = { staffId: d.role === 'barber' ? d.myStaffId : '', type: (x.types || ['Vacation'])[0], from: d.date, to: d.date, reason: '', busy: false, err: '' }, o = sheet('<div id="lv"></div>'), box = o.querySelector('#lv');
+  const draw = () => { box.innerHTML = `<div class="row"><h3 style="margin:0" class="sp">Request leave</h3><button class="btn sec sm" data-x>Cancel</button></div>
+    ${d.role === 'barber' ? '' : `<label class="f">Employee<select id="lv-staff"><option value="">Choose</option>${d.staff.map(s => `<option value="${s.id}" ${W.staffId === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`}
+    <label class="f">Type<select id="lv-type">${(x.types || []).map(t => `<option ${W.type === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+    <div class="row" style="gap:10px"><label class="f sp">From<input id="lv-from" type="date" value="${W.from}"></label><label class="f sp">To<input id="lv-to" type="date" value="${W.to}"></label></div>
+    <label class="f">Reason<input id="lv-why" value="${esc(W.reason)}"></label>
+    ${W.err ? `<div class="err" style="margin-top:10px">${esc(W.err)}</div>` : ''}<button class="btn block" style="margin-top:14px" data-lvsave ${W.busy ? 'disabled' : ''}>${W.busy ? 'Please wait…' : 'Send request'}</button>`; };
+  o.addEventListener('input', e => { if (e.target.id === 'lv-why') W.reason = e.target.value; });
+  o.addEventListener('change', e => { const m = { 'lv-staff': 'staffId', 'lv-type': 'type', 'lv-from': 'from', 'lv-to': 'to' }[e.target.id]; if (m) W[m] = e.target.value; });
+  o.addEventListener('click', async e => {
+    if (!e.target.closest('[data-lvsave]')) return; W.busy = true; W.err = ''; draw();
+    try { await sapi('/leaves', { method: 'POST', body: { branchId: d.branch.id, staffId: W.staffId, type: W.type, from: W.from, to: W.to, reason: W.reason } }); o.remove(); toast('Leave request sent'); loadTool(); }
+    catch (x) { W.busy = false; W.err = x.message; draw(); }
+  });
+  draw();
+}
+document.addEventListener('click', async e => {
+  const t = e.target.closest('[data-tool],[data-clk],[data-exr],[data-expnew],[data-cashnew],[data-relnew],[data-chkk],[data-chksave],[data-probnew],[data-lvnew]'); if (!t || !S.td) return;
+  if (t.dataset.tool !== undefined) { S.tool = t.dataset.tool; S.tlData = null; S.tlErr = ''; S.chkDraft = null; render(); if (S.tool && S.tool !== 'clock') loadTool(); if (S.tool === 'clock') loadToday(true); return; }
+  if (t.dataset.clk) return openClock(t.dataset.sid, t.dataset.clk);
+  if (t.dataset.exr) { S.expRange = t.dataset.exr; S.tlData = null; render(); return loadTool(); }
+  if (t.hasAttribute('data-expnew')) return openExpense();
+  if (t.hasAttribute('data-cashnew')) return openCash();
+  if (t.hasAttribute('data-relnew')) return openRel();
+  if (t.hasAttribute('data-probnew')) return openProb();
+  if (t.hasAttribute('data-lvnew')) return openLeave();
+  if (t.dataset.chkk) { S.chkKind = t.dataset.chkk; return render(); }
+  if (t.hasAttribute('data-chksave')) {
+    const C = S.chkDraft; C.busy = true; C.err = ''; render();
+    try { await sapi('/checklists/submit', { method: 'POST', body: { branchId: S.td.branch.id, kind: C.kind, items: C.items.map(i => ({ done: i.done, note: i.note, photoId: i.photoId, doneAt: i.doneAt })) } }); S.chkDraft = null; toast('Checklist submitted'); loadTool(); }
+    catch (x) { C.busy = false; C.err = x.message; render(); }
+  }
+});
+document.addEventListener('change', async e => {
+  const t = e.target, C = S.chkDraft; if (!C) return;
+  if (t.dataset.chki !== undefined) { const it = C.items[+t.dataset.chki]; it.done = t.checked; it.doneAt = t.checked ? new Date().toISOString() : ''; render(); }
+  if (t.dataset.chkf !== undefined && t.files[0]) { const it = C.items[+t.dataset.chkf]; try { C.busy = true; render(); const r = await upPhoto(t.files[0], 'checklist', 1000); it.photoId = r.id; it.preview = r.preview; } catch (x) { C.err = x.message; } C.busy = false; render(); }
+});
+document.addEventListener('input', e => { const t = e.target; if (t.dataset.chkn !== undefined && S.chkDraft) S.chkDraft.items[+t.dataset.chkn].note = t.value; });
 
 function openReview(bookingId) {
   let rating = 0; const o = document.createElement('div'); o.className = 'lb'; o.style.alignItems = 'end';

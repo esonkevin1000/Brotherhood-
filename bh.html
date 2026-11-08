@@ -86,7 +86,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .star{color:var(--gold)}.tag{display:inline-block;font-size:12px;padding:3px 9px;border-radius:99px;background:var(--s3);border:1px solid var(--line);color:var(--mute)}
 .tag.ok{color:var(--ok);border-color:#1d6f55;background:#0f2a26}.tag.bad{color:var(--bad);border-color:#7a2a36;background:#2a1520}.tag.on{background:#fff;color:#09090a;border-color:#fff}
 .chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
-.chips.wrap{flex-wrap:wrap;overflow:visible}.tkno{min-width:52px;height:44px;padding:0 6px;border-radius:12px;background:rgba(255,255,255,.07);display:grid;place-items:center;font-weight:700;font-size:14px;flex:none;white-space:nowrap}.tdh{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.15}.card.tk .nm{font-weight:600}.err{color:var(--bad);font-size:14px}
+.chips.wrap{flex-wrap:wrap;overflow:visible}.row.wrap{flex-wrap:wrap}.tgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tcard{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;width:100%;min-height:118px}.tcard svg.i{width:26px;height:26px;color:var(--blue,#1f7bff)}.tcard b{font-size:15.5px}@media(min-width:700px){.tgrid{grid-template-columns:repeat(3,1fr)}}.tkno{min-width:52px;height:44px;padding:0 6px;border-radius:12px;background:rgba(255,255,255,.07);display:grid;place-items:center;font-weight:700;font-size:14px;flex:none;white-space:nowrap}.tdh{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.15}.card.tk .nm{font-weight:600}.err{color:var(--bad);font-size:14px}
 .chip{border:1px solid var(--line);background:var(--s1);color:var(--mute);border-radius:99px;padding:7px 14px;white-space:nowrap;font-size:13px}.chip.on{background:#fff;border-color:#fff;color:#09090a;font-weight:600}
 .search{display:flex;align-items:center;gap:10px;background:var(--s1);border:1px solid var(--line);border-radius:14px;padding:0 14px}
 .search input{flex:1;background:none;border:0;color:var(--text);padding:13px 0;outline:0}
@@ -314,6 +314,7 @@ input[type=range]{accent-color:var(--blue);height:28px}
 <body>
 <div id="app"></div>
 <noscript><p style="padding:24px">Brotherhood needs JavaScript to run.</p></noscript>
+<script src="/inbox.js"></script>
 <script src="/bh.js"></script>
 </body>
 </html>

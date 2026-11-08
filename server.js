@@ -1040,6 +1040,7 @@ async function handleIn(req, res) {
       if (/^\/api\/pos\/dashboard$/.test(p)) return 'dashboard';
       if (/^\/api\/pos\/queue$/.test(p)) return ['queue', 'pos'];
       if (/^\/api\/pos\/(shift|zreadings)$|^\/api\/shifts\//.test(p)) return 'reading';
+      if (p === '/api/attendance' && method === 'POST' && me.role === 'barber') return null;   // a barber clocks himself in from the app (checked below: only himself)
       if (/^\/api\/(pos\/)?attendance$/.test(p) || p === '/api/attendance/log') return 'attendance';
       if (/^\/api\/expenses$/.test(p) || /^\/api\/expense-claims/.test(p)) return 'expenses';
       if (/^\/api\/bookings/.test(p)) return 'bookings';
@@ -1052,6 +1053,7 @@ async function handleIn(req, res) {
       if (/^\/api\/leaves/.test(p)) return 'leave';
       if (/^\/api\/me\//.test(p)) return 'myperf';
       if (/^\/api\/inbox/.test(p)) return 'inbox';
+      if (p === '/api/files' && method === 'POST') return null;   // any staff may attach a photo (selfie, receipt, problem, checklist); it stays private to the shop
       if (/^\/api\/files/.test(p)) return ['remittance', 'expenses', 'pos'];
       if (/^\/api\/orders\/\w+\/(pay|void)$/.test(p)) return 'pos';
       if (/^\/api\/orders\/\w+$/.test(p) && method === 'PUT') return ['pos', 'queue'];
@@ -1087,7 +1089,7 @@ async function handleIn(req, res) {
         .filter(b => me.role !== 'barber' || !b.staffId || b.staffId === myStaffId)
         .map(b => ({ id: b.id, customerName: b.customerName, phone: b.phone, time: b.time, staffId: b.staffId || '', staffName: b.staffId ? get('staff', b.staffId)?.name || '' : 'Any barber', items: jp(b.itemIds).map(i => get('items', i)?.name).filter(Boolean) }));
       return send(res, 200, {
-        branch: { id: bid, name: get('branches', bid)?.name || '' }, branches: isBranchUser(me) ? [] : all('select id,name from branches order by rowid'), date: t, role: me.role, myStaffId, locked: !!dayLocked(bid, t),
+        branch: { id: bid, name: get('branches', bid)?.name || '' }, branches: isBranchUser(me) ? [] : all('select id,name from branches order by rowid'), date: t, role: me.role, myStaffId, locked: !!dayLocked(bid, t), attPhoto: getSetting('attPhoto') !== '0', modules: isAdmin(me) ? MODULES : modulesFor(me.role),
         menu: all('select id,name,type,price,mins,needId from items where active=1 order by type desc, price').map(i => ({ ...i, needId: !!i.needId })),
         discounts: all('select id,name,kind,value from discounts where active=1 order by name'), methods: PAY_METHODS, staff, tickets, bookings,
         totals: { waiting: tickets.filter(x => x.status === 'waiting').length, inChair: tickets.filter(x => x.status === 'in_chair').length, done: done.length, earned: r2(sum(done, x => x.total)) }
@@ -1387,7 +1389,7 @@ async function handleIn(req, res) {
     const reason = String(b.noReceiptReason || '').trim().slice(0, 300); if (!receipts.length && reason.length < 5) bad(400, 'No receipt? Enter the reason (at least a few words).');
     const id = uid(); let cm = '';
     const sh = method2 === 'Cash' && date === todayStr() ? openShift(branchId) : null;
-    if (sh) { cm = uid(); run('insert into cash_moves(id,shiftId,branchId,date,kind,amount,note,staffId,ts,by) values(?,?,?,?,?,?,?,?,?,?)', cm, sh.id, branchId, date, 'expense', amount, (category + ': ' + description).slice(0, 200), '', nowISO(), me.name); }
+    if (sh || (method2 === 'Cash' && date === todayStr())) { cm = uid(); run('insert into cash_moves(id,shiftId,branchId,date,kind,amount,note,staffId,ts,by) values(?,?,?,?,?,?,?,?,?,?)', cm, sh ? sh.id : '', branchId, date, 'expense', amount, (category + ': ' + description).slice(0, 200), '', nowISO(), me.name); }
     run('insert into expense_claims(id,branchId,date,category,description,amount,method,receipts,noReceiptReason,status,submittedById,submittedBy,staffId,createdAt,cashMoveId,history) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       id, branchId, date, category, description, amount, method2, JSON.stringify(receipts), receipts.length ? '' : reason, 'PENDING', me.id, me.name, '', nowISO(), cm, JSON.stringify([{ at: nowISO(), by: me.name, action: 'SUBMITTED', note: receipts.length ? '' : 'NO RECEIPT: ' + reason }]));
     log(me, 'expense', 'expense_claims', id, `${category} ${amount} ${method2}${receipts.length ? '' : ' NO RECEIPT'}`); return send(res, 201, expView(get('expense_claims', id)));
@@ -1929,6 +1931,7 @@ async function handleIn(req, res) {
   if (p === '/api/attendance' && method === 'POST') {
     const b = await readBody(req), s = get('staff', b.staffId); if (!s || !s.active) bad(404, 'Unknown barber');
     if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
+    if (me.role === 'barber' && !modulesFor('barber').includes('attendance') && s.id !== (get('users', me.id)?.staffId || '')) bad(403, 'You can only clock yourself in and out');
     const br = get('branches', s.branchId), needPhoto = getSetting('attPhoto') !== '0', recv = new Date();
     // idempotent: a record sent twice (offline retry) is applied once
     const cid = String(b.clientId || '').slice(0, 64);
