@@ -60,7 +60,7 @@ function vHome() {
   ${installCard()}${loyaltyCard()}${up ? `<div class="card pop" style="margin-bottom:6px"><div class="sm mute">YOUR NEXT CUT</div><div class="nm" style="margin-top:4px">${fmtDate(up.date)} · ${t12(up.time)}</div><div class="sm mute">${esc(up.items.map(i => i.name).join(' + '))} with ${esc(up.staffName)} · ${esc(up.branchName)}</div></div>` : ''}
   <button class="bcard" data-go="/style" style="margin-top:6px"><span class="av" style="background:var(--s2)">${ic('scissors')}</span><div class="sp"><div class="nm">Find your cut</div><div class="sm mute">Pick your face shape and get cut ideas to show your barber</div></div></button>
   <div class="sec-h"><h2>Top barbers</h2><button class="link" data-go="/discover">See all</button></div>
-  ${D ? (D.barbers.length ? `<div class="hscroll">${D.barbers.slice(0, 12).map(b => barberTile(b)).join('')}</div>` : '<div class="empty">No barbers yet.</div>') : '<div class="empty">Loading…</div>'}
+  ${D ? (D.barbers.length ? `<div class="hscroll">${D.barbers.slice(0, 12).map(b => barberTile(b)).join('')}</div>` : '<div class="empty">No barbers yet.</div>') : skelList()}
   <div class="sec-h"><h2>Our shops</h2><button class="link" data-go="/map">View map</button></div>${D ? `<div class="hscroll">${D.shops.map(shopTile).join('')}</div>` : ''}`;
 }
 // ----- Discover: a marketplace of barbers and haircuts -----
@@ -97,14 +97,14 @@ function vDiscover() {
   const D = S.D, active = discoverActive(), locLabel = S.branch ? (shopOf(S.branch)?.name || 'Shop') : S.geo ? 'Near you' : 'All shops';
   const head = `<div class="dhead" id="dhead"><div class="row" style="margin-bottom:10px"><button class="locchip" data-floc aria-label="Choose location">${ic('pin')}<b>${esc(locLabel)}</b><span>▾</span></button><span class="sp"></span><button class="iconb" data-go="/map" aria-label="Map">${ic('pin')}</button><button class="iconb" data-go="${S.token ? '/me' : '/auth'}" aria-label="Barbers you follow">${ic('heart')}</button></div>
     <div class="search">${ic('search')}<input id="q" placeholder="Search barbers, haircuts or shops" value="${esc(S.q)}" autocomplete="off"></div></div>`;
-  if (!D) return head + '<div class="empty">Loading…</div>';
+  if (!D) return head + skelList();
   let body = '';
   if (!active) {
     const all_ = withKm(D.barbers), counts = new Map((D.styleTiles || []).map(t => [t.name, t])), tiles = CUTS.map(c => ({ name: c.name, n: counts.get(c.name)?.n || 0, image: counts.get(c.name)?.image || '' })).sort((x, y) => y.n - x.n);
     const soon = all_.filter(b => b.nextSlot).sort((x, y) => x.nextSlot.localeCompare(y.nextSlot)).slice(0, 10), hot = all_.filter(b => b.weekCuts > 0).sort((x, y) => y.weekCuts - x.weekCuts).slice(0, 10);
     body = `<div class="banners" id="banners">${BANNERS.map(n => `<div class="banner"><div class="sp"><h3>${esc(n.t)}</h3><p>${esc(n.p)}</p><button class="btn white sm" ${n.a}>${esc(n.cta)} ›</button></div><span class="big" aria-hidden="true">${n.e}</span></div>`).join('')}</div>
     <div class="dots" id="bdots">${BANNERS.map((_, i) => `<span class="${i ? '' : 'on'}"></span>`).join('')}</div>
-    ${secRow('Pick a service')}<div class="pkgs">${PKGS.map(([k, name, desc]) => { const t = (D.pkgTiles || []).find(x => x.pkg === k) || { n: 0, from: 0 }; return `<button class="pkg" data-dpkg="${k}"><div class="pa">${pkgArt(k)}</div><div class="pb"><b>${esc(name)}</b><span class="sm mute">${esc(desc)}</span><span class="sm">${t.n ? `${t.n} barber${t.n === 1 ? '' : 's'} · from <b>${peso(t.from)}</b>` : 'Barbers are adding their prices'}</span></div></button>`; }).join('')}</div>
+    ${secRow('Pick a service')}<div class="pkgs">${PKGS.map(([k, name, desc]) => { const t = (D.pkgTiles || []).find(x => x.pkg === k) || { n: 0, from: 0 }; return `<button class="pkg" data-dpkg="${k}"><div class="pa">${pkgArt(k)}</div><div class="pb"><b>${esc(name)}</b><span class="sm mute">${esc(desc)}</span><span class="sm">${t.n ? `${t.n} barber${t.n === 1 ? '' : 's'} · from <b>${peso(t.from)}</b>` : (k === 'cut' && shopFrom() ? `Shop menu from <b>${peso(shopFrom())}</b>` : 'Price set by your barber')}</span></div></button>`; }).join('')}</div>
     ${soon.length ? secRow('Free today', 'data-dsee="soonest"') + `<div class="hscroll">${soon.map(b => barberTile(b, 'Next ' + t12(b.nextSlot))).join('')}</div>` : ''}
     ${hot.length ? secRow('Trending this week', 'data-dsee="trending"') + `<div class="hscroll">${hot.map(b => barberTile(b, '🔥 ' + b.weekCuts + ' cut' + (b.weekCuts === 1 ? '' : 's'))).join('')}</div>` : ''}
     ${S.fresh && S.fresh.length ? secRow('Fresh cuts', '') + `<div class="hscroll">${S.fresh.map((i, k) => `<button class="tile sq" data-fresh="${k}"><div class="tw"><img class="tp" src="${esc(i.image)}" alt="${esc(i.title)}" loading="lazy">${i.style ? `<span class="tbadge">${esc(i.style)}</span>` : ''}</div><div class="tb"><div class="sm tl"><b>${esc(i.title)}</b></div><div class="sm mute tl">${esc(i.barberName || i.author || '')}</div></div></button>`).join('')}</div>` : ''}
@@ -114,7 +114,7 @@ function vDiscover() {
     const R = S.R, shopsMode = S.tab === 'shops';
     let list = R ? withKm(R.barbers) : null; if (list && S.sort === 'nearest') list.sort((x, y) => (x.km ?? 1e9) - (y.km ?? 1e9));
     body = filterBar() + `<div class="row" style="margin:6px 0 10px"><div class="tabs sp" style="margin:0"><button class="${!shopsMode ? 'on' : ''}" data-tab="barbers">Barbers</button><button class="${shopsMode ? 'on' : ''}" data-tab="shops">Shops</button></div><button class="link" data-dreset>Clear all</button></div>
-    ${!R ? '<div class="empty">Loading…</div>' : shopsMode ? `<div class="list">${R.shops.map(shopCard).join('') || '<div class="card empty">No shops match.</div>'}</div>` : `<div class="mute sm" style="margin-bottom:8px">${list.length} barber${list.length === 1 ? '' : 's'}${S.sort === 'nearest' && !S.geo ? ' · allow location to sort by distance' : ''}</div><div class="list">${list.map(barberBig).join('') || '<div class="card empty">No barbers match. Try removing a filter.</div>'}</div>`}`;
+    ${!R ? skelList() : shopsMode ? `<div class="list">${R.shops.map(shopCard).join('') || '<div class="card empty">No shops match.</div>'}</div>` : `<div class="mute sm" style="margin-bottom:8px">${list.length} barber${list.length === 1 ? '' : 's'}${S.sort === 'nearest' && !S.geo ? ' · allow location to sort by distance' : ''}</div><div class="list">${list.map(barberBig).join('') || '<div class="card empty">No barbers match. Try removing a filter.</div>'}</div>`}`;
   }
   return head + body;
 }
@@ -258,7 +258,7 @@ function vBook() {
   ${repeatCard(k)}
   ${promoCard(k)}
   ${k.err ? `<div class="err">${esc(k.err)}</div>` : ''}
-  <div class="foot"><div><div class="sp"><div class="sm mute">${k.pkg ? 'Package · pay at the shop' : 'Total · pay at the shop'}</div>${k.promo ? `<span class="sm mute" style="text-decoration:line-through">${peso(k.pkg ? k.pkg.price : total)}</span> ` : ''}<b class="num" style="font-size:22px">${peso(Math.max(0, (k.pkg ? k.pkg.price : total) - (k.promo ? k.promo.amt : 0)))}</b></div><button class="btn" data-confirm style="min-width:160px" ${k.items.length && k.time && !k.busy ? '' : 'disabled'}>${k.busy ? 'Booking…' : 'Confirm booking'}</button></div></div>`;
+  <div class="foot"><div><div class="sp"><div class="sm mute">${k.pkg ? 'Package · pay at the shop' : 'Total · pay at the shop'}</div>${k.promo ? `<span class="sm mute" style="text-decoration:line-through">${peso(k.pkg ? k.pkg.price : total)}</span> ` : ''}${!k.pkg && !k.items.length ? '<b style="font-size:16px">Pick a service</b>' : `<b class="num" style="font-size:22px">${peso(Math.max(0, (k.pkg ? k.pkg.price : total) - (k.promo ? k.promo.amt : 0)))}</b>`}</div><button class="btn" data-confirm style="min-width:160px" ${k.items.length && k.time && !k.busy ? '' : 'disabled'}>${k.busy ? 'Booking…' : 'Confirm booking'}</button></div></div>`;
 }
 async function confirmBooking() {
   const k = S.bk; k.busy = true; k.err = ''; render();
@@ -270,7 +270,7 @@ async function confirmBooking() {
 // ----- bookings -----
 function vBookings() {
   if (!S.token) return header('Bookings') + `<div class="empty">${ic('cal')}<p>Log in to see your bookings.</p><button class="btn" data-go="/auth">Log in or sign up</button></div>`;
-  if (!S.mine) return header('Bookings') + '<div class="empty">Loading…</div>';
+  if (!S.mine) return header('Bookings') + skelList();
   const today = ymd(new Date()), up = S.mine.filter(b => b.status === 'booked' && b.date >= today).reverse(), past = S.mine.filter(b => !up.includes(b));
   const card = b => `<div class="card pop"><div class="row"><b>${fmtDate(b.date)} · ${t12(b.time)}</b><span class="sp"></span><span class="tag ${b.status === 'booked' ? 'on' : b.status === 'cancelled' || b.status === 'noshow' ? 'bad' : 'ok'}">${b.status === 'arrived' ? 'completed' : b.status === 'noshow' ? 'no-show' : esc(b.status)}</span></div>
     <div class="sm mute">${esc(b.items.map(i => i.name).join(' + '))} · ${peso(b.total)}</div><div class="sm mute">${esc(b.staffName || 'Any barber')} · ${esc(b.branchName)}</div>
@@ -344,7 +344,7 @@ const kpi = (l, v, sub = '') => `<div class="card" style="padding:12px"><div cla
 const claimCard = () => { const v = S.vchk; return `<div class="card" style="margin-bottom:12px"><div class="sm mute" style="letter-spacing:1px">CLAIM A MEMBER VOUCHER</div><div class="row" style="gap:8px;margin-top:6px;align-items:end"><label class="f sp" style="margin:0">Voucher code<input id="vcode" maxlength="12" autocapitalize="characters" autocomplete="off" placeholder="e.g. RWK3M9PQ" style="text-transform:uppercase" value="${esc(S.vcode || '')}"></label><button class="btn sec sm" data-vcheck>Check</button></div>${S.verr ? `<div class="err" style="margin-top:8px">${esc(S.verr)}</div>` : ''}${v ? `<div class="row" style="gap:10px;margin-top:10px">${v.photo ? `<img src="${esc(v.photo)}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:10px">` : ''}<div class="sp"><b>${esc(v.name)}</b> <span class="tag ${v.status === 'active' ? 'ok' : v.status === 'used' ? '' : 'bad'}">${v.status === 'active' ? 'Valid' : v.status === 'used' ? 'Already used' : 'Expired'}</span><div class="sm mute">${esc(v.member)} · ${esc(v.label)}${v.expires ? ' · until ' + fmtDate(v.expires) : ''}</div></div></div>${v.status === 'active' && v.kind === 'item' ? `<button class="btn block" style="margin-top:10px" data-vclaim="${esc(v.code)}">Hand over and mark as claimed</button>` : v.status === 'active' ? '<div class="sm mute" style="margin-top:8px">This is a discount voucher. It applies automatically when the member books with it.</div>' : ''}` : ''}</div>`; };
 function vDash() {
   const d = S.dash; const per = `<div class="tabs">${[['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['all', 'All time']].map(([k, n]) => `<button class="${S.dashRange === k ? 'on' : ''}" data-drange="${k}" style="font-size:13px;padding:9px 2px;white-space:nowrap">${n}</button>`).join('')}</div>`;
-  if (!d) return claimCard() + per + '<div class="empty">Loading…</div>';
+  if (!d) return claimCard() + per + skelList();
   const m = d.metrics, today = ymd(new Date()), e = S.earn;
   return claimCard() + per + `<div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${kpi('Haircuts', m.haircuts, `${m.daysWorked} days worked`)}${kpi('Revenue', peso(m.revenue), `avg ${peso(m.avgService)}`)}${kpi('Commission', peso(m.commission), 'earned this period')}${kpi('Rating', m.reviews ? m.rating.toFixed(1) + ' ★' : '—', `${m.reviews} review${m.reviews === 1 ? '' : 's'}`)}${kpi('Retention', m.retention + '%', `${m.clients} clients served`)}${kpi('Rebooking', d.clients.length ? m.rebooking + '%' : '—', 'clients with 2+ visits')}</div>
   ${e ? `<div class="card" style="margin-top:10px"><div class="sm mute">MY PAY · NOT YET PAID OUT</div><div class="num" style="font-size:28px">${peso(e.unpaid.net)}</div><div class="sm mute">${e.unpaid.days} day${e.unpaid.days === 1 ? '' : 's'} · commission ${peso(e.unpaid.commission)}${e.unpaid.bonus ? ' · bonus ' + peso(e.unpaid.bonus) : ''}${e.unpaid.advance ? ' · advance −' + peso(e.unpaid.advance) : ''}</div><div class="sm" style="margin-top:6px">Today: ${e.today.cuts} cut${e.today.cuts === 1 ? '' : 's'} · ${peso(e.today.commission)}</div></div>` : ''}
@@ -361,7 +361,7 @@ async function loadInsights() {
   await loadRules(); render();
 }
 function vInsights() {
-  const h = S.health, r = S.ret; if (!h || !r) return '<div class="empty">Loading…</div>';
+  const h = S.health, r = S.ret; if (!h || !r) return skelList();
   const chips = (list, cur, attr, fmt) => `<div class="chips">${list.map(n => `<button class="chip ${cur === n ? 'on' : ''}" ${attr}="${n}">${fmt(n)}</button>`).join('')}</div>`;
   return `<div class="sec-h" style="margin-top:4px"><h2>Branch health</h2><span class="mute sm">${h.from} to ${h.to}</span></div>${chips([7, 30, 90], S.insDays, 'data-idays', n => 'Last ' + n + ' days')}
   <div class="list">${h.branches.map(b => `<div class="card"><div class="row"><b style="font-size:17px">${esc(b.name)}</b><span class="sp"></span><span class="hs ${hsCls(b.score)}">${b.score ?? '—'}</span></div><div class="bar2" style="margin-top:8px"><i class="${hsCls(b.score)}" style="width:${b.score || 0}%"></i></div>
@@ -538,7 +538,7 @@ function openBlock() {
   };
 }
 function vOwner() {
-  const d = S.shopData; if (!d) return '<div class="empty">Loading…</div>';
+  const d = S.shopData; if (!d) return skelList();
   const t = d.totals;
   return `<div class="row" style="margin-bottom:12px;gap:10px"><a class="btn block" href="/pos" style="flex:1">${ic('scissors')} Open POS</a><a class="btn sec block" href="/backend" style="flex:1">Back office</a></div>
   <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${kpi('Sales today', peso(t.today), `${t.transactions} transactions`)}${kpi('Sales · 7 days', peso(t.week))}${kpi('Bookings today', t.bookings)}${kpi('Queue now', t.waiting + t.cutting, `${t.waiting} waiting · ${t.cutting} cutting`)}</div>
@@ -643,9 +643,13 @@ function pkgArt(k) {
     : `<g transform="translate(-4 0)">${scissors}${comb}</g>`;
   return `<svg class="sa" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${esc((PK[k] || {}).name || k)}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="pg${n}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${bg[0]}"/><stop offset="1" stop-color="${bg[1]}"/></linearGradient></defs><rect width="100" height="100" fill="url(#pg${n})"/>${body}</svg>`;
 }
+// premium touches: skeletons while loading, and real shop prices when a barber has not set their own
+const skelList = () => '<div class="skel"><div class="sk h1"></div><div class="sk h2"></div><div class="sk h3"></div></div>';
+const shopFrom = () => { const p = ((S.D && S.D.services) || []).map(x => +x.price).filter(x => x > 0); return p.length ? Math.min(...p) : 0; };
+const shopMenuRows = b => { const sv = ((S.D && S.D.services) || []).slice(0, 4); return sv.length ? sv.map(x => `<div class="card row">${x.photo ? `<img src="${esc(x.photo)}" alt="" style="width:48px;height:48px;border-radius:12px;object-fit:cover;flex:none">` : ''}<div class="sp"><div class="nm">${esc(x.name)}</div><div class="sm mute">${x.mins || 30} min · shop menu</div></div><div style="text-align:right"><b class="num" style="font-size:19px">${peso(x.price)}</b><div><button class="btn white sm" style="margin-top:4px" data-book="${b.id}">Book</button></div></div></div>`).join('') : '<div class="card empty sm">Prices are set by the shop. Book and pay at the counter.</div>'; };
 function offersBlock(b) {
   const o = b.offers || [];
-  return `<div class="sec-h" style="margin-top:14px"><h2>Services & prices</h2></div><div class="list">${o.length ? o.map(x => `<div class="card row"><div class="pa s">${pkgArt(x.pkg)}</div><div class="sp"><div class="nm">${esc(PK[x.pkg].name)}</div><div class="sm mute">${esc(PK[x.pkg].desc)}</div></div><div style="text-align:right"><b class="num" style="font-size:20px">${peso(x.price)}</b><div><button class="btn white sm" style="margin-top:4px" data-bookpkg="${x.pkg}">Book</button></div></div></div>`).join('') : '<div class="card empty sm">This barber has not listed services and prices yet. The shop menu in About applies.</div>'}</div>`;
+  return `<div class="sec-h" style="margin-top:14px"><h2>Services & prices</h2></div><div class="list">${o.length ? o.map(x => `<div class="card row"><div class="pa s">${pkgArt(x.pkg)}</div><div class="sp"><div class="nm">${esc(PK[x.pkg].name)}</div><div class="sm mute">${esc(PK[x.pkg].desc)}</div></div><div style="text-align:right"><b class="num" style="font-size:20px">${peso(x.price)}</b><div><button class="btn white sm" style="margin-top:4px" data-bookpkg="${x.pkg}">Book</button></div></div></div>`).join('') : shopMenuRows(b)}</div>`;
 }
 const offersEditor = sel => `<div class="sec-h"><h2>Services I offer</h2></div><div class="card"><div class="sm mute" style="margin-bottom:6px">Turn on what you cater to and set your price. Customers can find you by these. Your price is shown to customers; the shop still charges at the POS.</div>${PKGS.map(([k, name, desc]) => { const o = (sel.offers || []).find(x => x.pkg === k); return `<div class="row" style="padding:10px 0;border-top:1px solid var(--line);gap:10px;align-items:center"><label class="row sp" style="gap:10px;cursor:pointer;min-width:0"><input type="checkbox" data-opk="${k}" ${o ? 'checked' : ''} style="width:20px;height:20px;flex:none"><span class="pa s">${pkgArt(k)}</span><span style="min-width:0"><b>${esc(name)}</b><span class="sm mute" style="display:block">${esc(desc)}</span></span></label><span class="row" style="gap:4px;flex:none"><span class="mute">₱</span><input type="number" min="1" max="99999" inputmode="numeric" data-opp="${k}" value="${o ? o.price : ''}" placeholder="Price" style="width:88px" ${o ? '' : 'disabled'}></span></div>`; }).join('')}<button class="btn block" style="margin-top:12px" data-offsave>Save services</button></div>`;
 function recommend() {
@@ -733,7 +737,7 @@ function vMap() {
   return header('Shops near you', '/discover') + `<div id="map" aria-label="Map of Brotherhood barbershops"></div>
   <div class="row" style="margin:10px 0"><button class="btn sec sm" data-locate>${S.geoBusy ? 'Locating…' : S.geo ? '◎ Update my location' : '◎ Near me'}</button><span class="sp"></span><span class="mute sm">${list.length} shop${list.length === 1 ? '' : 's'} on the map</span></div>
   ${S.geoErr ? `<div class="err">${esc(S.geoErr)}</div>` : ''}
-  <div class="list">${!S.D ? '<div class="empty">Loading…</div>' : list.map(s => `<button class="bcard" data-shop="${s.id}">${s.photo ? `<img class="av" src="${esc(s.photo)}" alt="" loading="lazy" style="border-radius:12px">` : `<span class="av">${esc(initials(s.name))}</span>`}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${esc(s.address || 'Brotherhood Barbershop')} · ${t12(s.openTime)}–${t12(s.closeTime)}</div></div>${s.km != null ? `<b class="num">${kmText(s.km)}</b>` : ''}</button>`).join('') || '<div class="card empty">Shop locations are being added. Check back soon.</div>'}${missing > 0 && list.length ? `<div class="sm mute" style="text-align:center">${missing} more shop${missing === 1 ? ' is' : 's are'} not on the map yet.</div>` : ''}</div>`;
+  <div class="list">${!S.D ? skelList() : list.map(s => `<button class="bcard" data-shop="${s.id}">${s.photo ? `<img class="av" src="${esc(s.photo)}" alt="" loading="lazy" style="border-radius:12px">` : `<span class="av">${esc(initials(s.name))}</span>`}<div class="sp"><div class="nm">${esc(s.name)}</div><div class="sm mute">${esc(s.address || 'Brotherhood Barbershop')} · ${t12(s.openTime)}–${t12(s.closeTime)}</div></div>${s.km != null ? `<b class="num">${kmText(s.km)}</b>` : ''}</button>`).join('') || '<div class="card empty">Shop locations are being added. Check back soon.</div>'}${missing > 0 && list.length ? `<div class="sm mute" style="text-align:center">${missing} more shop${missing === 1 ? ' is' : 's are'} not on the map yet.</div>` : ''}</div>`;
 }
 async function mountMap() {
   const el = document.getElementById('map'); if (!el) return; const list = withPos();
@@ -761,7 +765,7 @@ function locate() {
 const NICON = { reminder: 'bell', due: 'scissors', waitlist: 'cal', reply: 'chat', booking: 'cal', rate: 'heart', like: 'heart', comment: 'chat', follow: 'team' };
 function vNotifs() {
   if (!S.token) { setTimeout(() => nav('/auth')); return ''; }
-  const n = S.notifs; if (!n) return header('Notifications', '/') + '<div class="empty">Loading…</div>';
+  const n = S.notifs; if (!n) return header('Notifications', '/') + skelList();
   return header('Notifications', '/') + `<div class="list">${n.items.map(x => `<button class="bcard" data-ngo="${esc(x.link || '#/')}" style="${x.readAt ? 'opacity:.7' : 'border-color:var(--blue)'}"><span class="av" style="width:40px;height:40px">${ic(NICON[x.kind] || 'bell')}</span><div class="sp"><div>${esc(x.text)}</div><div class="sm mute">${(a => a === 'just now' ? a : a + ' ago')(ago(x.createdAt))}</div></div></button>`).join('') || '<div class="card empty">No notifications yet. Booking updates and community activity show up here.</div>'}</div>`;
 }
 async function loadNotifs() {
@@ -801,7 +805,7 @@ function vCommunity() {
     body = `<div class="chips"><button class="chip ${S.feedScope === 'all' ? 'on' : ''}" data-cscope="all">Latest</button><button class="chip ${S.feedScope === 'following' ? 'on' : ''}" data-cscope="following">Following</button></div>` + chips(styleNames, S.cstyle, 'data-cstyle', 'All styles');
   } else if (tab === 'cuts') {
     const c = S.cuts; body = chips(c ? c.styles : [], S.cstyle, 'data-cstyle', 'All styles');
-    body += !c ? '<div class="empty">Loading…</div>' : c.items.length ? `<div class="pgrid">${c.items.map((i, k) => `<button class="pcard" data-ctile="${k}"><span class="ptag">${i.kind === 'cut' ? 'CUT' : 'POST'}</span><img src="${esc(i.image)}" alt="${esc(i.title)}" loading="lazy"><div class="pt">${esc(i.title)}</div><div class="ps">${esc(i.style || i.barberName || i.author || '')}</div></button>`).join('')}</div>` : '<div class="card empty">No cuts here yet. Be the first to post one.</div>';
+    body += !c ? skelList() : c.items.length ? `<div class="pgrid">${c.items.map((i, k) => `<button class="pcard" data-ctile="${k}"><span class="ptag">${i.kind === 'cut' ? 'CUT' : 'POST'}</span><img src="${esc(i.image)}" alt="${esc(i.title)}" loading="lazy"><div class="pt">${esc(i.title)}</div><div class="ps">${esc(i.style || i.barberName || i.author || '')}</div></button>`).join('')}</div>` : '<div class="card empty">No cuts here yet. Be the first to post one.</div>';
   } else if (tab === 'me') {
     if (!u) body = loginCard('Log in to see your profile and posts.');
     else { const st = (f && f.stats) || { posts: 0, likes: 0, following: S.favs.length };
@@ -810,7 +814,7 @@ function vCommunity() {
   }
   let list = '';
   if (tab === 'feed' || tab === 'saved' || tab === 'me') {
-    if (!f) list = '<div class="empty">Loading…</div>';
+    if (!f) list = skelList();
     else if (f.needLogin) list = tab === 'me' ? '' : loginCard(tab === 'saved' ? 'Log in to see the posts you saved.' : 'Log in to see posts from the members and barbers you follow.');
     else list = f.posts.length ? f.posts.map(postCard).join('') : `<div class="card empty">${tab === 'saved' ? `<div style="font-size:30px">${ic('bookmark')}</div><b>No saved items yet</b><div class="sm">Tap the bookmark on any post to save it here.</div>` : tab === 'me' ? 'You have not posted yet. Share your first cut.' : S.feedScope === 'following' ? 'Follow members or barbers to see their posts here.' : S.cstyle || S.cq ? 'No posts match. Try another style or search.' : 'No posts yet. Be the first!'}</div>`;
   }
@@ -878,7 +882,7 @@ function openMedia(i) {
 }
 const REASONS = ['Spam', 'Harassment or hate', 'Nudity or sexual content', 'Violence', 'Other'];
 function vMod() {
-  const r = S.reports; if (!r) return '<div class="empty">Loading…</div>';
+  const r = S.reports; if (!r) return skelList();
   return `<div class="sec-h"><h2>Reported content</h2><span class="mute sm">${r.length}</span></div><div class="list">${r.map(x => `<div class="card"><div class="row"><span class="tag ${x.hidden ? 'bad' : ''}">${x.kind}${x.hidden ? ' · hidden' : ''}</span><span class="tag">${x.n} report${x.n > 1 ? 's' : ''}</span></div>
     ${x.author ? `<div class="sm mute" style="margin-top:6px">by ${esc(x.author)}</div>` : ''}<p style="margin:6px 0;white-space:pre-wrap;word-break:break-word">${esc(x.text) || '<span class="mute">(no text)</span>'}</p>${x.image ? `<img src="${esc(x.image)}" alt="" style="width:100%;max-height:200px;object-fit:cover;border-radius:10px">` : ''}
     <div class="sm mute" style="margin:6px 0">${esc(x.reasons || '')}</div>${x.kind === 'user' ? '<div class="sm mute">Account reports are reviewed manually.</div>' : `<div class="row">${x.hidden ? `<button class="btn sec sm" data-mod="restore" data-mkind="${x.kind}" data-mid="${x.targetId}">Restore</button>` : ''}<button class="btn danger sm" data-mod="remove" data-mkind="${x.kind}" data-mid="${x.targetId}">Remove</button></div>`}</div>`).join('') || '<div class="card empty">Nothing to review.</div>'}</div>`;
