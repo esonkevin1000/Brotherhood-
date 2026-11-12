@@ -12,6 +12,7 @@ import { mountBH } from './bh-api.js';
 import { migrate } from './src/db/migrate.js';
 import { createMailer } from './src/lib/mail.js';
 import { hashPw, checkPw, sha, createAuth } from './src/lib/auth.js';
+import { createLimiter, allOf, intSetting } from './src/lib/throttle.js';
 import { HttpError, bad, MIME, send, readBody, noteGzip, staticServer } from './src/lib/http.js';
 
 process.env.TZ ||= 'Asia/Manila';
@@ -268,6 +269,16 @@ const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings',
 const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: (Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber).filter(m => m !== 'queue') }; } catch { return { ...DEFAULT_PERMS }; } };
 const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
 const needAny = (me, mods) => { if (isAdmin(me)) return; const have = modulesFor(me.role); if (![].concat(mods).some(m => have.includes(m))) bad(403, 'Your role is not allowed to open this section'); };
+// Guessing protection for staff logins. The keys cannot be faked by the caller: a shop (for PINs, because a PIN alone says who you are)
+// and a shop + username (for passwords). The address-based delay below stays as a small extra brake only.
+// Two limits each: a short one that stops a burst, and a daily one that stops someone who stays just under the short limit all day.
+const pinLimiter = allOf(
+  createLimiter({ max: intSetting(process.env.PIN_FAIL_MAX, 10, 3), windowMs: 10 * 60e3, lockMs: 10 * 60e3, maxLockMs: 2 * 3600e3 }),
+  createLimiter({ max: intSetting(process.env.PIN_FAIL_DAY, 40, 5), windowMs: 24 * 3600e3, lockMs: 2 * 3600e3, maxLockMs: 24 * 3600e3 }));
+const userLimiter = allOf(
+  createLimiter({ max: intSetting(process.env.LOGIN_FAIL_MAX, 10, 3), windowMs: 15 * 60e3, lockMs: 15 * 60e3, maxLockMs: 3600e3 }),
+  createLimiter({ max: intSetting(process.env.LOGIN_FAIL_DAY, 30, 5), windowMs: 24 * 3600e3, lockMs: 2 * 3600e3, maxLockMs: 24 * 3600e3 }));
+const waitText = ms => { const m = Math.ceil(ms / 60e3); return m >= 60 ? 'about ' + Math.ceil(m / 60) + ' hour' + (m > 60 ? 's' : '') : m + ' minute' + (m === 1 ? '' : 's'); };
 const fails = new Map();
 const failDelay = ip => { const f = fails.get(ip); return f && Date.now() - f.t < 600e3 ? Math.min(f.n * 500, 3000) : 0; };
 const noteFail = ip => { const f = fails.get(ip); fails.set(ip, { n: (f && Date.now() - f.t < 600e3 ? f.n : 0) + 1, t: Date.now() }); };
@@ -1181,6 +1192,11 @@ async function handleIn(req, res) {
     const uname = String(b.username || '').trim().toLowerCase(), pw = String(b.password || '');
     let tok = null, who = '';
     const pin = String(b.pin || '').trim();
+    if (uname.length > 64) return send(res, 401, { error: 'Wrong username or password' });   // no real username is this long: refused without being counted or remembered
+    // from here to the answer nothing waits, so many requests sent at once are still counted one by one
+    const shopKey = curOrg()?.id || 'main', lockKey = pin ? shopKey : shopKey + ':' + (uname || 'owner'), limiter = pin ? pinLimiter : userLimiter;
+    { const w = limiter.lockedFor(lockKey);
+      if (w) return send(res, 429, { error: pin ? `Too many wrong PINs. PIN login is paused for ${waitText(w)}. Please wait, or log in with a username and password.` : `Too many wrong tries. Please wait ${waitText(w)} and try again.` }); }
     if (pin) {
       const u = /^\d{6}$/.test(pin) ? one('select * from users where pinKey=? and active=1', pinKeyOf(pin)) : null;
       if (u) { tok = makeToken(u.id, u.pinKey.slice(-8), curOrg()?.id); who = u.name; }
@@ -1190,6 +1206,11 @@ async function handleIn(req, res) {
       const u = one('select * from users where username=? and active=1', uname);
       if (u?.passHash && checkPw(pw, u.passHash)) { tok = makeToken(u.id, u.passHash.slice(-8), curOrg()?.id); who = u.name; }
     }
+    if (!tok) {
+      const locked = limiter.fail(lockKey);
+      if (locked) log({ name: pin ? 'PIN login' : uname || 'owner' }, pin ? 'pin-login-paused' : 'login-locked', 'auth', '', `too many wrong tries, ${waitText(locked)} (last from ${ip})`);
+    }
+    else if (!pin) userLimiter.clear(lockKey);
     if (!tok) { noteFail(ip); log({ name: uname || 'owner' }, 'login-failed', 'auth', '', ip); return send(res, 401, { error: pin ? 'Wrong PIN' : 'Wrong username or password' }); }
     fails.delete(ip); log({ name: who }, 'login', 'auth', '', ip);
     return send(res, 200, { token: tok });
