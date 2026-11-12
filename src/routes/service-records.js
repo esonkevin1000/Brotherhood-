@@ -1,0 +1,91 @@
+// Day board for the Brotherhood app (takes over from the POS): walk-ins, start, finish, cancel, ID photos.
+// Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
+// Created once by server.js; the handler gets the request and the logged-in person on each call.
+export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
+  return async function handleServiceRecords({ req, res, p, method, q, me }) {
+      if (!['owner', 'admin', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
+      const myStaffId = me.role === 'barber' ? (get('users', me.id)?.staffId || '') : '';
+      const PAY_METHODS = ['Cash', 'GCash', 'Maya', 'Card', 'Bank transfer', 'Other'];
+      const svcView = row => {
+        const x = parseOrder(row), c = x.customerId ? get('customers', x.customerId) : null;
+        return { id: x.id, no: x.no, status: x.status === 'paid' ? 'done' : x.status === 'void' ? 'cancelled' : x.status, customerName: x.customerName, phone: c?.phone || '',
+          barberId: x.barberId || '', barberName: x.barberId ? get('staff', x.barberId)?.name || '' : '', items: x.items.map(i => ({ itemId: i.itemId, name: i.name, type: i.type, price: i.price, qty: i.qty, needId: !!i.needId })),
+          subtotal: x.subtotal, discountId: x.discountId || '', discountName: x.discountName || '', discountAmt: x.discountAmt || 0, total: x.total, method: x.tenders[0]?.method || '', invoiceNo: x.invoiceNo || '',
+          hasId: !!x.idPhoto, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '' };
+      };
+      const ticket = id => { const o = get('orders', String(id)); if (!o) bad(404, 'Visit not found'); if (isBranchUser(me) && o.branchId !== me.branchId) bad(403, 'Not your shop'); return parseOrder(o); };
+      if (p === '/api/svc/today' && method === 'GET') {
+        const bid = isBranchUser(me) ? me.branchId : String(q.branch || one('select id from branches order by rowid')?.id || ''); if (!get('branches', bid)) bad(400, 'Pick a branch');
+        const t = todayStr(), mine = x => x.barberId === myStaffId;
+        let tickets = all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair','paid') order by no", bid, t).map(svcView);
+        if (me.role === 'barber') tickets = tickets.filter(x => mine(x) || (x.status === 'waiting' && !x.barberId));   // a barber sees his own customers and the unassigned line
+        const done = tickets.filter(x => x.status === 'done' && (me.role !== 'barber' || mine(x)));
+        const staff = all('select id,name,photo,chairId from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, ...staffState(s.id, t), busy: !!one("select 1 x from orders where barberId=? and status='in_chair'", s.id) }));
+        const bookings = all("select id,customerName,phone,time,staffId,itemIds from bookings where branchId=? and date=? and status='booked' order by time", bid, t)
+          .filter(b => me.role !== 'barber' || !b.staffId || b.staffId === myStaffId)
+          .map(b => ({ id: b.id, customerName: b.customerName, phone: b.phone, time: b.time, staffId: b.staffId || '', staffName: b.staffId ? get('staff', b.staffId)?.name || '' : 'Any barber', items: jp(b.itemIds).map(i => get('items', i)?.name).filter(Boolean) }));
+        return send(res, 200, {
+          branch: { id: bid, name: get('branches', bid)?.name || '' }, branches: isBranchUser(me) ? [] : all('select id,name from branches order by rowid'), date: t, role: me.role, myStaffId, locked: !!dayLocked(bid, t), attPhoto: getSetting('attPhoto') !== '0', modules: isAdmin(me) ? MODULES : modulesFor(me.role),
+          menu: all('select id,name,type,price,mins,needId from items where active=1 order by type desc, price').map(i => ({ ...i, needId: !!i.needId })),
+          discounts: all('select id,name,kind,value from discounts where active=1 order by name'), methods: PAY_METHODS, staff, tickets, bookings,
+          totals: { waiting: tickets.filter(x => x.status === 'waiting').length, inChair: tickets.filter(x => x.status === 'in_chair').length, done: done.length, earned: r2(sum(done, x => x.total)) }
+        });
+      }
+      if (p === '/api/svc/idphoto' && method === 'POST') {
+        const b = await readBody(req, 1_800_000), branchId = branchScope(me, b.branchId);
+        const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(b.data || '')); if (!m) bad(400, 'The ID photo must be a JPEG, PNG or WebP image');
+        const buf = Buffer.from(m[2], 'base64'); if (buf.length > 1_000_000) bad(413, 'The photo is too large. Please try again.');
+        const type = ID_TYPES.includes(b.idType) ? b.idType : bad(400, 'Choose the ID type: Senior, PWD or Student');
+        const id = uid() + uid(); run('insert into id_photos(id,orderId,branchId,idType,mime,data,byId,createdAt) values(?,?,?,?,?,?,?,?)', id, '', branchId, type, m[1], buf, me.id, nowISO());
+        log(me, 'id-photo', 'id_photos', id, type); return send(res, 201, { id, idType: type });
+      }
+      if (p === '/api/svc/walkin' && method === 'POST') {
+        const b = await readBody(req), bid = branchScope(me, b.branchId), t = todayStr();
+        if (dayLocked(bid, t)) bad(409, 'Today is already closed for this shop.');
+        if (me.role === 'barber' && !myStaffId) bad(409, 'Your login is not linked to your barber profile yet. Ask the owner.');
+        const name = String(b.name || '').trim().slice(0, 100); if (!name) bad(400, "Enter the customer's name");
+        const items = priceItems(b.items); if (!items.length) bad(400, 'Choose at least one service');
+        const need = idNeeded(items); if (need.length && !b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is needed for ${need.join(', ')}.`);
+        if (need.length) { const ph = get('id_photos', String(b.idPhotoId)); if (!ph || ph.orderId || ph.branchId !== bid) bad(400, 'ID photo not found. Please take the photo again.'); }
+        const cust = resolveCustomer({ customer: { name, phone: String(b.phone || '').trim().slice(0, 30) } }, 'pos', bid);
+        const o = createTicket(me, bid, cust.id, cust.name || name, items, me.role === 'barber' ? myStaffId : String(b.barberId || ''));
+        run("update orders set via='app' where id=?", o.id);
+        if (need.length) attachIdPhoto(o.id, bid, b.idPhotoId);
+        log(me, 'walk-in', 'orders', o.id, `#${o.no} ${name}`);
+        return send(res, 201, svcView(get('orders', o.id)));
+      }
+      const sa = p.match(/^\/api\/svc\/(\w+)\/(start|finish|cancel)$/);
+      if (sa && method === 'POST') {
+        const o = ticket(sa[1]), act = sa[2], b = await readBody(req);
+        if (!['waiting', 'in_chair'].includes(o.status)) bad(409, o.status === 'paid' ? 'This visit is already done.' : 'This visit was cancelled.');
+        if (me.role === 'barber' && o.barberId && o.barberId !== myStaffId) bad(403, 'This customer is with another barber.');
+        if (act === 'start') {
+          const bar = me.role === 'barber' ? myStaffId : String(b.barberId || o.barberId || ''); if (!bar) bad(400, 'Choose the barber');
+          const a = checkAssign(o, { barberId: bar }, o.id);
+          run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), o.id);
+          log(me, 'visit-start', 'orders', o.id, `#${o.no} ${a.barber.name}`); return send(res, 200, svcView(get('orders', o.id)));
+        }
+        if (act === 'cancel') {
+          run("update orders set status='void', voidReason=? where id=?", String(b.reason || 'Cancelled').trim().slice(0, 200) || 'Cancelled', o.id);
+          if (o.status === 'in_chair') promoteNext(o.branchId, o.chairId);
+          log(me, 'visit-cancelled', 'orders', o.id, `#${o.no} ${b.reason || ''}`); return send(res, 200, { ok: true });
+        }
+        // finish: the service is done and the customer paid the shop. This only records it (who, what, how much, how paid).
+        if (dayLocked(o.branchId, todayStr())) bad(409, 'Today is already closed for this shop.');
+        let items = o.items;
+        if (Array.isArray(b.items)) { items = priceBooked(bookedSnap(o.id), b.items); if (!items.length) bad(400, 'Choose at least one service'); }
+        if (idNeeded(items).length && !o.idPhoto) { if (!b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is needed for ${idNeeded(items).join(', ')}.`); attachIdPhoto(o.id, o.branchId, b.idPhotoId); }
+        let barberId = o.barberId || (me.role === 'barber' ? myStaffId : String(b.barberId || ''));
+        if (barberId) { const s = get('staff', barberId); if (!s || s.branchId !== o.branchId) bad(409, 'That barber is not in this shop'); }
+        if (!barberId && items.some(i => i.type === 'service')) bad(409, 'Choose the barber who did the cut');
+        const did = 'discountId' in b ? String(b.discountId || '') : (o.discountId || ''), disc = did ? get('discounts', did) : null; if (did && (!disc || !disc.active)) bad(400, 'Unknown discount');
+        const tt = totals(items, disc), mth = PAY_METHODS.includes(b.method) ? b.method : bad(400, 'Choose how the customer paid'), inv = String(b.invoiceNo || '').trim().slice(0, 40);
+        run("update orders set status='paid', items=?, barberId=?, discountId=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId='', paidAt=?, date=?, invoiceNo=?, via='app' where id=?",
+          JSON.stringify(items), barberId, did, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify([{ method: mth, amount: tt.total }]), me.id, nowISO(), todayStr(), inv, o.id);
+        promoteNext(o.branchId, o.chairId);
+        log(me, 'visit-done', 'orders', o.id, `#${o.no} ₱${tt.total} ${mth}`);
+        return send(res, 200, svcView(get('orders', o.id)));
+      }
+      bad(404, 'Not found');
+  };
+}
