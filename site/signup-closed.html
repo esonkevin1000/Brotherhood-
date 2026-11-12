@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Opening soon · Brotherhood</title>
+<meta name="theme-color" content="#0a0a0b">
+<link rel="icon" type="image/png" href="/bh-icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0a0b;--card:#121215;--line:#26262c;--fg:#f2f2f4;--mute:#9b9ba5;--blue:#1f7bff;--blue2:#4d97ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+a{color:var(--blue2)}
+.top{max-width:720px;width:100%;margin:0 auto;padding:18px 16px}
+.logo{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--fg);font:26px/1 'Bebas Neue',Inter,sans-serif;letter-spacing:1.5px}
+.logo img{width:34px;height:34px}.logo b{color:var(--blue);font-weight:400}
+main{max-width:720px;width:100%;margin:0 auto;padding:24px 16px 64px;flex:1}
+.mono{font:600 12px/1 'JetBrains Mono',monospace;letter-spacing:2px;text-transform:uppercase;color:var(--blue2)}
+h1{font:clamp(48px,11vw,84px)/.9 'Bebas Neue',Inter,sans-serif;letter-spacing:.5px;margin:14px 0 12px}
+h1 em{font-style:normal;color:var(--blue)}
+p{color:var(--mute);max-width:520px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;margin:22px 0;max-width:520px}
+.card b{color:var(--fg)}
+.cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+.btn{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:14px 22px;font-weight:700;font-size:15px;text-decoration:none;background:var(--blue);color:#fff}
+.btn:hover{background:#3a8bff}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}.btn.ghost:hover{border-color:#44444e}
+</style>
+</head>
+<body>
+<header class="top"><a class="logo" href="/"><img src="/bh-mark.png" alt=""><span>Brother<b>hood</b></span></a></header>
+<main>
+  <div class="mono">For barbershops</div>
+  <h1>Opening <em>soon</em></h1>
+  <p>Sign-up for new shops is not open yet. We are getting Brotherhood ready with our own branches first.</p>
+  <div class="card"><b>Want to be told when it opens?</b><br><span id="contact">Message any Brotherhood branch and we will get back to you.</span></div>
+  <p>Already have a Brotherhood shop account? Your login works as usual.</p>
+  <div class="cta"><a class="btn" href="/member#/discover">Find a barber</a><a class="btn ghost" href="/backend">Shop login</a></div>
+</main>
+<script>
+fetch('/api/public/plans').then(r => r.json()).then(j => {
+  if (!j.contact) return;
+  const el = document.getElementById('contact'), a = document.createElement('a');
+  a.href = 'mailto:' + j.contact + '?subject=' + encodeURIComponent('Tell me when Brotherhood opens for shops'); a.textContent = j.contact;
+  el.textContent = 'Email us at '; el.append(a, ' and we will tell you.');
+}).catch(() => { });
+</script>
+</body>
+</html>

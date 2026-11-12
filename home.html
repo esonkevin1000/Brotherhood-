@@ -497,6 +497,7 @@ footer{background:#000;padding:56px 0 40px;border-top:1px solid #131316}
   // live numbers, and the contact email (demo and support links become email links when it is set)
   fetch('/api/bh/config').then(r=>r.json()).then(c=>{
     if(c.stats){for(const [k,id] of [['shops','n-shops'],['barbers','n-barbers']])if(c.stats[k]){$('#'+id).dataset.count=c.stats[k];$('#'+id).textContent=c.stats[k]}}
+    if(!c.signupOpen)$$('a[href="/signup"]').forEach(a=>{a.textContent='Get a demo';a.classList.add('demo')});   // sign-up for new shops is closed for now: these become contact links (or open the "opening soon" page)
     const lead=$('#lead');
     if(c.contact){
       const mail=sub=>'mailto:'+c.contact+'?subject='+encodeURIComponent(sub);

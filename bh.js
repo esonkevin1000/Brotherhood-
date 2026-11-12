@@ -24,8 +24,12 @@ const store = { get: k => { try { return localStorage.getItem(k); } catch { retu
 
 const S = { token: store.get('bh_token'), user: null, favs: [], D: null, q: '', branch: '', specialty: '', avail: false, sort: 'best', tab: 'barbers', bk: null, mine: null, auth: { mode: 'login', err: '', busy: false }, err: '', pro: null, proToken: store.get('bh_pro'), proTab: 'dash', rules: null, nsw: null, blocks: null, shop: null, loyal: null, health: null, ret: null, insDays: 30, lapDays: 45, pkg: '', style: '', verified: false, minRating: 0, R: null, fresh: null, ctab: 'feed', cstyle: '', cq: '', spot: null, cuts: null, proPin: false, unread: 0, notifs: null, feed: null, feedScope: 'all', comp: { text: '', img: null, busy: false, err: '' }, open: {}, reports: null, dash: null, dashRange: 'week', toastMsg: '' };
 
+// sent with a booking so a double tap or a retry never makes a second booking: the same choices in this visit give the same key
+const newVisit = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now());
+let BK_VISIT = newVisit();   // renewed after every successful booking
+const bkKey = k => [BK_VISIT, k.branchId, k.staffId, k.date, k.time, (k.items || []).join('.'), k.repEvery || 0].join('|').slice(0, 180);
 async function api(path, opt = {}, token = S.token) {
-  const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
+  const r = await fetch('/api/bh' + path, { method: opt.method || 'GET', headers: { ...(opt.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opt.headers || {}) }, body: opt.body ? JSON.stringify(opt.body) : undefined });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(j.error || 'Something went wrong'); e.code = r.status; throw e; }
   return j;
@@ -303,8 +307,8 @@ function vBook() {
 }
 async function confirmBooking() {
   const k = S.bk; k.busy = true; k.err = ''; render();
-  try { const j = await api('/book', { method: 'POST', body: { branchId: k.branchId, staffId: k.staffId, itemIds: k.items, date: k.date, time: k.time, notes: (k.pkg ? `Package: ${k.pkg.name} (${peso(k.pkg.price)}). ` : '') + k.notes, promo: k.promo ? k.promo.code : undefined, repeatEvery: k.repEvery || undefined, repeatCount: k.repEvery ? (k.repCount || 4) : undefined } }); k.done = j.booking; k.series = j.series || []; S.mine = null; S.styleNote = ''; }
-  catch (e) { k.err = e.message; if (/no longer available/i.test(e.message)) loadSlots(); }
+  try { const j = await api('/book', { method: 'POST', headers: { 'Idempotency-Key': bkKey(k) }, body: { branchId: k.branchId, staffId: k.staffId, itemIds: k.items, date: k.date, time: k.time, notes: (k.pkg ? `Package: ${k.pkg.name} (${peso(k.pkg.price)}). ` : '') + k.notes, promo: k.promo ? k.promo.code : undefined, repeatEvery: k.repEvery || undefined, repeatCount: k.repEvery ? (k.repCount || 4) : undefined } }); k.done = j.booking; k.series = j.series || []; BK_VISIT = newVisit(); S.mine = null; S.styleNote = ''; }
+  catch (e) { k.err = e.message; if (/already used/i.test(e.message)) BK_VISIT = newVisit(); if (/no longer available/i.test(e.message)) loadSlots(); }
   k.busy = false; render();
 }
 

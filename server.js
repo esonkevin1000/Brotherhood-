@@ -12,6 +12,7 @@ import net from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { mountBH } from './bh-api.js';
+import { migrate } from './src/db/migrate.js';
 
 process.env.TZ ||= 'Asia/Manila';
 const PORT = +process.env.PORT || 3000;
@@ -119,6 +120,7 @@ for (const [c, t] of [['email', 'text'], ['phone', 'text'], ['ownerName', 'text'
   if (!mainDb.prepare('pragma table_info(orgs)').all().some(x => x.name === c)) mainDb.exec(`alter table orgs add column ${c} ${t}`);
 mainDb.exec('create table if not exists org_payments(id text primary key, orgId text, amount real, months integer, method text, ref text, invoiceNo text, note text, paidAt text, createdBy text)');
 const ORG_DBS = new Map(); let schemaReady = false;
+const BAD_ORGS = new Set();   // partner databases that failed to open or migrate: left out of cross-shop lists until the next restart, so one broken shop never breaks the others
 const orgRow = id => mainDb.prepare('select * from orgs where id=?').get(String(id || ''));
 const orgList = () => mainDb.prepare('select * from orgs order by createdAt').all();
 // copy every table, column and index of the main database into a partner database (safe to repeat; only adds what is missing)
@@ -135,13 +137,15 @@ function syncSchema(d) {
 function orgDb(id) {
   if (!/^\w+$/.test(id)) throw new Error('bad org id');
   let d = ORG_DBS.get(id); if (d) return d;
-  d = new DatabaseSync(path.join(path.dirname(DB_FILE), `org-${id}.db`)); syncSchema(d);
-  if (schemaReady) ORG_DBS.set(id, d);   // before startup finishes the main schema is not complete yet, so sync again later
+  if (BAD_ORGS.has(id)) throw new HttpError(503, 'This shop is temporarily unavailable. Please contact Brotherhood.');
+  try { d = new DatabaseSync(path.join(path.dirname(DB_FILE), `org-${id}.db`)); syncSchema(d); if (schemaReady) migrate(d); }
+  catch (e) { try { d && d.close(); } catch { } if (schemaReady) { BAD_ORGS.add(id); console.error(`shop database org-${id} could not be prepared:`, e.message); throw new HttpError(503, 'This shop is temporarily unavailable. Please contact Brotherhood.'); } throw e; }
+  if (schemaReady) ORG_DBS.set(id, d);   // before startup finishes the main schema is not complete yet, so sync (and migrate) again later
   return d;
 }
 const inOrg = (org, fn) => als.run({ db: orgDb(org.id), org }, fn);
 const inMain = fn => als.run({ db: mainDb, org: null }, fn);
-const activeOrgs = () => orgList().filter(o => o.active);
+const activeOrgs = () => orgList().filter(o => o.active && !BAD_ORGS.has(o.id));
 // which database holds this record: null = Brotherhood, a shop row = that partner, undefined = nowhere (or a paused partner)
 const ownerOf = (kind, id) => { id = String(id || ''); if (!id) return undefined; if (inMain(() => get(kind, id))) return null; for (const o of activeOrgs()) if (inOrg(o, () => get(kind, id))) return o; return undefined; };
 const shopName = () => curOrg()?.name || SHOP;
@@ -232,7 +236,7 @@ function dailyBackup() {
     backup(path.join(BK_DIR, `barber-${todayStr()}.db`));
     const files = fs.readdirSync(BK_DIR).filter(f => /^barber-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort();
     for (const f of files.slice(0, -14)) fs.rmSync(path.join(BK_DIR, f));
-    for (const o of orgList()) {
+    for (const o of orgList().filter(x => !BAD_ORGS.has(x.id))) {
       inOrg(o, () => backup(path.join(BK_DIR, `org-${o.id}-${todayStr()}.db`)));
       const of = fs.readdirSync(BK_DIR).filter(f => new RegExp(`^org-${o.id}-\\d{4}-\\d{2}-\\d{2}\\.db$`).test(f)).sort();
       for (const f of of.slice(0, -14)) fs.rmSync(path.join(BK_DIR, f));
@@ -444,6 +448,8 @@ function orgStatus(o) {
 }
 const orgInfo = () => { const o = curOrg(); if (!o) return null; const f = orgRow(o.id) || o; return { name: f.name, code: f.code, kind: f.kind || '', email: f.email || '', status: orgStatus(f), plans: plansNow(), payInfo: payInfo(), contact: contactEmail() }; };
 const signupHits = new Map();
+// Public sign-up for new shops is closed until the legal review is done (decision D-1). SIGNUPS_OPEN=1 opens it again; the code stays.
+const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === '1';
 const STARTER = [['Haircut', 150, 30], ['Haircut and shave', 250, 45], ['Beard trim', 100, 20]];   // a new shop starts with these; they change the names and prices in a minute
 const KIND_LABEL = { owner: 'Shop owner with barbers', renter: 'Chair renter', suite: 'Own suite or studio', student: 'Student barber' };
 
@@ -766,7 +772,30 @@ function noShowGate(phone, email) {
   const n = all("select phone, customerId from bookings where status='noshow' and date>=?", since).filter(x => (c && x.customerId === c.id) || (pk.length >= 10 && normPhone(x.phone) === pk)).length;
   if (n >= max) bad(403, 'Online booking is paused for this number because of missed appointments. Please call the shop to book.');
 }
-function createBooking(b, source) {
+// one atomic step: everything inside either happens completely or not at all
+function tx(fn) { db.exec('begin immediate'); try { const r = fn(); db.exec('commit'); return r; } catch (e) { try { db.exec('rollback'); } catch { } throw e; } }
+// a booking's history: one row per status change, never edited
+const bookingEvent = (bookingId, from, to, actor, reason = '') => run('insert into booking_events(id,bookingId,at,actor,fromStatus,toStatus,reason) values(?,?,?,?,?,?,?)', uid(), bookingId, nowISO(), String(actor || '').slice(0, 100), from || '', to, String(reason || '').slice(0, 300));
+// the key a phone or browser sends with a booking so that a repeated tap or a retry never makes a second booking
+const idemKeyOf = v => { const k = String(v || '').trim(); return k.length >= 16 && k.length <= 200 ? k : ''; };
+// what was agreed at booking time. Later price changes do not touch a booking that is already made.
+function bookingSnapshot(itemIds, branchId, staffId, mins) {
+  const its = itemIds.map(i => get('items', i)).filter(Boolean);
+  return { items: its.map(i => ({ id: i.id, name: i.name, price: i.price, mins: i.mins || 30 })), total: r2(sum(its, i => i.price)), mins, branchName: get('branches', branchId)?.name || '', staffName: get('staff', staffId)?.name || '', takenAt: nowISO() };
+}
+// Prices the lines of a visit. A line that is in the booking's snapshot keeps the booked price (and still works when that service was switched off later); any other line gets today's price.
+function priceBooked(snap, lines) {
+  const out = [];
+  for (const l of Array.isArray(lines) ? lines : []) {
+    const s = snap ? snap.items.find(x => x.id === l.itemId) : null, it = s ? get('items', s.id) : null;
+    if (s && (!it || !it.active)) { out.push({ itemId: s.id, name: s.name, type: 'service', price: s.price, qty: 1 }); continue; }
+    const [p] = priceItems([l]); if (s) p.price = s.price; out.push(p);
+  }
+  return out;
+}
+const bookedSnap = orderId => { const bk = orderId ? one('select snapshot from bookings where orderId=?', orderId) : null; return bk ? snapOf(bk) : null; };
+const snapOf = b => { try { const s = b.snapshot ? JSON.parse(b.snapshot) : null; return s && Array.isArray(s.items) && s.items.length ? s : null; } catch { return null; } };
+function createBooking(b, source, actor) {
   const branchId = String(b.branchId || ''); if (!get('branches', branchId)) bad(400, 'Pick a branch');
   const date = String(b.date || ''), time = String(b.time || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) bad(400, 'Invalid date or time');
@@ -777,6 +806,12 @@ function createBooking(b, source) {
   const name = String(b.name || '').trim().slice(0, 100), phone = String(b.phone || '').trim().slice(0, 30);
   if (!name) bad(400, 'Name required');
   if (phone.replace(/\D/g, '').length < 10) bad(400, 'Enter a valid mobile number');
+  const idem = idemKeyOf(b.idemKey);
+  return tx(() => {
+  if (idem) {   // the same request again (double tap, retry after a lost connection): give back the booking that was already made
+    const ex = one('select * from bookings where idemKey=?', idem);
+    if (ex) { if (ex.status !== 'booked' || normPhone(ex.phone) !== normPhone(phone) || ex.branchId !== branchId || ex.date !== date || ex.time !== time) bad(409, 'This booking request was already used. Please start again.'); return { ...bookingView(ex), duplicate: true }; }
+  }
   if (source === 'online') noShowGate(phone, b.email);
   const mins = bookingMins(itemIds), start = toMin(time);
   let sid = String(b.staffId || 'any');
@@ -788,13 +823,17 @@ function createBooking(b, source) {
   }
   const cust = upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos', branchId);
   const id = uid();
-  run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '');
+  run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId,snapshot,idemKey) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '', JSON.stringify(bookingSnapshot(itemIds, branchId, sid, mins)), idem || null);
+  bookingEvent(id, '', 'booked', actor || (source === 'online' ? 'Customer (online)' : 'Staff'));
   return bookingView(one('select * from bookings where id=?', id));
+  });
 }
 function bookingView(b) {
-  const ids = jp(b.itemIds), its = ids.map(i => get('items', i)).filter(Boolean), s = b.staffId ? get('staff', b.staffId) : null;
-  return { ...b, itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
+  // services and prices come from the snapshot taken at booking time; bookings older than the snapshot fall back to today's price list
+  const { snapshot, idemKey, ...row } = b, snap = snapOf(b);
+  const ids = jp(b.itemIds), its = snap ? snap.items : ids.map(i => get('items', i)).filter(Boolean), s = b.staffId ? get('staff', b.staffId) : null;
+  return { ...row, itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: snap ? r2(snap.total) : r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
 }
 // a walk-in style ticket (used when a booked customer arrives)
 function createTicket(me, branchId, customerId, name, items, barberId) {
@@ -1124,13 +1163,14 @@ async function handleIn(req, res) {
     if (LANDING_HOST && hostNow === LANDING_HOST) return serveStatic(req, res, 'landing.html');
   }
   if (method === 'GET' && p === '/' && /^\/[\w\-\/]*$/.test(process.env.ROOT_REDIRECT || '')) { res.writeHead(302, { Location: process.env.ROOT_REDIRECT }); return res.end(); }   // e.g. ROOT_REDIRECT=/brotherhood so a partner shop's home page is the app, not Brotherhood's promo page
+  if (method === 'GET' && p === '/signup' && !SIGNUPS_OPEN) return serveStatic(req, res, 'site/signup-closed.html');
   if (method === 'GET' && STATIC[p]) return serveStatic(req, res, STATIC[p]);
   const sm0 = p.match(/^\/site\/([\w-]+\.(?:jpg|png))$/);   // promo-site photos (shop, barbers, storefront)
   if (sm0 && method === 'GET') { if (!fs.existsSync(path.join(DIR, 'site', sm0[1]))) return send(res, 404, { error: 'Not found' }); return serveStatic(req, res, 'site/' + sm0[1]); }
   const im = p.match(/^\/img\/(\w+)$/);
   if (im && method === 'GET') {
     let r = one('select mime,data from images where id=?', im[1]);
-    if (!r && !curOrg()) for (const o of orgList()) { r = orgDb(o.id).prepare('select mime,data from images where id=?').get(im[1]); if (r) break; }
+    if (!r && !curOrg()) for (const o of activeOrgs()) { r = orgDb(o.id).prepare('select mime,data from images where id=?').get(im[1]); if (r) break; }
     if (!r) return send(res, 404, { error: 'Not found' });
     res.writeHead(200, { 'Content-Type': r.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
     return res.end(Buffer.from(r.data));
@@ -1145,11 +1185,12 @@ async function handleIn(req, res) {
   if (!p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
   if (p === '/api/public/terms' && method === 'GET') return send(res, 200, { terms: getTerms() });
   // ----- public: plans and self sign-up for new shops (each gets its own separate database and a free trial) -----
-  if (p === '/api/public/plans' && method === 'GET') return send(res, 200, { plans: plansNow(), trialDays: TRIAL_DAYS, contact: contactEmail() });
+  if (p === '/api/public/plans' && method === 'GET') return send(res, 200, { plans: plansNow(), trialDays: TRIAL_DAYS, contact: contactEmail(), signupOpen: SIGNUPS_OPEN });
   const codeTaken = c => !!mainDb.prepare('select 1 x from orgs where code=?').get(c);
   if (p === '/api/public/signup/check' && method === 'GET') { const c = String(q.code || '').trim().toLowerCase(); return send(res, 200, { ok: /^[a-z0-9-]{3,30}$/.test(c) && !codeTaken(c) }); }
   if (p === '/api/public/signup' && method === 'POST') {
     if (curOrg()) bad(404, 'Not found');
+    if (!SIGNUPS_OPEN) bad(403, 'Sign-up for new shops is not open yet.');
     if (recent(signupHits, ip).length >= (+process.env.SIGNUP_LIMIT || 5)) bad(429, 'Too many sign-ups from this connection. Please try again in an hour.');
     const b = await readBody(req), s = (k, n) => String(b[k] || '').trim().slice(0, n);
     const kind = String(b.kind || ''); if (!KIND_LABEL[kind]) bad(400, 'Choose what describes you');
@@ -1227,9 +1268,9 @@ async function handleIn(req, res) {
   }
   if (p === '/api/public/book' && method === 'POST') {
     if (bookingBlocked(ip)) bad(429, 'Too many bookings from this device. Please try again later.');
-    const bk = createBooking(await readBody(req), 'online'); hitRate(bookHits, ip);
-    log({ name: 'Online: ' + bk.customerName }, 'booking', 'bookings', bk.id, `${bk.date} ${bk.time} ${bk.branchName}`);
-    return send(res, 201, { ok: true, booking: { date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, staffPhoto: bk.staffPhoto, items: bk.items, total: bk.total, name: bk.customerName } });
+    const bk = createBooking({ ...(await readBody(req)), idemKey: req.headers['idempotency-key'] }, 'online');
+    if (!bk.duplicate) { hitRate(bookHits, ip); log({ name: 'Online: ' + bk.customerName }, 'booking', 'bookings', bk.id, `${bk.date} ${bk.time} ${bk.branchName}`); }
+    return send(res, bk.duplicate ? 200 : 201, { ok: true, booking: { date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, staffPhoto: bk.staffPhoto, items: bk.items, total: bk.total, name: bk.customerName } });
   }
 
   if (p.startsWith('/api/bh/')) return BH(req, res, p, method, q, ip);
@@ -1360,7 +1401,7 @@ async function handleIn(req, res) {
       // finish: the service is done and the customer paid the shop. This only records it (who, what, how much, how paid).
       if (dayLocked(o.branchId, todayStr())) bad(409, 'Today is already closed for this shop.');
       let items = o.items;
-      if (Array.isArray(b.items)) { items = priceItems(b.items); if (!items.length) bad(400, 'Choose at least one service'); }
+      if (Array.isArray(b.items)) { items = priceBooked(bookedSnap(o.id), b.items); if (!items.length) bad(400, 'Choose at least one service'); }
       if (idNeeded(items).length && !o.idPhoto) { if (!b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is needed for ${idNeeded(items).join(', ')}.`); attachIdPhoto(o.id, o.branchId, b.idPhotoId); }
       let barberId = o.barberId || (me.role === 'barber' ? myStaffId : String(b.barberId || ''));
       if (barberId) { const s = get('staff', barberId); if (!s || s.branchId !== o.branchId) bad(409, 'That barber is not in this shop'); }
@@ -1488,7 +1529,7 @@ async function handleIn(req, res) {
     const gone = {}; db.exec('begin');
     try {
       if (b.sales) for (const tb of ['orders', 'shifts', 'cash_moves', 'zreadings', 'attendance', 'payroll_days']) gone[tb] = Number(run(`delete from ${tb}`).changes);
-      if (b.bookings) gone.bookings = Number(run('delete from bookings').changes);
+      if (b.bookings) { gone.bookings = Number(run('delete from bookings').changes); run('delete from booking_events'); }
       if (b.reviews) gone.reviews = Number(run('delete from reviews').changes);
       if (b.customers) { gone.customers = Number(run('delete from customers').changes); gone.emails = Number(run('delete from email_log').changes); }
       db.exec('commit');
@@ -1527,10 +1568,10 @@ async function handleIn(req, res) {
       if ('payInfo' in b) mainSet('payInfo', String(b.payInfo || '').trim().slice(0, 600));
       log(me, 'settings', 'orgs', '', 'plans'); return send(res, 200, { plans: plansNow(), payInfo: payInfo() });
     }
-    if (p === '/api/orgs/plans' && method === 'GET') return send(res, 200, { plans: plansNow(), payInfo: payInfo(), trialDays: TRIAL_DAYS });
+    if (p === '/api/orgs/plans' && method === 'GET') return send(res, 200, { plans: plansNow(), payInfo: payInfo(), trialDays: TRIAL_DAYS, signupOpen: SIGNUPS_OPEN });
     const om2 = p.match(/^\/api\/orgs(?:\/(\w+)(?:\/(enter|reset|payments))?)?$/); if (!om2) bad(404, 'Not found');
     const temp = () => crypto.randomBytes(9).toString('base64url').replace(/[-_]/g, 'x').slice(0, 10), since = dOf(new Date(Date.now() - 30 * 864e5));
-    if (!om2[1] && method === 'GET') return send(res, 200, orgList().map(({ ownerHash, ...o }) => inOrg(o, () => ({ ...o, active: !!o.active, status: orgStatus(o), paid: r2(mainDb.prepare('select coalesce(sum(amount),0) t from org_payments where orgId=?').get(o.id).t),
+    if (!om2[1] && method === 'GET') return send(res, 200, orgList().map(({ ownerHash, ...o }) => BAD_ORGS.has(o.id) ? { ...o, active: !!o.active, status: { state: 'error' }, paid: 0, branches: 0, barbers: 0, users: 0, sales30: 0 } : inOrg(o, () => ({ ...o, active: !!o.active, status: orgStatus(o), paid: r2(mainDb.prepare('select coalesce(sum(amount),0) t from org_payments where orgId=?').get(o.id).t),
       branches: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n, users: one('select count(*) n from users where active=1').n,
       sales30: r2(one("select coalesce(sum(total),0) t from orders where status='paid' and date>=?", since).t) }))));
     if (!om2[1] && method === 'POST') {
@@ -2013,24 +2054,26 @@ async function handleIn(req, res) {
   }
   if (p === '/api/bookings' && method === 'POST') {
     const b = await readBody(req); b.branchId = isBranchUser(me) ? me.branchId : b.branchId;
-    const bk = createBooking(b, 'pos'); log(me, 'booking', 'bookings', bk.id, `${bk.customerName} ${bk.date} ${bk.time}`); return send(res, 201, bk);
+    const bk = createBooking({ ...b, idemKey: req.headers['idempotency-key'] }, 'pos', me.name); if (bk.duplicate) return send(res, 200, bk);
+    log(me, 'booking', 'bookings', bk.id, `${bk.customerName} ${bk.date} ${bk.time}`); return send(res, 201, bk);
   }
-  const bkm = p.match(/^\/api\/bookings\/(\w+)(?:\/(arrive))?$/);
+  const bkm = p.match(/^\/api\/bookings\/(\w+)(?:\/(arrive|history))?$/);
   if (bkm) {
     const cur = one('select * from bookings where id=?', bkm[1]); if (!cur) bad(404, 'Not found');
     if (isBranchUser(me) && cur.branchId !== me.branchId) bad(403, 'Not your branch');
+    if (method === 'GET' && bkm[2] === 'history') return send(res, 200, all('select at, actor, fromStatus, toStatus, reason from booking_events where bookingId=? order by at, rowid', cur.id));
     if (method === 'PUT' && !bkm[2]) {
       const b = await readBody(req); if (!['cancelled', 'noshow'].includes(b.status)) bad(400, 'Bad status');
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
-      run('update bookings set status=? where id=?', b.status, cur.id); BH.freed(cur.branchId, cur.staffId, cur.date); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
+      run('update bookings set status=? where id=?', b.status, cur.id); bookingEvent(cur.id, cur.status, b.status, me.name, b.reason); BH.freed(cur.branchId, cur.staffId, cur.date); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
     }
     if (method === 'POST' && bkm[2] === 'arrive') {
       if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
-      const items = priceItems(jp(cur.itemIds).map(i => ({ itemId: i, qty: 1 })));
+      const items = priceBooked(snapOf(cur), jp(cur.itemIds).map(i => ({ itemId: i, qty: 1 })));   // the customer is charged the price that was shown when booking
       const cust = (cur.customerId && get('customers', cur.customerId)) || findCustomer(cur.phone, '') || upsertCustomer({ name: cur.customerName, phone: cur.phone }, 'online', cur.branchId);
       const o = createTicket(me, cur.branchId, cust.id, cust.name, items, cur.staffId);
       if (cur.promoCode) { const pr = one('select discountId from bh_promos where code=?', cur.promoCode); if (pr?.discountId) { run('update orders set discountId=? where id=?', pr.discountId, o.id); o.discountId = pr.discountId; } }   // promo from the app: the ticket opens with that discount already applied
-      run("update bookings set status='arrived', orderId=? where id=?", o.id, cur.id); log(me, 'booking-arrived', 'bookings', cur.id, `#${o.no} ${cur.customerName}`);
+      run("update bookings set status='arrived', orderId=? where id=?", o.id, cur.id); bookingEvent(cur.id, 'booked', 'arrived', me.name); log(me, 'booking-arrived', 'bookings', cur.id, `#${o.no} ${cur.customerName}`);
       return send(res, 200, { order: o, seated: o.status === 'in_chair' });
     }
     bad(405, 'Method not allowed');
@@ -2153,7 +2196,7 @@ async function handleIn(req, res) {
       const b = await readBody(req); const upd = {}; let queued = false;
       if (!admin && Object.keys(b).some(k => !['barberId', 'chairId'].includes(k))) needAny(me, 'pos');
       if ('items' in b) {
-        const items = priceItems(b.items), tt = totals(items, null), need = idNeeded(items);
+        const items = priceBooked(bookedSnap(o.id), b.items), tt = totals(items, null), need = idNeeded(items);
         if (need.length && !o.idPhoto && !b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is required for ${need.join(', ')}.`);
         upd.items = JSON.stringify(items); upd.subtotal = tt.subtotal; upd.total = tt.total;
       }
@@ -2363,9 +2406,11 @@ async function handleIn(req, res) {
   bad(405, 'Method not allowed');
 }
 
-const BH = mountBH({ inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
+const BH = mountBH({ inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 
+{ const ran = migrate(mainDb); if (ran.length) console.log('migrations applied:', ran.join(', ')); }   // numbered files in src/db/migrations, once per database
 schemaReady = true; ORG_DBS.clear();
+for (const o of orgList()) { try { orgDb(o.id); } catch { } }   // partner shops are migrated at startup too, not on their first request
 http.createServer(async (req, res) => {
   if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);
   try { await handle(req, res); }

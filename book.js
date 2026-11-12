@@ -20,6 +20,10 @@ const S = { step: 1, lock: false, branch: '', items: [], staff: 'any', date: '',
 const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(Date.now() + i * 864e5); return { v: ymd(d), l: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-PH', { weekday: 'short' }), s: d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) }; });
 const maxDate = ymd(new Date(Date.now() + 60 * 864e5));
 
+// sent with the booking so a double tap or a retry never makes a second booking: the same choices in this visit give the same key
+const newVisit = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now());
+let VISIT = newVisit();   // renewed after every successful booking
+const idemKey = () => [VISIT, S.branch, S.staff, S.date, S.time, S.items.join('.')].join('|').slice(0, 200);
 const svcs = () => I.services.filter(s => S.items.includes(s.id));
 const total = () => svcs().reduce((t, s) => t + s.price, 0), mins = () => Math.max(30, svcs().reduce((t, s) => t + (s.mins || 30), 0));
 const team = () => I.staff.filter(s => s.branchId === S.branch);
@@ -181,10 +185,10 @@ document.addEventListener('click', async e => {
   if (el.hasAttribute('data-go')) {
     S.busy = true; S.err = ''; render();
     try {
-      const r = await fetch('/api/public/book', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branchId: S.branch, staffId: S.staff, date: S.date, time: S.time, itemIds: S.items, name: S.name, phone: S.phone, email: S.email, preferredCut: S.cut, consent: S.consent }) });
+      const r = await fetch('/api/public/book', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idemKey() }, body: JSON.stringify({ branchId: S.branch, staffId: S.staff, date: S.date, time: S.time, itemIds: S.items, name: S.name, phone: S.phone, email: S.email, preferredCut: S.cut, consent: S.consent }) });
       const j = await r.json();
-      if (!r.ok) { S.err = j.error || 'Something went wrong. Please try again.'; S.busy = false; if (r.status === 409) { S.step = 4; await loadSlots(); S.err = j.error; } return render(); }
-      S.done = j.booking; S.busy = false; render();
+      if (!r.ok) { S.err = j.error || 'Something went wrong. Please try again.'; S.busy = false; if (r.status === 409) { if (/already used/i.test(j.error || '')) VISIT = newVisit(); S.step = 4; await loadSlots(); S.err = j.error; } return render(); }
+      S.done = j.booking; S.busy = false; VISIT = newVisit(); render();
     } catch (x) { S.err = 'No connection. Please try again.'; S.busy = false; render(); }
   }
 });

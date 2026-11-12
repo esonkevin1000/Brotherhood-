@@ -2,7 +2,7 @@
 // Mounted from server.js under /api/bh/*. Shares the same database, staff, branches, bookings and reviews as the POS.
 import { loadVapid, sendPush, knownPushHost } from './bh-push.js';
 export function mountBH(c) {
-  const { inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, slotsFor,
+  const { inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor,
     whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName, getSetting, setSetting, queueEmail, emailReady, baseUrl, esc: escHtml, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
 
   // ---------- schema ----------
@@ -255,7 +255,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
   const handleBH = async function (req, res, p, method, q, ip) {
     const sub = p.slice('/api/bh'.length);
 
-    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood', contact: String(process.env.CONTACT_EMAIL || '').trim().slice(0, 120), stats: { shops: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n }, partners: activeOrgs().length });
+    if (sub === '/config' && method === 'GET') return send(res, 200, { shop: shopName || 'Brotherhood', contact: String(process.env.CONTACT_EMAIL || '').trim().slice(0, 120), signupOpen: process.env.SIGNUPS_OPEN === '1', stats: { shops: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n }, partners: activeOrgs().length });
     // ----- accounts -----
     if (sub === '/signup' && method === 'POST') {
       if (tooMany(ip, 'su', 5, 3600e3)) bad(429, 'Too many sign-ups from this device. Try again later.');
@@ -452,15 +452,22 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const every = [1, 2, 3, 4, 6].includes(+b.repeatEvery) ? +b.repeatEvery : 0, count = every ? Math.max(2, Math.min(6, Math.round(+b.repeatCount) || 2)) : 1;
       const org = ownerOf('branches', b.branchId); if (org === undefined) bad(400, 'Pick a shop');   // Brotherhood or a partner shop
       if (org && b.promo) bad(400, 'Promo codes work only at Brotherhood shops');
+      // the same request again (double tap, or a retry after a lost connection) gives back the booking that was already made
+      const idem = idemKeyOf(req.headers['idempotency-key']), keyFor = date => idem ? idem + ':' + date : '';
+      if (idem) {
+        const find = () => { const r = one("select * from bookings where idemKey=? and userId=? and status='booked'", keyFor(String(b.date || '')), u.id); return r ? bookingView(r) : null; }, ex = org ? inOrg(org, find) : find();
+        if (ex) return send(res, 200, { ok: true, duplicate: true, booking: { id: ex.id, brand: org?.name || '', date: ex.date, time: ex.time, branch: org ? `${org.name} · ${ex.branchName}` : ex.branchName, staff: ex.staffName, items: ex.items, total: ex.total, promo: ex.promoCode ? { code: ex.promoCode, amt: ex.promoAmt } : null }, series: [] });
+      }
       let pc = null; if (b.promo) pc = promoCheck(b.promo, b.itemIds, u.phone, u.email, u.id);   // checked first: a bad code stops the booking with a clear message
       const make = date => {
         const at = () => {
-          const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent }, 'online');
+          const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent, idemKey: keyFor(date) }, 'online', 'Customer (app)');
+          if (x.duplicate) return x;
           run('update bookings set userId=? where id=?', u.id, x.id); log({ name: 'App: ' + u.name }, 'booking', 'bookings', x.id, `${x.date} ${x.time} ${x.branchName}`); return x;
         };
         const x = org ? inOrg(org, at) : at();
         if (!org && x.customerId && !u.customerId) { run('update bh_users set customerId=? where id=?', x.customerId, u.id); u.customerId = x.customerId; }   // loyalty links only to Brotherhood's customer records
-        notify(u.id, 'booking', `Booked: ${x.date} ${x.time} with ${x.staffName || 'any barber'} at ${org ? org.name + ' ' : ''}${x.branchName}`, '#/bookings', 'bk-' + x.id, false);
+        if (!x.duplicate) notify(u.id, 'booking', `Booked: ${x.date} ${x.time} with ${x.staffName || 'any barber'} at ${org ? org.name + ' ' : ''}${x.branchName}`, '#/bookings', 'bk-' + x.id, false);
         return x;
       };
       const bk = make(String(b.date || '')); hit(ip, 'bk'); const series = [];
@@ -494,7 +501,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const u = needUser(req), b = one('select * from bookings where id=? and userId=?', cm[1], u.id); if (!b) bad(404, 'Booking not found');
       if (b.status !== 'booked') bad(409, 'This booking is already ' + b.status);
       if (new Date(`${b.date}T${b.time}:00`).getTime() - Date.now() < 3600e3) bad(409, 'Bookings can be cancelled up to 1 hour before. Please call the shop.');
-      run("update bookings set status='cancelled' where id=?", b.id); log({ name: 'App: ' + u.name }, 'booking-cancelled', 'bookings', b.id, b.customerName); freed(b.branchId, b.staffId, b.date);
+      run("update bookings set status='cancelled' where id=?", b.id); bookingEvent(b.id, 'booked', 'cancelled', 'Customer (app)'); log({ name: 'App: ' + u.name }, 'booking-cancelled', 'bookings', b.id, b.customerName); freed(b.branchId, b.staffId, b.date);
       return send(res, 200, { ok: true });
       });
     }

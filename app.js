@@ -430,7 +430,7 @@ function partnersCard() {
       <div><label>First branch name</label><input id="og-branch" placeholder="e.g. Calamba"></div>
       <div><label>Owner username</label><input id="og-user" placeholder="e.g. juan" autocapitalize="none" autocomplete="off"></div>
     </div>
-    <p class="mute" style="font-size:12px;margin:8px 0 10px">New shops can also sign up by themselves at <b>${esc(location.origin)}/signup</b> (free trial). A temporary password is made for the owner and shown once. Give it to them privately; they can change it in their Settings.</p>
+    <p class="mute" style="font-size:12px;margin:8px 0 10px">${ui.plans && ui.plans.signupOpen ? `New shops can also sign up by themselves at <b>${esc(location.origin)}/signup</b> (free trial). ` : 'Public sign-up for new shops is closed for now, so you add each shop here. '}A temporary password is made for the owner and shown once. Give it to them privately; they can change it in their Settings.</p>
     <button class="btn" data-act="neworg">Add partner shop</button></div>`;
 }
 function vSettings() {
@@ -535,7 +535,7 @@ function vBookings() {
     <div class="row"><button class="btn" data-act="copylink">Copy link</button><a class="btn ghost" href="/book" target="_blank" style="text-decoration:none">Open</a></div></div></div>
   <div class="card overflow"><table><tr><th>Date</th><th>Time</th><th>Customer</th><th>Phone</th><th>Services</th><th>Barber</th><th>Branch</th><th>Source</th><th>Status</th><th></th></tr>
   ${rows.map(b => `<tr><td>${esc(b.date)}</td><td>${esc(b.time)}</td><td>${esc(b.customerName)}</td><td>${esc(b.phone)}</td><td>${b.items.map(i => esc(i.name)).join(', ')}</td><td>${thumb({ photo: b.staffPhoto, name: b.staffName })} ${esc(b.staffName)}</td><td>${esc(b.branchName)}</td><td>${b.source === 'online' ? 'Online' : 'Phone/POS'}</td>
-    <td><span class="tag ${b.status === 'booked' ? 'booked' : b.status === 'arrived' ? 'done' : ''}">${esc(b.status)}</span></td><td>${b.status === 'booked' ? `<button class="btn bad sm" data-act="bkcancel" data-id="${b.id}">Cancel</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="mute">No bookings in this period.</td></tr>'}</table></div>`;
+    <td><span class="tag ${b.status === 'booked' ? 'booked' : b.status === 'arrived' ? 'done' : ''}">${esc(b.status)}</span></td><td style="white-space:nowrap">${b.status === 'booked' ? `<button class="btn bad sm" data-act="bkcancel" data-id="${b.id}">Cancel</button> ` : ''}<button class="btn ghost sm" data-act="bkhistory" data-id="${b.id}">History</button></td></tr>`).join('') || '<tr><td colspan="10" class="mute">No bookings in this period.</td></tr>'}</table></div>`;
 }
 
 function parseCSV(text) {
@@ -758,6 +758,16 @@ document.addEventListener('click', async e => {
   if (act === 'resetterms') { if (confirm('Restore the default Terms?')) { try { await api('PUT', '/api/settings', { terms: '' }); await loadView(); render(); } catch (x) { alert(x.message); } } return; }
   if (act === 'testmail') { const to = document.getElementById('testto').value.trim(); try { await api('POST', '/api/settings/test-email', { to }); alert('Test email sent to ' + to + '. Check the inbox (and spam).'); await loadView(); render(); } catch (x) { alert(x.message); } return; }
   if (act === 'copylink') { try { await navigator.clipboard.writeText(location.origin + '/book'); alert('Link copied!'); } catch (x) { prompt('Copy this link:', location.origin + '/book'); } return; }
+  if (act === 'bkhistory') {
+    const b = ui.bk.find(x => x.id === d.id), label = { booked: 'Booked', arrived: 'Arrived', cancelled: 'Cancelled', noshow: 'No-show' };
+    try {
+      const ev = await api('GET', `/api/bookings/${d.id}/history`);
+      openModal(`<h2 style="margin-top:0">Booking history</h2><p class="mute" style="margin:-6px 0 10px">${b ? esc(b.customerName) + ' · ' + esc(b.date) + ' ' + esc(b.time) + ' · ' + b.items.map(i => esc(i.name) + ' ' + peso(i.price)).join(', ') : ''}</p>
+        ${ev.length ? `<table data-nopg><tr><th>When</th><th>What</th><th>By</th><th>Note</th></tr>${ev.map(e => `<tr><td>${new Date(e.at).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td><b>${esc(label[e.toStatus] || e.toStatus)}</b></td><td>${esc(e.actor)}</td><td>${esc(e.reason)}</td></tr>`).join('')}</table>` : '<p class="mute">This booking was made before history was recorded.</p>'}
+        <div class="row" style="margin-top:14px"><button class="btn ghost" data-act="close">Close</button></div>`);
+    } catch (x) { alert(x.message); }
+    return;
+  }
   if (act === 'bkcancel') { if (confirm('Cancel this booking?')) mut(() => api('PUT', `/api/bookings/${d.id}`, { status: 'cancelled' })); return; }
   if (act === 'backup') return download('/api/backup', `brotherhood-${today()}.db`);
   if (act === 'page') { ui.cust.page += +d.n; await loadView(); return render(); }
