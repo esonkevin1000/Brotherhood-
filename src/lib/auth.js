@@ -20,7 +20,7 @@ export function createAuth(secret, { tokenDays = 30, fileSecrets = [secret] } = 
 
   // a login token is base64url(JSON { u: user, v: password version, e: expiry, o: shop }) + "." + its signature
   const sign = s => crypto.createHmac('sha256', secret).update(s).digest('base64url');
-  const makeToken = (u, v, o) => { const p = Buffer.from(JSON.stringify({ u, v, e: Date.now() + tokenDays * 864e5, ...(o ? { o } : {}) })).toString('base64url'); return p + '.' + sign(p); };
+  const makeToken = (u, v, o, days = tokenDays) => { const p = Buffer.from(JSON.stringify({ u, v, e: Date.now() + days * 864e5, ...(o ? { o } : {}) })).toString('base64url'); return p + '.' + sign(p); };
   function readToken(t) {
     const [p, sig] = String(t).split('.');
     if (!p || !sig) return null;

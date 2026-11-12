@@ -416,6 +416,7 @@ function vAccount() {
 // ----- pro tools -----
 async function loadPro() { try { S.pro = await api('/pro/me', {}, S.proToken); S.proErr = ''; } catch (e) { S.pro = null; S.proErr = e.message; if (e.code === 401) { S.proToken = null; store.set('bh_pro', null); } } }
 function vPro() {
+  if ((!S.proToken || !S.pro) && store.get('bh_device') && !S.devSkip) return header('Pro tools', '/') + vDeviceLogin();
   if (!S.proToken || !S.pro) return header('Pro tools', '/') + `<p class="mute">Sign in with your Brotherhood staff username and password (same as the back office). New here? <a href="/signup">Put your shop on Brotherhood</a>.</p><form id="prolf">${S.proPin ? '<label class="f">6-digit PIN<input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label>' : '<label class="f">Username (owners may leave this blank)<input name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label><label class="f">Password<input name="password" type="password" autocomplete="current-password" required></label>'}<label class="f">Shop code (partner shops only)<input name="org" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Leave blank for Brotherhood" value="${esc(store.get('bh_org') || '')}"></label>${S.proErr ? `<div class="err">${esc(S.proErr)}</div>` : ''}<button class="btn block" style="margin-top:14px">Sign in</button><p class="mute sm" style="text-align:center"><button type="button" class="link" data-proPin>${S.proPin ? 'Use username and password instead' : 'Barber or cashier? Sign in with your 6-digit PIN'}</button></p></form>`;
   if (S.pro.desk) { if (!S.td) loadToday(true); if (!['today', 'tools'].includes(S.proTab)) S.proTab = 'today'; return header('Front desk', '/') + `<div class="tabs"><button class="${S.proTab === 'today' ? 'on' : ''}" data-ptab="today">Today</button><button class="${S.proTab === 'tools' ? 'on' : ''}" data-ptab="tools">Tools</button></div>` + (S.proTab === 'tools' ? vTools() : vToday()) + '<button class="btn ghost block" style="margin-top:22px" data-prologout>Sign out</button>'; }   // front desk: the day board only
   const sel = S.pro.staff.find(s => s.id === S.proSel) || S.pro.staff[0]; S.proSel = sel?.id;
@@ -1310,7 +1311,7 @@ async function sapi(path, opt = {}) {
 async function loadToday(quiet) {
   try { S.td = await sapi('/svc/today' + (S.tdBranch ? '?branch=' + encodeURIComponent(S.tdBranch) : '')); S.tdErr = ''; }
   catch (e) { S.tdErr = e.message; if (!quiet) toast(e.message); }
-  if (S.proTab === 'today' && !document.querySelector('.lb')) render();
+  if ((S.proTab === 'today' || (S.proTab === 'tools' && !S.tool)) && !document.querySelector('.lb')) render();   // the Tools tab also waits for this data
 }
 setInterval(() => { if (S.proToken && S.proTab === 'today' && !document.hidden && document.querySelector('[data-today]') && !document.querySelector('.lb')) loadToday(true); }, 20000);
 const NOT_RECEIPT = 'Tracking only. This is not an official receipt: issue your BIR invoice to the customer separately.';
@@ -1475,7 +1476,7 @@ async function loadTool() {
 }
 function vTools() {
   const d = S.td; if (!d) return `<div>${S.tdErr ? `<div class="card sm">${esc(S.tdErr)}</div>` : skelList()}</div>`;
-  if (!S.tool) return `<div class="tgrid">${TOOLS.filter(t => toolOk(t[4])).map(([k, n, s, i]) => `<button class="card tcard" data-tool="${k}">${ic(i)}<b>${esc(n)}</b><span class="sm mute">${esc(s)}</span></button>`).join('')}</div>`;
+  if (!S.tool) return (S.pro?.admin ? vDeviceCard() : '') + `<div class="tgrid">${TOOLS.filter(t => toolOk(t[4])).map(([k, n, s, i]) => `<button class="card tcard" data-tool="${k}">${ic(i)}<b>${esc(n)}</b><span class="sm mute">${esc(s)}</span></button>`).join('')}</div>`;
   const t = TOOLS.find(x => x[0] === S.tool);
   const head = `<div class="row" style="margin:4px 0 12px;gap:10px"><button class="btn sec sm" data-tool="">${ic('back')} All tools</button><b class="sp" style="font-size:18px">${esc(t[1])}</b></div>`;
   if (S.tool === 'clock') return head + vClock();
@@ -1701,3 +1702,62 @@ function openReview(bookingId) {
   if (S.token) loadBookings().then(render);
   onRoute();
 })();
+
+// ---------- staff PIN login on a phone set up for a branch (decision D-21) ----------
+// The owner or an admin sets up the phone once (Tools → This phone). After that, staff pick their name and type their PIN;
+// wrong PINs pause only that person. A phone can be switched off from the back office if it is lost.
+const devHeaders = () => ({ 'x-device': store.get('bh_device') || '', ...(store.get('bh_device_org') ? { 'x-org': store.get('bh_device_org') } : {}) });
+async function loadDevicePeople() {
+  S.dev = { loading: true }; render();
+  try {
+    const r = await fetch('/api/device/people', { headers: devHeaders() }), j = await r.json().catch(() => ({}));
+    if (r.status === 401) { store.set('bh_device', null); store.set('bh_device_org', null); store.set('bh_device_branch', null); S.dev = null; S.proErr = 'This phone is no longer set up for PIN login. Ask the owner to set it up again.'; return render(); }
+    if (!r.ok) throw new Error(j.error || 'Could not load the names');
+    S.dev = { people: j.people, branch: j.branch.name };
+  } catch (x) { S.dev = { err: x.message }; }
+  render();
+}
+function vDeviceLogin() {
+  if (!S.dev) { loadDevicePeople(); return skelList(); }
+  if (S.dev.loading) return skelList();
+  const other = '<p class="mute sm" style="text-align:center;margin-top:18px"><button type="button" class="link" data-devskip>Owner or admin? Sign in with username and password</button></p>';
+  if (S.dev.err) return `<div class="card sm">${esc(S.dev.err)}</div><button class="btn block" style="margin-top:12px" data-devreload>Try again</button>` + other;
+  const who = S.dev.people.find(x => x.id === S.devPick);
+  if (who) return `<p class="mute" style="margin-top:0">${esc(S.dev.branch)}</p><form id="devpinf"><div class="card" style="display:flex;align-items:center;gap:12px"><span class="av" aria-hidden="true">${esc(initials(who.name))}</span><div class="sp"><b>${esc(who.name)}</b><div class="sm mute">${who.role === 'barber' ? 'Barber' : 'Front desk'}</div></div><button type="button" class="btn sec sm" data-devpick="">Not you?</button></div>
+    <label class="f">Your 6-digit PIN<input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required autofocus></label>${S.proErr ? `<div class="err" role="alert">${esc(S.proErr)}</div>` : ''}<button class="btn block" style="margin-top:14px" ${S.devBusy ? 'disabled' : ''}>Sign in</button></form>` + other;
+  return `<p class="mute" style="margin-top:0">${esc(S.dev.branch)} · tap your name</p>${S.proErr ? `<div class="err" role="alert">${esc(S.proErr)}</div>` : ''}<div class="tgrid">${S.dev.people.map(x => `<button class="card tcard" data-devpick="${esc(x.id)}"><span class="av" aria-hidden="true">${esc(initials(x.name))}</span><b>${esc(x.name)}</b><span class="sm mute">${x.role === 'barber' ? 'Barber' : 'Front desk'}</span></button>`).join('') || '<div class="empty">Nobody with a PIN in this branch yet.</div>'}</div>` + other;
+}
+function vDeviceCard() {
+  const set = store.get('bh_device'), branches = S.td?.branches?.length ? S.td.branches : (S.td?.branch ? [S.td.branch] : []);
+  if (set) return `<div class="card" style="margin-bottom:12px"><b>This phone</b><p class="sm mute" style="margin:4px 0 10px">Set up for staff PIN login at <b>${esc(store.get('bh_device_branch') || 'a branch')}</b>. Staff pick their name, then type their PIN.</p><button class="btn sec sm" data-devunset>Stop using this phone for PIN login</button></div>`;
+  return `<div class="card" style="margin-bottom:12px"><b>This phone</b><p class="sm mute" style="margin:4px 0 10px">Use this phone or tablet at a branch so staff sign in by picking their name and typing their PIN.</p>
+    <div class="row" style="gap:8px"><select id="devbranch" aria-label="Branch for this phone" style="flex:1">${branches.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select><button class="btn sm" data-devset ${branches.length ? '' : 'disabled'}>Set up</button></div></div>`;
+}
+app.addEventListener('click', async e => {
+  const el = e.target.closest('[data-devpick],[data-devskip],[data-devreload],[data-devset],[data-devunset]'); if (!el) return;
+  const D = el.dataset; S.proErr = '';
+  if ('devpick' in D) { S.devPick = D.devpick || null; return render(); }
+  if ('devskip' in D) { S.devSkip = true; return render(); }
+  if ('devreload' in D) { S.dev = null; return render(); }
+  if ('devset' in D) {
+    const bid = document.getElementById('devbranch')?.value; if (!bid) return;
+    try { const j = await sapi('/device/setup', { method: 'POST', body: { branchId: bid } }); store.set('bh_device', j.deviceToken); store.set('bh_device_org', store.get('bh_org') || null); store.set('bh_device_branch', j.device.branchName); toast('This phone is set up for ' + j.device.branchName); }
+    catch (x) { toast(x.message); }
+    return render();
+  }
+  if ('devunset' in D) { store.set('bh_device', null); store.set('bh_device_org', null); store.set('bh_device_branch', null); S.dev = null; toast('This phone is no longer used for PIN login'); return render(); }
+});
+app.addEventListener('submit', async e => {
+  if (e.target.id !== 'devpinf') return;
+  const pin = String(new FormData(e.target).get('pin') || '').trim();
+  S.devBusy = true; S.proErr = ''; render();
+  try {
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', ...devHeaders() }, body: JSON.stringify({ userId: S.devPick, pin }) }), j = await r.json().catch(() => ({}));
+    if (r.status === 401 && /not set up/.test(j.error || '')) { S.dev = null; store.set('bh_device', null); throw new Error(j.error); }
+    if (!r.ok) throw new Error(j.error || 'Something went wrong');
+    store.set('bh_org', store.get('bh_device_org') || null);
+    S.proToken = j.token; store.set('bh_pro', j.token); S.devPick = null; await loadPro(); S.proSel = S.pro?.staff[0]?.id; S.td = null;
+    if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } else { S.proTab = 'today'; loadToday(true); } loadDash();
+  } catch (x) { S.proErr = x.message; }
+  S.devBusy = false; render();
+});

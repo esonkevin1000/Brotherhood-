@@ -14,6 +14,7 @@ import { createMailer } from './src/lib/mail.js';
 import { hashPw, checkPw, sha, createAuth } from './src/lib/auth.js';
 import { createLimiter, allOf, intSetting } from './src/lib/throttle.js';
 import { createServiceRoutes } from './src/routes/service-records.js';
+import { createDeviceRoutes } from './src/routes/devices.js';
 import { createReports } from './src/lib/reports.js';
 import { createBookings, idemKeyOf, snapOf } from './src/lib/booking.js';
 import { HttpError, bad, MIME, send, readBody, noteGzip, staticServer, NEXT } from './src/lib/http.js';
@@ -301,6 +302,19 @@ const pinLimiter = allOf(
 const userLimiter = allOf(
   createLimiter({ max: intSetting(process.env.LOGIN_FAIL_MAX, 10, 3), windowMs: 15 * 60e3, lockMs: 15 * 60e3, maxLockMs: 3600e3 }),
   createLimiter({ max: intSetting(process.env.LOGIN_FAIL_DAY, 30, 5), windowMs: 24 * 3600e3, lockMs: 2 * 3600e3, maxLockMs: 24 * 3600e3 }));
+// Name + PIN login (decision D-21): wrong PINs are counted per person, so a pause hits only that person; a phone has its own limit too.
+const personPinShort = createLimiter({ max: intSetting(process.env.PERSON_PIN_FAIL_MAX, 5, 3), windowMs: 10 * 60e3, lockMs: 15 * 60e3, maxLockMs: 4 * 3600e3 });
+const personPinDaily = createLimiter({ max: intSetting(process.env.PERSON_PIN_FAIL_DAY, 15, 5), windowMs: 24 * 3600e3, lockMs: 4 * 3600e3, maxLockMs: 24 * 3600e3 });
+const personPin = allOf(personPinShort, personPinDaily);
+const devicePin = createLimiter({ max: intSetting(process.env.DEVICE_PIN_FAIL_MAX, 30, 5), windowMs: 10 * 60e3, lockMs: 10 * 60e3, maxLockMs: 2 * 3600e3 });
+// the phone a request comes from (header x-device), if an owner or admin set it up for a branch of this shop and it is still on
+function deviceOf(req) {
+  const t = readToken(String(req.headers['x-device'] || ''));
+  if (!t || !String(t.u).startsWith('device:') || (t.o || null) !== (curOrg()?.id || null)) return null;
+  const d = one('select * from devices where id=? and active=1', String(t.u).slice(7));
+  return d && get('branches', d.branchId) ? d : null;
+}
+const sameKey = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 const waitText = ms => { const m = Math.ceil(ms / 60e3); return m >= 60 ? 'about ' + Math.ceil(m / 60) + ' hour' + (m > 60 ? 's' : '') : m + ' minute' + (m === 1 ? '' : 's'); };
 const fails = new Map();
 const failDelay = ip => { const f = fails.get(ip); return f && Date.now() - f.t < 600e3 ? Math.min(f.n * 500, 3000) : 0; };
@@ -830,7 +844,7 @@ async function handle(req, res) {
   let org = null;
   if (tk && tk.o) { org = orgRow(tk.o); if (!org) return send(res, 401, { error: 'Login required' }); }
   else if (!tk && pth === '/api/public/slots') { const o = ownerOf('branches', new URL(req.url, 'http://x').searchParams.get('branch')); if (o) org = o; }   // the customer app asks a partner shop for its free times
-  else if (!tk && (pth === '/api/login' || pth === '/api/public/login-hint')) {
+  else if (!tk && (pth === '/api/login' || pth === '/api/public/login-hint' || pth === '/api/device/people')) {
     const code = String(req.headers['x-org'] || '').trim().toLowerCase();
     if (code) { org = mainDb.prepare('select * from orgs where code=?').get(code); if (!org) return send(res, 404, { error: 'Shop code not found. Check the code and try again.' }); }
   }
@@ -888,13 +902,37 @@ async function handleIn(req, res) {
   { const r = await PUBLIC_ROUTES({ req, res, p, method, q, ip }); if (r !== NEXT) return r; }   // src/routes/public.js
   if (p.startsWith('/api/bh/')) return BH(req, res, p, method, q, ip);
   if (p === '/api/public/login-hint' && method === 'GET') return send(res, 200, { ownerNamed: !!ownerUser() });
+  if (p === '/api/device/people' && method === 'GET') {   // only names, for the "pick your name" screen of a set-up phone
+    const d = deviceOf(req); if (!d) return send(res, 401, { error: 'This phone is not set up for PIN login. Ask the owner.' });
+    run('update devices set lastUsedAt=? where id=?', nowISO(), d.id);
+    return send(res, 200, { branch: { id: d.branchId, name: get('branches', d.branchId)?.name || '' }, device: d.name,
+      people: all("select id, name, role from users where active=1 and branchId=? and role in ('cashier','barber') and pinKey is not null and pinKey<>'' order by name", d.branchId) });
+  }
   if (p === '/api/login' && method === 'POST') {
     const b = await readBody(req);
     await new Promise(r => setTimeout(r, failDelay(ip)));
     const uname = String(b.username || '').trim().toLowerCase(), pw = String(b.password || '');
     let tok = null, who = '';
     const pin = String(b.pin || '').trim();
-    if (uname.length > 64) return send(res, 401, { error: 'Wrong username or password' });   // no real username is this long: refused without being counted or remembered
+    if (uname.length > 64) return send(res, 401, { error: 'Wrong username or password' });
+    if (b.userId) {   // picked a name on a set-up phone, then typed the PIN. Nothing waits from the checks to the answer.
+      const d = deviceOf(req); if (!d) return send(res, 401, { error: 'This phone is not set up for PIN login. Ask the owner.' });
+      const shopKey = curOrg()?.id || 'main', u = one('select * from users where id=? and active=1', String(b.userId)), personKey = shopKey + ':person:' + (u?.id || '-');
+      { const w = Math.max(u ? personPin.lockedFor(personKey) : 0, devicePin.lockedFor(d.id));
+        if (w) return send(res, 429, { error: u && personPin.lockedFor(personKey) ? `Too many wrong PINs for ${u.name}. Their PIN login is paused for ${waitText(w)}. Ask the owner if this keeps happening.` : `Too many wrong PINs on this phone. Please wait ${waitText(w)}.` }); }
+      const good = u && u.branchId === d.branchId && ['cashier', 'barber'].includes(u.role) && u.pinKey && /^\d{6}$/.test(pin) && sameKey(pinKeyOf(pin), u.pinKey);
+      if (!good) {
+        devicePin.fail(d.id);
+        const locked = u ? personPin.fail(personKey) : 0;
+        if (locked) log({ name: u.name }, 'pin-login-paused', 'auth', u.id, `too many wrong PINs, ${waitText(locked)} (phone: ${d.name})`);
+        log({ name: u?.name || 'unknown person' }, 'login-failed', 'auth', u?.id || '', 'name + PIN, phone: ' + d.name);
+        return send(res, 401, { error: 'Wrong PIN' });
+      }
+      personPinShort.clear(personKey); run('update devices set lastUsedAt=? where id=?', nowISO(), d.id);
+      log({ name: u.name }, 'login', 'auth', u.id, 'name + PIN, phone: ' + d.name);
+      return send(res, 200, { token: makeToken(u.id, u.pinKey.slice(-8), curOrg()?.id) });
+    }
+    if (pin && getSetting('pinOnly') === '0') return send(res, 403, { error: 'Log in with a PIN alone is turned off. Pick your name first, on a phone set up for your branch.' });   // no real username is this long: refused without being counted or remembered
     // from here to the answer nothing waits, so many requests sent at once are still counted one by one
     const shopKey = curOrg()?.id || 'main', lockKey = pin ? shopKey : shopKey + ':' + (uname || 'owner'), limiter = pin ? pinLimiter : userLimiter;
     { const w = limiter.lockedFor(lockKey);
@@ -956,6 +994,7 @@ async function handleIn(req, res) {
   // Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
   if (p.startsWith('/api/svc/')) return SERVICE_RECORDS({ req, res, p, method, q, me });   // src/routes/service-records.js
 
+  { const r = await DEVICES({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/devices.js
   { const r = await MANAGEMENT({ req, res, p, method, q, me, admin, adminOnly }); if (r !== NEXT) return r; }   // src/routes/management.js
   { const r = await PARTNER_SHOPS({ req, res, p, method, me }); if (r !== NEXT) return r; }   // src/routes/partner-shops.js
   { const r = await MARKETING({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/marketing.js
@@ -968,6 +1007,7 @@ async function handleIn(req, res) {
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
 const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
+const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
 const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isBranchUser, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
 const MARKETING = createMarketingRoutes({ curOrg, uid, nowISO, all, one, run, insert, log, normEmail, validEmail, TIERS, setSetting, NO_MAIL, mailCount, baseUrl, welcomeEmail, processEmails, AUD_WHO, audienceOf, promoEmail, queueMarketing, winbackCfg, runWinback, mailProvider, mailReady, MAIL_LIMIT, mailFrom, sendEmail, bad, send, readBody });
 const PARTNER_SHOPS = createPartnerShopRoutes({ ownerUser, mainDb, curOrg, BAD_ORGS, orgRow, orgList, inOrg, uid, dOf, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, log, normEmail, validEmail, mainSet, TRIAL_DAYS, PLAN_IDS, plansNow, payInfo, addMonthsStr, orgStatus, SIGNUPS_OPEN, esc2, sendEmail, makeToken, hashPw, bad, send, readBody });

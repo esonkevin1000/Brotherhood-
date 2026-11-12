@@ -100,12 +100,13 @@ export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainD
     // ----- settings: terms, email (admin) -----
     if (p === '/api/settings' && method === 'GET') {
       adminOnly();
-      return send(res, 200, { payRules: payRules(), attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: mailReady(), provider: mailProvider(), from: mailFrom(), replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+      return send(res, 200, { payRules: payRules(), pinOnly: getSetting('pinOnly') !== '0', attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: mailReady(), provider: mailProvider(), from: mailFrom(), replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
         log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
     }
     if (p === '/api/settings' && method === 'PUT') {
       adminOnly(); const b = await readBody(req, 50_000);
       if ('attPhoto' in b) setSetting('attPhoto', b.attPhoto ? '1' : '0');
+      if ('pinOnly' in b) { setSetting('pinOnly', b.pinOnly ? '1' : '0'); log(me, 'settings', 'settings', '', 'PIN-only login ' + (b.pinOnly ? 'on' : 'off')); }
       if ('attGeo' in b) setSetting('attGeo', b.attGeo ? '1' : '0');
       if (b.payRules) { for (const k of ['lunchAmount', 'lunchLateMins', 'allowLateMins']) if (k in b.payRules) { const v = Number(b.payRules[k]); if (!(v >= 0 && v <= 100000)) bad(400, 'Enter a valid number'); setSetting(k, String(v)); } log(me, 'pay-rules', 'settings', '', JSON.stringify(payRules())); }
       if ('terms' in b) setSetting('terms', String(b.terms || '').trim().slice(0, 8000));
