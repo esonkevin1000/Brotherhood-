@@ -7,12 +7,11 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
-import tls from 'node:tls';
-import net from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { mountBH } from './bh-api.js';
 import { migrate } from './src/db/migrate.js';
+import { createMailer } from './src/lib/mail.js';
 
 process.env.TZ ||= 'Asia/Manila';
 const PORT = +process.env.PORT || 3000;
@@ -417,7 +416,9 @@ You can unsubscribe at any time using the link at the bottom of every email, or 
 6. Protecting your data
 We do not sell or share your information with other companies. We follow the Data Privacy Act of 2012 (RA 10173). You have the right to ask to see, correct or delete your data by asking our cashier.`;
 const getTerms = () => getSetting('terms') || DEFAULT_TERMS;
-const EMAIL = { key: process.env.RESEND_API_KEY || '', from: process.env.EMAIL_FROM || 'Brotherhood Barber <onboarding@resend.dev>', replyTo: process.env.EMAIL_REPLY_TO || '' };
+// email sending lives in src/lib/mail.js; the count of emails sent today stays here because it is kept in the database
+const MAIL = createMailer({ defaultName: SHOP, sentToday: () => mailCount(), countSent: () => mailBump() });
+const EMAIL = MAIL.config, mailProvider = MAIL.provider, mailReady = MAIL.ready, MAIL_LIMIT = MAIL.limit, mailFrom = MAIL.from, sendEmail = MAIL.send;
 let lastOrigin = getSetting('origin') || '';
 addCol('email_log', 'campaignId', 'text');
 
@@ -453,54 +454,10 @@ const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === '1';
 const STARTER = [['Haircut', 150, 30], ['Haircut and shave', 250, 45], ['Beard trim', 100, 20]];   // a new shop starts with these; they change the names and prices in a minute
 const KIND_LABEL = { owner: 'Shop owner with barbers', renter: 'Chair renter', suite: 'Own suite or studio', student: 'Student barber' };
 
-// ---------- sending email: a Gmail account (or any SMTP account) first, else Resend ----------
-// Railway variables: GMAIL_USER = the Gmail address, GMAIL_APP_PASSWORD = a 16-letter App Password (Google Account, Security, App passwords).
-const SMTP = { host: process.env.SMTP_HOST || 'smtp.gmail.com', port: +process.env.SMTP_PORT || 465, secure: process.env.SMTP_SECURE !== '0',
-  user: String(process.env.GMAIL_USER || process.env.SMTP_USER || '').trim(), pass: String(process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS || '').replace(/\s+/g, '') };
-const mailProvider = () => SMTP.user && SMTP.pass ? 'gmail' : EMAIL.key ? 'resend' : '';
-const mailReady = () => !!mailProvider();
-const MAIL_LIMIT = +process.env.EMAIL_DAILY_LIMIT || (SMTP.user && SMTP.pass ? 450 : 3000);   // a normal Gmail account can send about 500 a day; we stop a little before
-const mailFrom = () => mailProvider() === 'gmail' ? SMTP.user : ((/<([^>]+)>/.exec(EMAIL.from) || [])[1] || EMAIL.from);
 const NO_MAIL = () => curOrg() ? 'Email is not turned on yet. Ask Brotherhood to connect it.' : 'Email is not connected yet. Add GMAIL_USER and GMAIL_APP_PASSWORD in the Railway variables.';
 // emails sent today, all shops together (kept in the main database so a restart does not reset it)
 const mailCount = () => { const [d, n] = String(mainGet('mailDay') || '').split(':'); return d === todayStr() ? +n || 0 : 0; };
 const mailBump = () => mainSet('mailDay', todayStr() + ':' + (mailCount() + 1));
-const b64 = s => Buffer.from(String(s), 'utf8').toString('base64');
-const wrap76 = s => s.replace(/.{1,76}/g, '$&\r\n');
-const dispName = n => /^[\x20-\x7e]*$/.test(n) ? '"' + n.replace(/["\\]/g, '') + '"' : '=?UTF-8?B?' + b64(n) + '?=';
-function mimeMessage({ from, fromName, to, subject, html, text, replyTo, unsub }) {
-  const bd = 'bh' + crypto.randomBytes(12).toString('hex'), sub = String(subject).replace(/[\r\n]+/g, ' ');
-  const h = [`From: ${fromName ? dispName(String(fromName).replace(/[\r\n]/g, '')) + ' ' : ''}<${from}>`, `To: <${to}>`, `Subject: ${/^[\x20-\x7e]*$/.test(sub) ? sub : '=?UTF-8?B?' + b64(sub) + '?='}`,
-    `Date: ${new Date().toUTCString()}`, `Message-ID: <${crypto.randomUUID()}@${from.split('@')[1] || 'brotherhood'}>`, 'MIME-Version: 1.0'];
-  if (replyTo) h.push(`Reply-To: <${replyTo}>`);
-  if (unsub) h.push(`List-Unsubscribe: <${unsub}>`);
-  h.push(`Content-Type: multipart/alternative; boundary="${bd}"`);
-  return h.join('\r\n') + '\r\n\r\n' + `--${bd}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrap76(b64(text || ' '))}`
-    + `--${bd}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrap76(b64(html || ' '))}--${bd}--\r\n`;
-}
-function smtpSend(msg, to) {
-  return new Promise(resolve => {
-    let done = false, buf = '', step = 0;
-    const sock = SMTP.secure ? tls.connect({ host: SMTP.host, port: SMTP.port, servername: SMTP.host }) : net.connect({ host: SMTP.host, port: SMTP.port });
-    const end = r => { if (done) return; done = true; clearTimeout(tm); try { sock.end(); } catch { } resolve(r); };
-    const tm = setTimeout(() => end({ ok: false, error: 'The mail server did not answer' }), 30000);
-    const say = l => sock.write(l + '\r\n');
-    const steps = [[220, () => say('EHLO brotherhood')], [250, () => say('AUTH LOGIN')], [334, () => say(b64(SMTP.user))], [334, () => say(b64(SMTP.pass))],
-      [235, () => say(`MAIL FROM:<${SMTP.user}>`)], [250, () => say(`RCPT TO:<${to}>`)], [250, () => say('DATA')],
-      [354, () => sock.write(msg.replace(/\r\n\./g, '\r\n..') + '\r\n.\r\n')], [250, () => { say('QUIT'); end({ ok: true }); }]];
-    sock.on('data', d => {
-      buf += d.toString('utf8'); const lines = buf.split(/\r?\n/); buf = lines.pop();
-      for (const ln of lines) {
-        if (done) return; if (/^\d{3}-/.test(ln)) continue;   // more lines of the same answer follow
-        const code = +ln.slice(0, 3), [want, next] = steps[step] || [];
-        if (code !== want) return end({ ok: false, error: (code === 535 || code === 534 ? 'Gmail did not accept the login. Use an App Password, not your normal password. ' : '') + ln.slice(0, 200) });
-        step++; next();
-      }
-    });
-    sock.on('error', e => end({ ok: false, error: String(e.message).slice(0, 200) }));
-    sock.on('close', () => end({ ok: false, error: 'The mail server closed the connection' }));
-  });
-}
 const baseUrl = () => process.env.PUBLIC_URL || lastOrigin || 'http://localhost:' + PORT;
 function rememberOrigin(req) {   // only called for authenticated admins, so the Host header can be trusted
   const host = req.headers.host || ''; if (!host || /^(localhost|127\.)/.test(host)) return;
@@ -619,20 +576,6 @@ function queueEmail({ customerId = '', to, kind, subject, html, text }) {   // t
   if (curOrg() || !mailReady() || !validEmail(to)) return false;
   run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt) values(?,?,?,?,?,?,?,'pending',0,'',?)", uid(), customerId, to, kind, subject, html, text, nowISO());
   setTimeout(() => processEmails().catch(() => { }), 50); return true;
-}
-async function sendEmail({ to, subject, html, text, fromName = '', replyTo = '', unsub = '' }) {
-  const pv = mailProvider(); if (!pv) return { ok: false, error: 'Email service not configured' };
-  if (mailCount() >= MAIL_LIMIT) return { ok: false, limit: true, error: "Today's email limit is used up. The rest go out tomorrow." };
-  const name = String(fromName || (/^(.*?)\s*</.exec(EMAIL.from) || [])[1] || SHOP).replace(/[<>"\r\n]/g, '').trim(), rt = replyTo || EMAIL.replyTo;
-  let r;
-  if (pv === 'gmail') r = await smtpSend(mimeMessage({ from: SMTP.user, fromName: name, to, subject, html, text, replyTo: rt, unsub }), to);
-  else try {
-    const x = await fetch(process.env.RESEND_URL || 'https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + EMAIL.key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: fromName ? `${name} <${mailFrom()}>` : EMAIL.from, to: [to], subject, html, text, ...(rt ? { reply_to: rt } : {}), ...(unsub ? { headers: { 'List-Unsubscribe': `<${unsub}>` } } : {}) }) });
-    const j = await x.json().catch(() => ({}));
-    r = x.ok ? { ok: true } : { ok: false, error: String(j.message || j.error || x.status).slice(0, 300) };
-  } catch (e) { r = { ok: false, error: String(e.message).slice(0, 300) }; }
-  if (r.ok) mailBump(); return r;
 }
 let sending = false;
 // sends what is waiting, for Brotherhood and every partner shop (a partner's emails go out with the shop's name and reply to the shop's email)

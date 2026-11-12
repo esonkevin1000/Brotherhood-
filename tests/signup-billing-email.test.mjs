@@ -105,7 +105,8 @@ try {
   const am = mails.find(m => m.to === 'ana@x.ph'), ab = body(am);
   ok('the email is personal, has the button and a working unsubscribe link and header', ab.includes('Hi Ana') && ab.includes('/member') && /List-Unsubscribe: <https:\/\/getbrotherhoodapp\.com\/unsubscribe\?c=\w+&t=/.test(am.raw), ab.slice(0, 300));
   // daily limit 8: welcome(4 customers, 3 with consent? welcome needs consent) + test + 3 ... the rest waits
-  mk = (await call('GET', '/api/marketing', null, owner)).j; ok('campaign stats', mk.campaigns[0].stats.sent === 3 && mk.campaigns[0].total === 3, JSON.stringify(mk.campaigns[0]));
+  for (let i = 0; i < 25; i++) { mk = (await call('GET', '/api/marketing', null, owner)).j; if (mk.campaigns[0].stats.sent === 3) break; await new Promise(r => setTimeout(r, 200)); }   // the server marks an email as sent a moment after the mail server accepts it
+  ok('campaign stats', mk.campaigns[0].stats.sent === 3 && mk.campaigns[0].total === 3, JSON.stringify(mk.campaigns[0]));
   // unsubscribe
   const link = /List-Unsubscribe: <([^>]+)>/.exec(am.raw)[1].replace('https://getbrotherhoodapp.com', B);
   r = await fetch(link); ok('unsubscribe link works', r.status === 200 && (await r.text()).includes('unsubscribed'));
