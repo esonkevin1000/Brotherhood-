@@ -18,7 +18,8 @@ try {
   let r = await call('POST', '/api/device/setup', { branchId: br.id, name: 'Front desk tablet' }, owner);
   ok('an owner sets up a phone for a branch and gets a device key', r.s === 201 && typeof r.j.deviceToken === 'string' && r.j.device.branchName === br.name, r);
   const dev = r.j.deviceToken, devId = r.j.device.id;
-  ok('an admin can set one up too', (await call('POST', '/api/device/setup', { branchId: br2.id }, ana)).s === 201);
+  r = await call('POST', '/api/device/setup', { branchId: br2.id }, ana); const dev2 = r.j.deviceToken;
+  ok('an admin can set one up too', r.s === 201);
   const deskTok = (await call('POST', '/api/login', { pin: '111111' })).j.token;
   ok('the front desk cannot set up a phone', (await call('POST', '/api/device/setup', { branchId: br.id }, deskTok)).s === 403);
   ok('nobody can without a login', (await call('POST', '/api/device/setup', { branchId: br.id })).s === 401);
@@ -35,6 +36,8 @@ try {
   // ---------- logging in with name + PIN ----------
   r = await call('POST', '/api/login', { userId: desk.id, pin: '111111' }, null, D(dev));
   ok('Dina picks her name and types her PIN', r.s === 200 && (await call('GET', '/api/svc/today', null, r.j.token)).s === 200, r);
+  { const exp = JSON.parse(Buffer.from(r.j.token.split('.')[0], 'base64url').toString()).e - Date.now();
+    ok('a login on a shared branch phone lasts one shift (12 hours), not 30 days', exp > 11.9 * 3600e3 && exp <= 12 * 3600e3, exp / 3600e3); }
   r = await call('POST', '/api/login', { userId: kevU.id, pin: '111111' }, null, D(dev)); ok("Dina's PIN does not open Kev's login", r.s === 401 && r.j.error === 'Wrong PIN', r);
   r = await call('POST', '/api/login', { userId: other.id, pin: '333333' }, null, D(dev)); ok('someone from another branch cannot log in on this phone', r.s === 401, r);
   r = await call('POST', '/api/login', { userId: desk.id, pin: '111111' }); ok('name + PIN needs a set-up phone', r.s === 401, r);
@@ -50,6 +53,14 @@ try {
   ok("the pause is in the activity log under Kev's name", JSON.stringify((await call('GET', '/api/audit', null, owner)).j).includes('pin-login-paused'));
   const burst = await Promise.all(Array.from({ length: 20 }, (_, i) => call('POST', '/api/login', { userId: desk.id, pin: String(500000 + i) }, null, D(dev))));
   ok('20 wrong PINs for one person at once: only the allowed few are even checked', burst.filter(x => x.s === 401).length === 4 && burst.filter(x => x.s === 429).length === 16, burst.map(x => x.s));
+
+  // ---------- a phone of one branch cannot pause someone of another branch (T6d review) ----------
+  // Desk Two works at branch 2. Wrong PINs for her sent from branch 1's phone count only against that phone.
+  const cross = [];
+  for (let i = 0; i < 6; i++) cross.push(await call('POST', '/api/login', { userId: other.id, pin: String(600000 + i) }, null, D(dev)));
+  ok('wrong PINs for someone of another branch are refused, never "paused"', cross.every(x => x.s === 401), cross.map(x => x.s));
+  ok('and the answers never show her name', cross.every(x => !/Desk Two/.test(JSON.stringify(x.j))));
+  ok('Desk Two still logs in on her own branch phone', (await call('POST', '/api/login', { userId: other.id, pin: '333333' }, null, D(dev2))).s === 200);
 
   // ---------- turning off the old PIN-only login ----------
   ok('the old PIN-only login still works by default (until every branch phone is set up)', (await call('POST', '/api/login', { pin: '333333' })).s === 200);

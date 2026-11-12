@@ -31,6 +31,12 @@ try {
   ok('an admin cannot rename it, turn it into an admin, or change its password', (await call('PUT', '/api/users/' + kevinId, { name: 'Hacked' }, ana)).s === 403 && (await call('PUT', '/api/users/' + kevinId, { role: 'admin' }, ana)).s === 403 && (await call('PUT', '/api/users/' + kevinId, { password: 'taken-over-pass' }, ana)).s === 403);
   ok('an admin cannot reset it or remove it', (await call('POST', `/api/users/${kevinId}/reset`, null, ana)).s === 403 && (await call('DELETE', '/api/users/' + kevinId, null, ana)).s === 403);
   ok('an admin cannot turn their own account into an owner', (await call('PUT', '/api/users/' + (await call('GET', '/api/state', null, ana)).j.me.id, { role: 'owner' }, ana)).s === 403);
+  // ---------- an admin cannot take over another admin (T6d review) ----------
+  const ben = (await call('POST', '/api/users', { name: 'Admin Ben', username: 'ben', password: 'benpass-123', role: 'admin' }, railway)).j;
+  ok("an admin cannot change another admin's password, username or role", (await call('PUT', '/api/users/' + ben.id, { password: 'taken-over-pass' }, ana)).s === 403 && (await call('PUT', '/api/users/' + ben.id, { username: 'ben2' }, ana)).s === 403 && (await call('PUT', '/api/users/' + ben.id, { role: 'cashier' }, ana)).s === 403);
+  ok("so Ben's own password still works", (await call('POST', '/api/login', { username: 'ben', password: 'benpass-123' })).s === 200);
+  ok('an admin can still edit their own name', (await call('PUT', '/api/users/' + (await call('GET', '/api/state', null, ana)).j.me.id, { name: 'Admin Ana' }, ana)).s === 200);
+  ok("an owner can change an admin's password", (await call('PUT', '/api/users/' + ben.id, { password: 'benpass-456' }, railway)).s === 200);
   r = await call('POST', `/api/users/${kevinId}/reset`, null, railway);
   ok('an owner can give an owner account a new password, shown once', r.s === 200 && r.j.password && !r.j.pin, r);
   ok('the old login of that owner account ends', (await call('GET', '/api/state', null, kevin)).s === 401);

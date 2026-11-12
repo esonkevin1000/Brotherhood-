@@ -58,8 +58,11 @@ try {
   try {
     const mk = (secret, payload) => { const p = Buffer.from(JSON.stringify(payload)).toString('base64url'); return p + '.' + crypto.createHmac('sha256', secret).update(p).digest('base64url'); };
     // a Brotherhood owner token carries a mark of the Railway password (T6b), here ADMIN_PASSWORD=ownerpw
-    const ov = crypto.createHash('sha256').update('owner-login:ownerpw').digest('base64url').slice(-8);
+    // the mark is keyed with SESSION_SECRET (T6d review), so a stolen token cannot be used to guess the Railway password offline
+    const ov = crypto.createHmac('sha256', 'wired-secret').update('owner-login:ownerpw').digest('base64url').slice(-8);
     const good = mk('wired-secret', { u: 'owner', v: ov, e: Date.now() + 864e5 });
+    const plain = crypto.createHash('sha256').update('owner-login:ownerpw').digest('base64url').slice(-8);
+    ok('an owner token with the old unkeyed mark is refused', (await S.call('GET', '/api/state', null, mk('wired-secret', { u: 'owner', v: plain, e: Date.now() + 864e5 }))).s === 401);
     ok('an owner token without the password mark is refused', (await S.call('GET', '/api/state', null, mk('wired-secret', { u: 'owner', v: '', e: Date.now() + 864e5 }))).s === 401);
     ok('the server accepts a token signed with its SESSION_SECRET', (await S.call('GET', '/api/state', null, good)).s === 200);
     ok('and refuses one signed with anything else', (await S.call('GET', '/api/state', null, mk('bp:ownerpw', { u: 'owner', v: ov, e: Date.now() + 864e5 }))).s === 401);

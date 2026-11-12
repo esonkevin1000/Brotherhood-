@@ -265,7 +265,9 @@ const SECRET = process.env.SESSION_SECRET || 'bp:' + PASS;
 // FILES_OLD_SECRETS (comma-separated) lists further old secrets, for the rare case the owner password changed too.
 const FILE_SECRETS = [process.env.FILES_SECRET || SECRET, 'bp:' + PASS, ...String(process.env.FILES_OLD_SECRETS || '').split(',').map(s => s.trim()).filter(Boolean)];
 const { makeToken, readToken, encBuf, decBuf, unsubSig } = createAuth(SECRET, { fileSecrets: FILE_SECRETS });
-const RAILWAY_OWNER_V = crypto.createHash('sha256').update('owner-login:' + PASS).digest('base64url').slice(-8);
+// a mark of the Railway password inside the owner token: changing the password logs old owner tokens out. It is keyed with
+// the server secret, so someone holding a token cannot use the mark to guess the password offline.
+const RAILWAY_OWNER_V = crypto.createHmac('sha256', SECRET).update('owner-login:' + PASS).digest('base64url').slice(-8);
 // Settings that weaken logins on the live server (decision D-22: warn loudly, keep running)
 const IS_PRODUCTION = !!process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
 const SECRET_WARNINGS = !IS_PRODUCTION ? [] : [
@@ -314,6 +316,7 @@ function deviceOf(req) {
   const d = one('select * from devices where id=? and active=1', String(t.u).slice(7));
   return d && get('branches', d.branchId) ? d : null;
 }
+const SHIFT_DAYS = 0.5;   // a login on a shared branch phone lasts 12 hours
 const sameKey = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 const waitText = ms => { const m = Math.ceil(ms / 60e3); return m >= 60 ? 'about ' + Math.ceil(m / 60) + ' hour' + (m > 60 ? 's' : '') : m + ' minute' + (m === 1 ? '' : 's'); };
 const fails = new Map();
@@ -912,25 +915,27 @@ async function handleIn(req, res) {
     const b = await readBody(req);
     await new Promise(r => setTimeout(r, failDelay(ip)));
     const uname = String(b.username || '').trim().toLowerCase(), pw = String(b.password || '');
-    let tok = null, who = '';
+    let tok = null, who = '', railwayOwner = false;
     const pin = String(b.pin || '').trim();
     if (uname.length > 64) return send(res, 401, { error: 'Wrong username or password' });
     if (b.userId) {   // picked a name on a set-up phone, then typed the PIN. Nothing waits from the checks to the answer.
       const d = deviceOf(req); if (!d) return send(res, 401, { error: 'This phone is not set up for PIN login. Ask the owner.' });
-      const shopKey = curOrg()?.id || 'main', u = one('select * from users where id=? and active=1', String(b.userId)), personKey = shopKey + ':person:' + (u?.id || '-');
+      // only staff of this phone's branch count: a phone cannot pause (or name) someone of another branch
+      const shopKey = curOrg()?.id || 'main', found = one('select * from users where id=? and active=1', String(b.userId));
+      const u = found && found.branchId === d.branchId && ['cashier', 'barber'].includes(found.role) ? found : null, personKey = shopKey + ':person:' + (u?.id || '-');
       { const w = Math.max(u ? personPin.lockedFor(personKey) : 0, devicePin.lockedFor(d.id));
         if (w) return send(res, 429, { error: u && personPin.lockedFor(personKey) ? `Too many wrong PINs for ${u.name}. Their PIN login is paused for ${waitText(w)}. Ask the owner if this keeps happening.` : `Too many wrong PINs on this phone. Please wait ${waitText(w)}.` }); }
-      const good = u && u.branchId === d.branchId && ['cashier', 'barber'].includes(u.role) && u.pinKey && /^\d{6}$/.test(pin) && sameKey(pinKeyOf(pin), u.pinKey);
+      const good = u && u.pinKey && /^\d{6}$/.test(pin) && sameKey(pinKeyOf(pin), u.pinKey);
       if (!good) {
         devicePin.fail(d.id);
         const locked = u ? personPin.fail(personKey) : 0;
         if (locked) log({ name: u.name }, 'pin-login-paused', 'auth', u.id, `too many wrong PINs, ${waitText(locked)} (phone: ${d.name})`);
-        log({ name: u?.name || 'unknown person' }, 'login-failed', 'auth', u?.id || '', 'name + PIN, phone: ' + d.name);
+        log({ name: found?.name || 'unknown person' }, 'login-failed', 'auth', found?.id || '', 'name + PIN, phone: ' + d.name + (found && !u ? ' (not staff of this branch)' : ''));
         return send(res, 401, { error: 'Wrong PIN' });
       }
       personPinShort.clear(personKey); run('update devices set lastUsedAt=? where id=?', nowISO(), d.id);
       log({ name: u.name }, 'login', 'auth', u.id, 'name + PIN, phone: ' + d.name);
-      return send(res, 200, { token: makeToken(u.id, u.pinKey.slice(-8), curOrg()?.id) });
+      return send(res, 200, { token: makeToken(u.id, u.pinKey.slice(-8), curOrg()?.id, SHIFT_DAYS) });   // a shared phone: one shift, then log in again
     }
     if (pin && getSetting('pinOnly') === '0') return send(res, 403, { error: 'Log in with a PIN alone is turned off. Pick your name first, on a phone set up for your branch.' });   // no real username is this long: refused without being counted or remembered
     // from here to the answer nothing waits, so many requests sent at once are still counted one by one
@@ -941,7 +946,7 @@ async function handleIn(req, res) {
       const u = /^\d{6}$/.test(pin) ? one('select * from users where pinKey=? and active=1', pinKeyOf(pin)) : null;
       if (u) { tok = makeToken(u.id, u.pinKey.slice(-8), curOrg()?.id); who = u.name; }
     }
-    else if (curOrg() ? (uname === curOrg().ownerUser && checkPw(pw, curOrg().ownerHash)) : ((ownerUser() ? uname === ownerUser() : (!uname || uname === 'owner')) && crypto.timingSafeEqual(sha(pw), sha(PASS)))) { tok = makeToken('owner', curOrg() ? String(curOrg().ownerHash).slice(-8) : RAILWAY_OWNER_V, curOrg()?.id); who = 'Owner'; }
+    else if (curOrg() ? (uname === curOrg().ownerUser && checkPw(pw, curOrg().ownerHash)) : ((ownerUser() ? uname === ownerUser() : (!uname || uname === 'owner')) && crypto.timingSafeEqual(sha(pw), sha(PASS)))) { tok = makeToken('owner', curOrg() ? String(curOrg().ownerHash).slice(-8) : RAILWAY_OWNER_V, curOrg()?.id); who = 'Owner'; railwayOwner = !curOrg(); }
     else if (uname) {
       const u = one('select * from users where username=? and active=1', uname);
       if (u?.passHash && checkPw(pw, u.passHash)) { tok = makeToken(u.id, u.passHash.slice(-8), curOrg()?.id); who = u.name; }
@@ -952,7 +957,7 @@ async function handleIn(req, res) {
     }
     else if (!pin) userLimiter.clear(lockKey);
     if (!tok) { noteFail(ip); log({ name: uname || 'owner' }, 'login-failed', 'auth', '', ip); return send(res, 401, { error: pin ? 'Wrong PIN' : 'Wrong username or password' }); }
-    const emergency = !pin && !curOrg() && who === 'Owner' && tok && one("select 1 x from users where role='owner' and active=1");
+    const emergency = railwayOwner && one("select 1 x from users where role='owner' and active=1");
     fails.delete(ip); log({ name: who }, emergency ? 'emergency-login' : 'login', 'auth', '', emergency ? `Railway ADMIN_PASSWORD used (${ip})` : ip);
     return send(res, 200, { token: tok });
   }

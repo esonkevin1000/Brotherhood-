@@ -1741,11 +1741,17 @@ app.addEventListener('click', async e => {
   if ('devreload' in D) { S.dev = null; return render(); }
   if ('devset' in D) {
     const bid = document.getElementById('devbranch')?.value; if (!bid) return;
-    try { const j = await sapi('/device/setup', { method: 'POST', body: { branchId: bid } }); store.set('bh_device', j.deviceToken); store.set('bh_device_org', store.get('bh_org') || null); store.set('bh_device_branch', j.device.branchName); toast('This phone is set up for ' + j.device.branchName); }
+    try { const j = await sapi('/device/setup', { method: 'POST', body: { branchId: bid } }); store.set('bh_device', j.deviceToken); store.set('bh_device_org', store.get('bh_org') || null); store.set('bh_device_branch', j.device.branchName); store.set('bh_device_id', j.device.id);
+      // sign the owner/admin out, so the next person on this shared phone sees the name list, not the owner's session
+      S.proToken = null; S.pro = null; store.set('bh_pro', null); S.dev = null; S.devSkip = false;
+      toast('This phone is set up for ' + j.device.branchName + '. You are signed out; staff can now tap their name.'); }
     catch (x) { toast(x.message); }
     return render();
   }
-  if ('devunset' in D) { store.set('bh_device', null); store.set('bh_device_org', null); store.set('bh_device_branch', null); S.dev = null; toast('This phone is no longer used for PIN login'); return render(); }
+  if ('devunset' in D) {
+    const id = store.get('bh_device_id');   // also switch it off on the server, so the key on this phone stops working
+    if (id) { try { await sapi('/devices/' + id, { method: 'DELETE' }); } catch (x) { if (!/not found/i.test(x.message)) { toast(x.message); return; } } }
+    store.set('bh_device_id', null); store.set('bh_device', null); store.set('bh_device_org', null); store.set('bh_device_branch', null); S.dev = null; toast('This phone is no longer used for PIN login'); return render(); }
 });
 app.addEventListener('submit', async e => {
   if (e.target.id !== 'devpinf') return;
