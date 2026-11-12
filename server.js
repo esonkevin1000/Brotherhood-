@@ -6,12 +6,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { mountBH } from './bh-api.js';
 import { migrate } from './src/db/migrate.js';
 import { createMailer } from './src/lib/mail.js';
+import { HttpError, bad, MIME, send, readBody, noteGzip, staticServer } from './src/lib/http.js';
 
 process.env.TZ ||= 'Asia/Manila';
 const PORT = +process.env.PORT || 3000;
@@ -286,8 +286,6 @@ const fails = new Map();
 const failDelay = ip => { const f = fails.get(ip); return f && Date.now() - f.t < 600e3 ? Math.min(f.n * 500, 3000) : 0; };
 const noteFail = ip => { const f = fails.get(ip); fails.set(ip, { n: (f && Date.now() - f.t < 600e3 ? f.n : 0) + 1, t: Date.now() }); };
 
-class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
-const bad = (code, msg) => { throw new HttpError(code, msg); };
 
 // ---------- POS logic ----------
 const branchScope = (me, requested) => {
@@ -998,33 +996,8 @@ function csv(rep) {
 }
 
 // ---------- http ----------
-const GZIP_OK = new WeakSet();   // responses whose client accepts gzip
-const send = (res, code, body, type = 'application/json') => {
-  let out = type === 'application/json' && !Buffer.isBuffer(body) ? JSON.stringify(body) : body;
-  const h = { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
-  if (GZIP_OK.has(res) && out.length > 1024) { out = zlib.gzipSync(out, { level: 6 }); h['Content-Encoding'] = 'gzip'; h.Vary = 'Accept-Encoding'; }
-  res.writeHead(code, h); res.end(out);
-};
-// Static files: read once, compressed once (brotli + gzip), revalidated with ETag so repeat visits cost a tiny 304.
-const SCACHE = new Map();
-function serveStatic(req, res, file) {
-  const fp = path.join(DIR, file), st = fs.statSync(fp); let c = SCACHE.get(file);
-  if (!c || c.mtime !== st.mtimeMs) {
-    const buf = fs.readFileSync(fp), ext = file.split('.').pop(), text = ext === 'html' || ext === 'js' || ext === 'webmanifest' || ext === 'json';
-    c = { mtime: st.mtimeMs, buf, ext, etag: '"' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 16) + '"', br: text && buf.length > 512 ? zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 9 } }) : null, gz: text && buf.length > 512 ? zlib.gzipSync(buf, { level: 9 }) : null };
-    SCACHE.set(file, c);
-  }
-  const img = c.ext === 'png' || c.ext === 'jpg';
-  const h = { 'Content-Type': MIME[c.ext], ETag: c.etag, 'Cache-Control': img ? 'public, max-age=86400' : 'no-cache', 'X-Content-Type-Options': 'nosniff', Vary: 'Accept-Encoding' };
-  if (req.headers['if-none-match'] === c.etag) { res.writeHead(304, h); return res.end(); }
-  const ae = String(req.headers['accept-encoding'] || ''); let body = c.buf;
-  if (c.br && /(^|[ ,])br([ ,;]|$)/.test(ae)) { body = c.br; h['Content-Encoding'] = 'br'; } else if (c.gz && /gzip/.test(ae)) { body = c.gz; h['Content-Encoding'] = 'gzip'; }
-  h['Content-Length'] = body.length; res.writeHead(200, h); res.end(body);
-}
-const readBody = (req, max = 100_000) => new Promise((ok, no) => {
-  let s = ''; req.on('data', c => { s += c; if (s.length > max) { no(new HttpError(413, 'Too large')); req.destroy(); } });
-  req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { no(new HttpError(400, 'Bad JSON')); } });
-});
+// JSON answers, request bodies and static files are in src/lib/http.js
+const serveStatic = staticServer(DIR);
 const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/brotherhood': 'bh.html', '/member': 'bh.html', '/bh.js': 'bh.js', '/bh.webmanifest': 'bh.webmanifest', '/bh-icon-192.png': 'bh-icon-192.png', '/bh-icon-512.png': 'bh-icon-512.png', '/bh-apple-touch.png': 'bh-apple-touch.png', '/bh-mark.png': 'bh-mark.png', '/barbershop': 'landing.html', '/privacy': 'site/privacy.html', '/terms': 'site/terms.html', '/delete-account': 'site/delete-account.html', '/signup': 'site/signup.html', '/shop-terms': 'site/shop-terms.html', '/': 'home.html','/app.js': 'app.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backend': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace(/:\d+$/, '').replace(/^www\./, '');
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST), LANDING_HOST = normHost(process.env.LANDING_HOST);
@@ -1032,7 +1005,6 @@ const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.e
 const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/brotherhood', '/member', '/bh.js', '/bh.webmanifest', '/bh-icon-192.png', '/bh-icon-512.png', '/bh-apple-touch.png', '/bh-mark.png', '/logo.png', '/logo-sm.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/barbershop', '/privacy', '/terms', '/delete-account', '/signup', '/shop-terms', '/.well-known/assetlinks.json']);
 // App version = hash of every file the apps load. It changes on each deploy, which is what makes phones offer the "Update app" button.
 const APP_VERSION = (() => { const h = crypto.createHash('sha1'); for (const f of Object.values(STATIC).filter((v, i, a) => a.indexOf(v) === i && v !== 'sw.js').sort()) { try { h.update(fs.readFileSync(path.join(DIR, f))); } catch { } } return h.digest('hex').slice(0, 12); })();
-const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', jpg: 'image/jpeg', json: 'application/json' };
 const REFS = {
   staff: [['orders', 'barberId'], ['attendance', 'staffId']], chairs: [['orders', 'chairId'], ['staff', 'chairId']],
   branches: [['staff', 'branchId'], ['chairs', 'branchId'], ['orders', 'branchId'], ['users', 'branchId']], categories: [['items', 'categoryId']]
@@ -2355,7 +2327,7 @@ const BH = mountBH({ inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get,
 schemaReady = true; ORG_DBS.clear();
 for (const o of orgList()) { try { orgDb(o.id); } catch { } }   // partner shops are migrated at startup too, not on their first request
 http.createServer(async (req, res) => {
-  if (/gzip/.test(String(req.headers['accept-encoding'] || ''))) GZIP_OK.add(res);
+  noteGzip(req, res);
   try { await handle(req, res); }
   catch (e) { if (!res.headersSent) send(res, e instanceof HttpError ? e.code : 400, { error: e.message }); }
 }).listen(PORT, () => console.log(`${SHOP} running → http://localhost:${PORT}`));
