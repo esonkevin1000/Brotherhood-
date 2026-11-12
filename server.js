@@ -11,6 +11,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { mountBH } from './bh-api.js';
 import { migrate } from './src/db/migrate.js';
 import { createMailer } from './src/lib/mail.js';
+import { hashPw, checkPw, sha, createAuth } from './src/lib/auth.js';
 import { HttpError, bad, MIME, send, readBody, noteGzip, staticServer } from './src/lib/http.js';
 
 process.env.TZ ||= 'Asia/Manila';
@@ -246,20 +247,8 @@ dailyBackup(); setInterval(dailyBackup, 6 * 3600e3).unref();
 
 // ---------- auth ----------
 const SECRET = process.env.SESSION_SECRET || 'bp:' + PASS;
-// evidence photos are encrypted at rest (AES-256-GCM) with a key derived from the server secret
-const FKEY = crypto.createHash('sha256').update('files:' + SECRET).digest();
-const encBuf = b => { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', FKEY, iv), e = Buffer.concat([c.update(b), c.final()]); return Buffer.concat([iv, c.getAuthTag(), e]); };
-const decBuf = b => { const d = crypto.createDecipheriv('aes-256-gcm', FKEY, b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]); };
-const TOKEN_DAYS = 30;
-const sign = s => crypto.createHmac('sha256', SECRET).update(s).digest('base64url');
-const makeToken = (u, v, o) => { const p = Buffer.from(JSON.stringify({ u, v, e: Date.now() + TOKEN_DAYS * 864e5, ...(o ? { o } : {}) })).toString('base64url'); return p + '.' + sign(p); };
-function readToken(t) {
-  const [p, sig] = String(t).split('.');
-  if (!p || !sig) return null;
-  const a = Buffer.from(sig), b = Buffer.from(sign(p));
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-  try { const o = JSON.parse(Buffer.from(p, 'base64url').toString()); return o.e > Date.now() ? o : null; } catch { return null; }
-}
+// tokens, photo encryption and unsubscribe codes are in src/lib/auth.js
+const { makeToken, readToken, encBuf, decBuf, unsubSig } = createAuth(SECRET);
 // roles: owner (env password) and admin = everything; cashier = POS for own branch only
 function whoami(req) {
   const o = readToken((req.headers.authorization || '').replace(/^Bearer /, ''));
@@ -279,9 +268,6 @@ const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings',
 const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: (Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber).filter(m => m !== 'queue') }; } catch { return { ...DEFAULT_PERMS }; } };
 const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
 const needAny = (me, mods) => { if (isAdmin(me)) return; const have = modulesFor(me.role); if (![].concat(mods).some(m => have.includes(m))) bad(403, 'Your role is not allowed to open this section'); };
-const hashPw = pw => { const salt = crypto.randomBytes(16).toString('hex'); return salt + ':' + crypto.scryptSync(pw, salt, 32).toString('hex'); };
-const checkPw = (pw, stored) => { const [salt, h] = String(stored).split(':'); return crypto.timingSafeEqual(crypto.scryptSync(pw, salt, 32), Buffer.from(h, 'hex')); };
-const sha = s => crypto.createHash('sha256').update(String(s)).digest();
 const fails = new Map();
 const failDelay = ip => { const f = fails.get(ip); return f && Date.now() - f.t < 600e3 ? Math.min(f.n * 500, 3000) : 0; };
 const noteFail = ip => { const f = fails.get(ip); fails.set(ip, { n: (f && Date.now() - f.t < 600e3 ? f.n : 0) + 1, t: Date.now() }); };
@@ -462,7 +448,6 @@ function rememberOrigin(req) {   // only called for authenticated admins, so the
   const o = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0] + '://' + host;
   if (o !== lastOrigin) { lastOrigin = o; setSetting('origin', o); }
 }
-const unsubSig = id => crypto.createHmac('sha256', SECRET).update('unsub:' + id).digest('base64url').slice(0, 22);
 
 function custCard(c) {
   const s = one("select count(*) n, ifnull(sum(total),0) s, max(paidAt) l from orders where customerId=? and status='paid'", c.id);
