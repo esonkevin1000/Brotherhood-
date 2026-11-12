@@ -7,6 +7,8 @@ import zlib from 'node:zlib';
 // throw bad(409, 'message') anywhere in a request: the server answers with that status and { error: message }
 export class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 export const bad = (code, msg) => { throw new HttpError(code, msg); };
+// a route module answers NEXT when none of its routes matched, so the server tries the next ones
+export const NEXT = Symbol('not handled here');
 
 export const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', webmanifest: 'application/manifest+json', png: 'image/png', jpg: 'image/jpeg', json: 'application/json' };
 
