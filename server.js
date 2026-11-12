@@ -259,7 +259,19 @@ dailyBackup(); setInterval(dailyBackup, 6 * 3600e3).unref();
 // ---------- auth ----------
 const SECRET = process.env.SESSION_SECRET || 'bp:' + PASS;
 // tokens, photo encryption and unsubscribe codes are in src/lib/auth.js
-const { makeToken, readToken, encBuf, decBuf, unsubSig } = createAuth(SECRET);
+// Photos stored while SESSION_SECRET was not set were encrypted with a key made from 'bp:' + ADMIN_PASSWORD. That key stays
+// on the list for reading, so setting SESSION_SECRET for the first time does not make stored photos unreadable.
+// FILES_OLD_SECRETS (comma-separated) lists further old secrets, for the rare case the owner password changed too.
+const FILE_SECRETS = [process.env.FILES_SECRET || SECRET, 'bp:' + PASS, ...String(process.env.FILES_OLD_SECRETS || '').split(',').map(s => s.trim()).filter(Boolean)];
+const { makeToken, readToken, encBuf, decBuf, unsubSig } = createAuth(SECRET, { fileSecrets: FILE_SECRETS });
+// Settings that weaken logins on the live server (decision D-22: warn loudly, keep running)
+const IS_PRODUCTION = !!process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
+const SECRET_WARNINGS = !IS_PRODUCTION ? [] : [
+  ...(!process.env.ADMIN_PASSWORD ? ['ADMIN_PASSWORD is not set, so the owner password is the default one. Set a long, unique ADMIN_PASSWORD in the Railway variables.']
+    : PASS.length < 12 ? ['ADMIN_PASSWORD is shorter than 12 characters. Use a longer one in the Railway variables.'] : []),
+  ...(!process.env.SESSION_SECRET ? ['SESSION_SECRET is not set, so logins are signed with a value made from the owner password. Add a long random SESSION_SECRET in the Railway variables (everyone will need to log in again once; stored photos stay readable).'] : []),
+];
+for (const w of SECRET_WARNINGS) console.error('WARNING:', w);
 // roles: owner (env password) and admin = everything; cashier = POS for own branch only
 function whoami(req) {
   const o = readToken((req.headers.authorization || '').replace(/^Bearer /, ''));
@@ -948,7 +960,7 @@ async function handleIn(req, res) {
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
 const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
-const MANAGEMENT = createManagementRoutes({ PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isBranchUser, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
+const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isBranchUser, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
 const MARKETING = createMarketingRoutes({ curOrg, uid, nowISO, all, one, run, insert, log, normEmail, validEmail, TIERS, setSetting, NO_MAIL, mailCount, baseUrl, welcomeEmail, processEmails, AUD_WHO, audienceOf, promoEmail, queueMarketing, winbackCfg, runWinback, mailProvider, mailReady, MAIL_LIMIT, mailFrom, sendEmail, bad, send, readBody });
 const PARTNER_SHOPS = createPartnerShopRoutes({ ownerUser, mainDb, curOrg, BAD_ORGS, orgRow, orgList, inOrg, uid, dOf, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, log, normEmail, validEmail, mainSet, TRIAL_DAYS, PLAN_IDS, plansNow, payInfo, addMonthsStr, orgStatus, SIGNUPS_OPEN, esc2, sendEmail, makeToken, hashPw, bad, send, readBody });
 const PUBLIC_ROUTES = createPublicRoutes({ ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody });

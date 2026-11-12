@@ -118,7 +118,7 @@ function renderBase() {
     <div id="navgroups">${navGroups(on)}</div>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { mb.textContent = ui.notif && ui.notif.total ? '🔔 ' + ui.notif.total : '🔔'; mb.style.color = ui.notif && ui.notif.total ? '#e5384a' : ''; }
-  view.innerHTML = orgBar() + branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'mkt' ? vMkt() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
+  view.innerHTML = secretBar() + orgBar() + branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'mkt' ? vMkt() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
   paginateTables();
 }
 // Branch picker shown at the top of every page (not only in the side menu), so it is one tap on phones too
@@ -410,6 +410,11 @@ function vCustomers() {
   <div class="row" style="margin-top:12px;justify-content:center"><button class="btn ghost sm" data-act="page" data-n="-1" ${c.page <= 1 ? 'disabled' : ''}>‹ Prev</button><span class="mute">Page ${c.page} / ${pages}</span><button class="btn ghost sm" data-act="page" data-n="1" ${c.page >= pages ? 'disabled' : ''}>Next ›</button></div>`;
 }
 const MOD_LABEL = { dashboard: 'Dashboard', pos: 'Front desk: walk-ins and finished services', bookings: 'Bookings (appointments)', queue: 'Walk-in line (start customers)', expenses: 'Expenses', attendance: 'Barber Attendance (time in / out, breaks)', reading: 'Old POS cash drawer (no longer used)', customers: 'Customer Directory (look up points and tiers)' };
+// red notice for the owner and admins when the live server's login settings are weak (decision D-22)
+function secretBar() {
+  const w = S.secretWarnings || []; if (!w.length) return '';
+  return `<div class="card" role="alert" style="margin-bottom:12px;border-color:#f2b8bf;background:#fff1f2"><b style="color:var(--bad)">Login security settings need attention</b><ul style="margin:6px 0 0;padding-left:18px;font-size:13px">${w.map(x => `<li>${esc(x)}</li>`).join('')}</ul><p class="mute" style="font-size:12px;margin:6px 0 0">Only the owner and admins see this. The app keeps working in the meantime.</p></div>`;
+}
 // partner shop banner, and the Brotherhood owner's list of partner shops
 function orgBar() {
   if (!S.org) return '';

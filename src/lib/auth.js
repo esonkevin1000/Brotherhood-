@@ -8,11 +8,15 @@ export const checkPw = (pw, stored) => { const [salt, h] = String(stored).split(
 export const sha = s => crypto.createHash('sha256').update(String(s)).digest();
 
 // Everything that depends on the server secret (SESSION_SECRET).
-export function createAuth(secret, { tokenDays = 30 } = {}) {
+// fileSecrets: the secrets photo keys are made from. The first one stores new photos; the others are only used to read
+// photos stored before a secret changed (so adding SESSION_SECRET later does not make stored photos unreadable).
+export function createAuth(secret, { tokenDays = 30, fileSecrets = [secret] } = {}) {
   // evidence photos are encrypted at rest (AES-256-GCM) with a key derived from the server secret
-  const fileKey = crypto.createHash('sha256').update('files:' + secret).digest();
+  const fileKeys = [...new Set(fileSecrets)].map(s => crypto.createHash('sha256').update('files:' + s).digest()), fileKey = fileKeys[0];
   const encBuf = b => { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', fileKey, iv), e = Buffer.concat([c.update(b), c.final()]); return Buffer.concat([iv, c.getAuthTag(), e]); };
-  const decBuf = b => { const d = crypto.createDecipheriv('aes-256-gcm', fileKey, b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]); };
+  const decWith = (key, b) => { const d = crypto.createDecipheriv('aes-256-gcm', key, b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]); };
+  // the authentication tag tells which key is right; a tampered photo fails with every key
+  const decBuf = b => { let err; for (const k of fileKeys) { try { return decWith(k, b); } catch (e) { err = e; } } throw err; };
 
   // a login token is base64url(JSON { u: user, v: password version, e: expiry, o: shop }) + "." + its signature
   const sign = s => crypto.createHmac('sha256', secret).update(s).digest('base64url');
