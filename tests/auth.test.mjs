@@ -57,10 +57,13 @@ try {
   const S = await startServer(3170, { SESSION_SECRET: 'wired-secret' });
   try {
     const mk = (secret, payload) => { const p = Buffer.from(JSON.stringify(payload)).toString('base64url'); return p + '.' + crypto.createHmac('sha256', secret).update(p).digest('base64url'); };
-    const good = mk('wired-secret', { u: 'owner', v: '', e: Date.now() + 864e5 });
+    // a Brotherhood owner token carries a mark of the Railway password (T6b), here ADMIN_PASSWORD=ownerpw
+    const ov = crypto.createHash('sha256').update('owner-login:ownerpw').digest('base64url').slice(-8);
+    const good = mk('wired-secret', { u: 'owner', v: ov, e: Date.now() + 864e5 });
+    ok('an owner token without the password mark is refused', (await S.call('GET', '/api/state', null, mk('wired-secret', { u: 'owner', v: '', e: Date.now() + 864e5 }))).s === 401);
     ok('the server accepts a token signed with its SESSION_SECRET', (await S.call('GET', '/api/state', null, good)).s === 200);
-    ok('and refuses one signed with anything else', (await S.call('GET', '/api/state', null, mk('bp:ownerpw', { u: 'owner', v: '', e: Date.now() + 864e5 }))).s === 401);
-    ok('and refuses an expired one', (await S.call('GET', '/api/state', null, mk('wired-secret', { u: 'owner', v: '', e: Date.now() - 1000 }))).s === 401);
+    ok('and refuses one signed with anything else', (await S.call('GET', '/api/state', null, mk('bp:ownerpw', { u: 'owner', v: ov, e: Date.now() + 864e5 }))).s === 401);
+    ok('and refuses an expired one', (await S.call('GET', '/api/state', null, mk('wired-secret', { u: 'owner', v: ov, e: Date.now() - 1000 }))).s === 401);
     const real = (await S.call('POST', '/api/login', { password: 'ownerpw' })).j.token, [rp, rs] = real.split('.');
     ok('a token from a real login is signed the same way', rs === crypto.createHmac('sha256', 'wired-secret').update(rp).digest('base64url'));
   } finally { await S.stop(); }

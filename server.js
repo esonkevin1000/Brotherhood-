@@ -264,6 +264,7 @@ const SECRET = process.env.SESSION_SECRET || 'bp:' + PASS;
 // FILES_OLD_SECRETS (comma-separated) lists further old secrets, for the rare case the owner password changed too.
 const FILE_SECRETS = [process.env.FILES_SECRET || SECRET, 'bp:' + PASS, ...String(process.env.FILES_OLD_SECRETS || '').split(',').map(s => s.trim()).filter(Boolean)];
 const { makeToken, readToken, encBuf, decBuf, unsubSig } = createAuth(SECRET, { fileSecrets: FILE_SECRETS });
+const RAILWAY_OWNER_V = crypto.createHash('sha256').update('owner-login:' + PASS).digest('base64url').slice(-8);
 // Settings that weaken logins on the live server (decision D-22: warn loudly, keep running)
 const IS_PRODUCTION = !!process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
 const SECRET_WARNINGS = !IS_PRODUCTION ? [] : [
@@ -277,7 +278,7 @@ function whoami(req) {
   const o = readToken((req.headers.authorization || '').replace(/^Bearer /, ''));
   if (!o) return null;
   const g = curOrg(); if ((o.o || null) !== (g?.id || null)) return null;   // a token only works in its own shop's database
-  if (o.u === 'owner') { if (g && o.v !== String(g.ownerHash).slice(-8)) return null; return { id: 'owner', role: 'owner', name: 'Owner' }; }
+  if (o.u === 'owner') { if (o.v !== (g ? String(g.ownerHash).slice(-8) : RAILWAY_OWNER_V)) return null; return { id: 'owner', role: 'owner', name: 'Owner' }; }
   const u = get('users', o.u);
   if (!u || !u.active || ![u.passHash, u.pinKey].some(h => h && h.slice(-8) === o.v)) return null;
   return { id: u.id, role: u.role, name: u.name, branchId: u.role === 'cashier' || u.role === 'barber' ? u.branchId : null };
@@ -797,19 +798,25 @@ function checkUser(b, cur) {
   if (pw && pw.length < 6) bad(409, 'Password must be at least 6 characters');
   if ('name' in b || !cur) { b.name = String(b.name || '').trim(); if (!b.name) bad(400, 'Name required'); }
   const role = 'role' in b ? b.role : cur?.role;
-  if (!['admin', 'cashier', 'barber'].includes(role)) bad(400, 'Role must be admin, cashier or barber');
+  if (!['owner', 'admin', 'cashier', 'barber'].includes(role)) bad(400, 'Role must be owner, admin, cashier or barber');
   const branchId = 'branchId' in b ? b.branchId : cur?.branchId;
-  if (role !== 'admin' && !get('branches', branchId)) bad(409, 'Cashiers and barbers need a branch');
+  if (role !== 'admin' && role !== 'owner' && !get('branches', branchId)) bad(409, 'Cashiers and barbers need a branch');
+  if (role === 'owner') {   // an owner account opens everything, so it is protected by a real password only (decision D-23)
+    if (pw && pw.length < 10) bad(409, 'An owner password must be at least 10 characters');
+    if (b.pin || cur?.pinKey) bad(409, 'An owner account cannot have a PIN. Use a username and password.');
+    b.branchId = null;
+  }
   const username = 'username' in b ? String(b.username || '').trim().toLowerCase() : (cur?.username || '');
   if (!/^[a-z0-9._-]{3,30}$/.test(username) || username === 'owner') bad(409, 'Username: 3–30 letters/numbers (. _ - allowed), not "owner"');
+  if (username === ownerUser()) bad(409, 'That username is used by the owner login (Railway password). Choose another one.');
   if (one('select id from users where username=? and id<>?', username, cur?.id || '')) bad(409, 'Username already taken');
   const pin = b.pin ? String(b.pin).trim() : '';
   if (pin) {
     if (!/^\d{6}$/.test(pin)) bad(409, 'PIN must be exactly 6 digits');
     if (one('select id from users where pinKey=? and id<>?', pinKeyOf(pin), cur?.id || '')) bad(409, 'That PIN is already used by someone else');
   }
-  if (role !== 'admin' && !pin && !cur?.pinKey) bad(409, 'Set a 6-digit PIN for this user');
-  if (role === 'admin' && !pw && !cur?.passHash) bad(409, 'Set a password for this admin');
+  if (role !== 'admin' && role !== 'owner' && !pin && !cur?.pinKey) bad(409, 'Set a 6-digit PIN for this user');
+  if ((role === 'admin' || role === 'owner') && !pw && !cur?.passHash) bad(409, 'Set a password for this ' + role);
   b.username = username;
 }
 const setPw = (id, b) => {
@@ -896,7 +903,7 @@ async function handleIn(req, res) {
       const u = /^\d{6}$/.test(pin) ? one('select * from users where pinKey=? and active=1', pinKeyOf(pin)) : null;
       if (u) { tok = makeToken(u.id, u.pinKey.slice(-8), curOrg()?.id); who = u.name; }
     }
-    else if (curOrg() ? (uname === curOrg().ownerUser && checkPw(pw, curOrg().ownerHash)) : ((ownerUser() ? uname === ownerUser() : (!uname || uname === 'owner')) && crypto.timingSafeEqual(sha(pw), sha(PASS)))) { tok = makeToken('owner', curOrg() ? String(curOrg().ownerHash).slice(-8) : '', curOrg()?.id); who = 'Owner'; }
+    else if (curOrg() ? (uname === curOrg().ownerUser && checkPw(pw, curOrg().ownerHash)) : ((ownerUser() ? uname === ownerUser() : (!uname || uname === 'owner')) && crypto.timingSafeEqual(sha(pw), sha(PASS)))) { tok = makeToken('owner', curOrg() ? String(curOrg().ownerHash).slice(-8) : RAILWAY_OWNER_V, curOrg()?.id); who = 'Owner'; }
     else if (uname) {
       const u = one('select * from users where username=? and active=1', uname);
       if (u?.passHash && checkPw(pw, u.passHash)) { tok = makeToken(u.id, u.passHash.slice(-8), curOrg()?.id); who = u.name; }
@@ -907,7 +914,8 @@ async function handleIn(req, res) {
     }
     else if (!pin) userLimiter.clear(lockKey);
     if (!tok) { noteFail(ip); log({ name: uname || 'owner' }, 'login-failed', 'auth', '', ip); return send(res, 401, { error: pin ? 'Wrong PIN' : 'Wrong username or password' }); }
-    fails.delete(ip); log({ name: who }, 'login', 'auth', '', ip);
+    const emergency = !pin && !curOrg() && who === 'Owner' && tok && one("select 1 x from users where role='owner' and active=1");
+    fails.delete(ip); log({ name: who }, emergency ? 'emergency-login' : 'login', 'auth', '', emergency ? `Railway ADMIN_PASSWORD used (${ip})` : ip);
     return send(res, 200, { token: tok });
   }
 
