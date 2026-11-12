@@ -18,6 +18,9 @@ import { createReports } from './src/lib/reports.js';
 import { createBookings, idemKeyOf, snapOf } from './src/lib/booking.js';
 import { HttpError, bad, MIME, send, readBody, noteGzip, staticServer, NEXT } from './src/lib/http.js';
 import { createManagementRoutes } from './src/routes/management.js';
+import { createMarketingRoutes } from './src/routes/marketing.js';
+import { createPartnerShopRoutes } from './src/routes/partner-shops.js';
+import { createPublicRoutes } from './src/routes/public.js';
 
 process.env.TZ ||= 'Asia/Manila';
 const PORT = +process.env.PORT || 3000;
@@ -860,96 +863,7 @@ async function handleIn(req, res) {
     return send(res, ok ? 200 : 400, page, 'text/html; charset=utf-8');
   }
   if (!p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
-  if (p === '/api/public/terms' && method === 'GET') return send(res, 200, { terms: getTerms() });
-  // ----- public: plans and self sign-up for new shops (each gets its own separate database and a free trial) -----
-  if (p === '/api/public/plans' && method === 'GET') return send(res, 200, { plans: plansNow(), trialDays: TRIAL_DAYS, contact: contactEmail(), signupOpen: SIGNUPS_OPEN });
-  const codeTaken = c => !!mainDb.prepare('select 1 x from orgs where code=?').get(c);
-  if (p === '/api/public/signup/check' && method === 'GET') { const c = String(q.code || '').trim().toLowerCase(); return send(res, 200, { ok: /^[a-z0-9-]{3,30}$/.test(c) && !codeTaken(c) }); }
-  if (p === '/api/public/signup' && method === 'POST') {
-    if (curOrg()) bad(404, 'Not found');
-    if (!SIGNUPS_OPEN) bad(403, 'Sign-up for new shops is not open yet.');
-    if (recent(signupHits, ip).length >= (+process.env.SIGNUP_LIMIT || 5)) bad(429, 'Too many sign-ups from this connection. Please try again in an hour.');
-    const b = await readBody(req), s = (k, n) => String(b[k] || '').trim().slice(0, n);
-    const kind = String(b.kind || ''); if (!KIND_LABEL[kind]) bad(400, 'Choose what describes you');
-    const shop = s('shopName', 60), ownerName = s('ownerName', 60), email = normEmail(b.email).slice(0, 120), phone = s('phone', 30), city = s('city', 60), user = s('username', 30).toLowerCase(), pw = String(b.password || '');
-    if (shop.length < 2) bad(400, kind === 'owner' ? 'Enter your shop name' : 'Enter the name your clients know you by');
-    if (ownerName.length < 2) bad(400, 'Enter your full name');
-    if (!validEmail(email)) bad(400, 'Enter a valid email address');
-    if (normPhone(phone).length < 10) bad(400, 'Enter a valid mobile number');
-    if (!/^[a-z0-9._-]{3,30}$/.test(user)) bad(400, 'Username: 3 to 30 letters, numbers, dot, dash or underscore');
-    if (pw.length < 8) bad(400, 'Password: at least 8 characters');
-    if (!b.agree) bad(400, 'Please agree to the Terms for shops and the Privacy Policy');
-    if (mainDb.prepare('select 1 x from orgs where lower(email)=?').get(email)) bad(409, 'This email already has a Brotherhood shop. Log in instead, or ask us to reset your password.');
-    let code = String(b.code || '').trim().toLowerCase();
-    if (code) { if (!/^[a-z0-9-]{3,30}$/.test(code)) bad(400, 'Shop code: 3 to 30 letters, numbers or dashes'); if (codeTaken(code)) bad(409, 'That shop code is taken. Try another one.'); }
-    else {
-      const base = shop.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'shop';
-      const root = base.length >= 3 ? base : base + '-shop'; code = root; for (let i = 2; codeTaken(code); i++) code = root + '-' + i;
-    }
-    const id = uid(), plan = kind === 'owner' ? 'shop' : 'solo', trialEnds = addDaysStr(todayStr(), TRIAL_DAYS);
-    mainDb.prepare('insert into orgs(id,code,name,ownerUser,ownerHash,active,createdAt,email,phone,ownerName,kind,plan,trialEnds,source,city) values(?,?,?,?,?,1,?,?,?,?,?,?,?,?,?)')
-      .run(id, code, shop, user, hashPw(pw), nowISO(), email, phone, ownerName, kind, plan, trialEnds, 'signup', city);
-    hitRate(signupHits, ip);
-    const g = orgRow(id);
-    inOrg(g, () => {
-      const bid = insert('branches', { name: city || shop, openTime: '09:00', closeTime: '21:00', graceMins: 10 }).id, chairs = [];
-      for (let i = 1; i <= (kind === 'owner' ? 3 : 1); i++) chairs.push(insert('chairs', { branchId: bid, name: 'Chair ' + i, sort: i, active: 1 }).id);
-      const cat = insert('categories', { name: 'Haircut', type: 'service' }).id;
-      for (const [n, pr, m] of STARTER) insert('items', { name: n, price: pr, categoryId: cat, type: 'service', mins: m, active: 1, bookable: 1 });
-      if (kind !== 'owner') insert('staff', { name: ownerName, branchId: bid, chairId: chairs[0], pct: 100, allowance: 0, active: 1 });   // one-person shop: the owner is the barber
-      log({ name: ownerName }, 'signup', 'shop', id, `${shop} (${KIND_LABEL[kind]})`);
-    });
-    inMain(() => log({ name: ownerName }, 'signup', 'orgs', id, `${shop} (${code}, ${KIND_LABEL[kind]}, ${email})`));
-    const links = { backend: baseUrl() + '/backend', app: baseUrl() + '/member#/pro' };
-    const w = shopWelcomeEmail({ shop, ownerName, code, user, trialEnds, kind, ...links });
-    sendEmail({ to: email, ...w }).catch(() => { });
-    if (contactEmail()) sendEmail({ to: contactEmail(), subject: `New shop sign-up: ${shop}`, html: `<p><b>${esc2(shop)}</b> signed up (${esc2(KIND_LABEL[kind])}).</p><p>${esc2(ownerName)} · ${esc2(email)} · ${esc2(phone)} · ${esc2(city)}</p><p>Shop code: <b>${esc2(code)}</b>. Free trial until ${trialEnds}.</p>`, text: `${shop} signed up (${KIND_LABEL[kind]}).\n${ownerName} · ${email} · ${phone} · ${city}\nShop code: ${code}. Free trial until ${trialEnds}.` }).catch(() => { });
-    return send(res, 201, { code, username: user, name: shop, trialEnds, token: makeToken('owner', String(g.ownerHash).slice(-8), id), ...links });
-  }
-
-  // ----- public: Google reviews of a branch -----
-  if (p === '/api/public/google' && method === 'GET') {
-    const br = get('branches', String(q.branch || '')); if (!br) bad(400, 'Pick a branch');
-    const g = await googleData(br); return send(res, 200, { ...gInfo(br), ...(g || {}), available: !!g?.reviews });
-  }
-  // ----- public booking (customers, no login) -----
-  if (p === '/api/public/info' && method === 'GET') {
-    return send(res, 200, {
-      shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime,photo,mapUrl,googlePlaceId,googleUrl from branches order by rowid').map(({ googlePlaceId, googleUrl, ...b }) => ({ ...b, photo: b.photo || siteCover(b.name), google: gInfo({ ...b, googlePlaceId, googleUrl }) })),
-      ratings: Object.fromEntries(all('select branchId, count(*) n, avg(rating) a from reviews group by branchId').map(s => [s.branchId, { count: s.n, avg: Math.round(s.a * 10) / 10 }])),
-      services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) })),
-      menu: all("select id,name,price,mins,photo,apptOnly,bookable from items where active=1 and type='service' order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name), bookable: !!s.bookable })),   // every service for the price menu; only bookable ones can be booked online
-      categories: all("select id,name from categories where type='service'"),
-      staff: all('select id,name,photo,branchId from staff where active=1 order by name')
-    });
-  }
-  if (p === '/api/public/slots' && method === 'GET') {
-    const date = String(q.date || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < todayStr()) return send(res, 200, { slots: [] });
-    const ids = String(q.items || '').split(',').filter(Boolean); if (!ids.length) return send(res, 200, { slots: [] });
-    return send(res, 200, { slots: slotsFor(String(q.branch || ''), date, String(q.staff || 'any'), bookingMins(ids)) });
-  }
-  if (p === '/api/public/reviews' && method === 'GET') {
-    const brId = q.branch && get('branches', String(q.branch)) ? String(q.branch) : null;
-    const rows = all(`select r.id, r.name, r.rating, r.text, r.createdAt, r.branchId, b.name branchName, s.name staffName from reviews r left join branches b on b.id=r.branchId left join staff s on s.id=r.staffId${brId ? ' where r.branchId=?' : ''} order by r.createdAt desc limit 60`, ...(brId ? [brId] : []));
-    const sm = one('select count(*) n, avg(rating) a from reviews' + (brId ? ' where branchId=?' : ''), ...(brId ? [brId] : []));
-    return send(res, 200, { reviews: rows, count: sm.n, avg: sm.n ? Math.round(sm.a * 10) / 10 : 0 });
-  }
-  if (p === '/api/public/reviews' && method === 'POST') {
-    if (reviewBlocked(ip)) bad(429, 'You can only post a few reviews per hour. Please try again later.');
-    const b = await readBody(req), name = String(b.name || '').trim().slice(0, 60), rating = Math.round(+b.rating), text = String(b.text || '').trim().slice(0, 600);
-    if (!name) bad(400, 'Please enter your name'); if (!(rating >= 1 && rating <= 5)) bad(400, 'Please choose a rating from 1 to 5 stars');
-    if (!get('branches', String(b.branchId || ''))) bad(400, 'Please choose the branch you visited');
-    const st = b.staffId ? get('staff', String(b.staffId)) : null, id = uid();
-    run('insert into reviews(id,branchId,staffId,name,rating,text,createdAt) values(?,?,?,?,?,?,?)', id, String(b.branchId), st && st.branchId === String(b.branchId) ? st.id : '', name, rating, text, nowISO());
-    hitRate(reviewHits, ip); log({ name: 'Online: ' + name }, 'review', 'reviews', id, `${rating} stars`); return send(res, 201, { ok: true });
-  }
-  if (p === '/api/public/book' && method === 'POST') {
-    if (bookingBlocked(ip)) bad(429, 'Too many bookings from this device. Please try again later.');
-    const bk = createBooking({ ...(await readBody(req)), idemKey: req.headers['idempotency-key'] }, 'online');
-    if (!bk.duplicate) { hitRate(bookHits, ip); log({ name: 'Online: ' + bk.customerName }, 'booking', 'bookings', bk.id, `${bk.date} ${bk.time} ${bk.branchName}`); }
-    return send(res, bk.duplicate ? 200 : 201, { ok: true, booking: { date: bk.date, time: bk.time, branch: bk.branchName, staff: bk.staffName, staffPhoto: bk.staffPhoto, items: bk.items, total: bk.total, name: bk.customerName } });
-  }
-
+  { const r = await PUBLIC_ROUTES({ req, res, p, method, q, ip }); if (r !== NEXT) return r; }   // src/routes/public.js
   if (p.startsWith('/api/bh/')) return BH(req, res, p, method, q, ip);
   if (p === '/api/public/login-hint' && method === 'GET') return send(res, 200, { ownerNamed: !!ownerUser() });
   if (p === '/api/login' && method === 'POST') {
@@ -1020,104 +934,8 @@ async function handleIn(req, res) {
   if (p.startsWith('/api/svc/')) return SERVICE_RECORDS({ req, res, p, method, q, me });   // src/routes/service-records.js
 
   { const r = await MANAGEMENT({ req, res, p, method, q, me, admin, adminOnly }); if (r !== NEXT) return r; }   // src/routes/management.js
-  // ----- partner shops: only Brotherhood's owner can add, pause or open them -----
-  if (p.startsWith('/api/orgs')) {
-    if (curOrg() || me.role !== 'owner') bad(403, 'Only the Brotherhood owner can manage partner shops');
-    if (p === '/api/orgs/plans' && method === 'PUT') {
-      const b = await readBody(req, 20_000);
-      if (Array.isArray(b.plans)) mainSet('plans', JSON.stringify(b.plans.filter(x => PLAN_IDS.includes(x?.id)).map(x => ({ id: x.id, price: Math.max(0, Math.round(+x.price || 0)), ...(x.desc ? { desc: String(x.desc).trim().slice(0, 120) } : {}) }))));
-      if ('payInfo' in b) mainSet('payInfo', String(b.payInfo || '').trim().slice(0, 600));
-      log(me, 'settings', 'orgs', '', 'plans'); return send(res, 200, { plans: plansNow(), payInfo: payInfo() });
-    }
-    if (p === '/api/orgs/plans' && method === 'GET') return send(res, 200, { plans: plansNow(), payInfo: payInfo(), trialDays: TRIAL_DAYS, signupOpen: SIGNUPS_OPEN });
-    const om2 = p.match(/^\/api\/orgs(?:\/(\w+)(?:\/(enter|reset|payments))?)?$/); if (!om2) bad(404, 'Not found');
-    const temp = () => crypto.randomBytes(9).toString('base64url').replace(/[-_]/g, 'x').slice(0, 10), since = dOf(new Date(Date.now() - 30 * 864e5));
-    if (!om2[1] && method === 'GET') return send(res, 200, orgList().map(({ ownerHash, ...o }) => BAD_ORGS.has(o.id) ? { ...o, active: !!o.active, status: { state: 'error' }, paid: 0, branches: 0, barbers: 0, users: 0, sales30: 0 } : inOrg(o, () => ({ ...o, active: !!o.active, status: orgStatus(o), paid: r2(mainDb.prepare('select coalesce(sum(amount),0) t from org_payments where orgId=?').get(o.id).t),
-      branches: one('select count(*) n from branches').n, barbers: one('select count(*) n from staff where active=1').n, users: one('select count(*) n from users where active=1').n,
-      sales30: r2(one("select coalesce(sum(total),0) t from orders where status='paid' and date>=?", since).t) }))));
-    if (!om2[1] && method === 'POST') {
-      const b = await readBody(req), name = String(b.name || '').trim().slice(0, 60), code = String(b.code || '').trim().toLowerCase(), ou = String(b.ownerUser || '').trim().toLowerCase(), br = String(b.branch || '').trim().slice(0, 60) || name;
-      if (name.length < 2) bad(400, 'Enter the shop name');
-      if (!/^[a-z0-9-]{3,30}$/.test(code)) bad(400, 'Shop code: 3 to 30 letters, numbers or dashes (e.g. kingsman-cuts)');
-      if (mainDb.prepare('select 1 x from orgs where code=?').get(code)) bad(409, 'That shop code is already used');
-      if (!/^[a-z0-9._-]{3,30}$/.test(ou)) bad(400, 'Owner username: 3 to 30 letters, numbers, dot, dash or underscore');
-      const id = uid(), pw = temp();
-      mainDb.prepare('insert into orgs(id,code,name,ownerUser,ownerHash,active,createdAt) values(?,?,?,?,?,1,?)').run(id, code, name, ou, hashPw(pw), nowISO());
-      inOrg(orgRow(id), () => { const bid = insert('branches', { name: br, openTime: '09:00', closeTime: '21:00', graceMins: 10 }).id; for (let i = 1; i <= 3; i++) insert('chairs', { branchId: bid, name: 'Chair ' + i, sort: i, active: 1 }); log({ name: 'Brotherhood' }, 'create', 'shop', id, name); });
-      log(me, 'create', 'orgs', id, `${name} (${code})`);
-      return send(res, 201, { id, code, name, ownerUser: ou, password: pw });
-    }
-    const g = orgRow(om2[1]); if (!g) bad(404, 'Partner shop not found');
-    if (!om2[2] && method === 'PUT') {
-      const b = await readBody(req);
-      if ('name' in b) { const n = String(b.name || '').trim().slice(0, 60); if (n.length < 2) bad(400, 'Enter the shop name'); mainDb.prepare('update orgs set name=? where id=?').run(n, g.id); }
-      if ('active' in b) mainDb.prepare('update orgs set active=? where id=?').run(b.active ? 1 : 0, g.id);
-      if ('plan' in b) { if (b.plan && !PLAN_IDS.includes(b.plan)) bad(400, 'Unknown plan'); mainDb.prepare('update orgs set plan=? where id=?').run(b.plan || null, g.id); }
-      for (const k of ['trialEnds', 'paidUntil']) if (k in b) { const v = String(b[k] || ''); if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) bad(400, 'Use a date like 2026-12-31'); mainDb.prepare(`update orgs set ${k}=? where id=?`).run(v || null, g.id); }
-      for (const k of ['email', 'phone', 'ownerName']) if (k in b) { const v = String(b[k] || '').trim().slice(0, 120); if (k === 'email' && v && !validEmail(normEmail(v))) bad(400, 'Invalid email address'); mainDb.prepare(`update orgs set ${k}=? where id=?`).run(k === 'email' ? normEmail(v) : v, g.id); }
-      log(me, 'update', 'orgs', g.id, JSON.stringify(b).slice(0, 200)); return send(res, 200, { ok: true });
-    }
-    if (om2[2] === 'reset' && method === 'POST') { const pw = temp(); mainDb.prepare('update orgs set ownerHash=? where id=?').run(hashPw(pw), g.id); log(me, 'reset-password', 'orgs', g.id, g.name); return send(res, 200, { ownerUser: g.ownerUser, password: pw }); }
-    if (om2[2] === 'payments' && method === 'GET') return send(res, 200, mainDb.prepare('select * from org_payments where orgId=? order by paidAt desc').all(g.id));
-    if (om2[2] === 'payments' && method === 'POST') {
-      // Brotherhood records a monthly fee the shop paid (cash, GCash, bank). It moves "paid until" forward. Brotherhood issues its own BIR invoice for it.
-      const b = await readBody(req), amount = r2(b.amount), months = Math.round(+b.months);
-      if (!(amount > 0)) bad(400, 'Enter the amount paid'); if (!(months >= 1 && months <= 24)) bad(400, 'Months paid: 1 to 24');
-      const start = g.paidUntil && g.paidUntil >= todayStr() ? g.paidUntil : todayStr(), until = addMonthsStr(start, months), pid = uid();
-      mainDb.prepare('insert into org_payments(id,orgId,amount,months,method,ref,invoiceNo,note,paidAt,createdBy) values(?,?,?,?,?,?,?,?,?,?)')
-        .run(pid, g.id, amount, months, String(b.method || '').slice(0, 30), String(b.ref || '').slice(0, 60), String(b.invoiceNo || '').slice(0, 40), String(b.note || '').slice(0, 200), nowISO(), me.name);
-      mainDb.prepare('update orgs set paidUntil=?, active=1, plan=? where id=?').run(until, PLAN_IDS.includes(b.plan) ? b.plan : (g.plan || 'shop'), g.id);
-      log(me, 'payment', 'orgs', g.id, `${g.name}: ${amount} for ${months} month(s), paid until ${until}`);
-      if (g.email && validEmail(g.email)) sendEmail({ to: g.email, subject: `Brotherhood: payment received, active until ${until}`,
-        html: `<p>Hi ${esc2(String(g.ownerName || '').split(' ')[0] || g.name)},</p><p>We received your payment of <b>PHP ${amount.toFixed(2)}</b> for <b>${months} month${months === 1 ? '' : 's'}</b>. <b>${esc2(g.name)}</b> is active until <b>${until}</b>.</p><p style="color:#666;font-size:13px">This email is a confirmation only. Your official invoice for the subscription is issued separately.</p><p>Salamat!<br>Brotherhood</p>`,
-        text: `We received your payment of PHP ${amount.toFixed(2)} for ${months} month(s). ${g.name} is active until ${until}.\nThis email is a confirmation only. Your official invoice for the subscription is issued separately.` }).catch(() => { });
-      return send(res, 201, { id: pid, paidUntil: until });
-    }
-    if (om2[2] === 'enter' && method === 'POST') { log(me, 'open', 'orgs', g.id, g.name); return send(res, 200, { token: makeToken('owner', String(g.ownerHash).slice(-8), g.id), name: g.name }); }
-    bad(404, 'Not found');
-  }
-  // ----- email marketing: promos and the automatic "we miss you" email -----
-  if (p.startsWith('/api/marketing')) {
-    adminOnly();
-    const msgOf = b => { const subject = String(b.subject || '').trim().slice(0, 150), body = String(b.body || '').trim().slice(0, 5000); if (subject.length < 3) bad(400, 'Write a subject'); if (body.length < 10) bad(400, 'Write the message'); return { subject, body, btnText: String(b.btnText || '').trim().slice(0, 40), btnUrl: String(b.btnUrl || '').trim().slice(0, 300) }; };
-    const audOf = b => { const a = b.audience || {}; return { who: AUD_WHO.includes(a.who) ? a.who : 'all', days: Math.max(7, Math.min(365, +a.days || 45)), tier: String(a.tier || ''), branchId: String(a.branchId || '') }; };
-    if (p === '/api/marketing' && method === 'GET') {
-      const camps = all('select * from campaigns order by createdAt desc limit 50').map(c => ({ ...c, audience: (() => { try { return JSON.parse(c.audience); } catch { return {}; } })(), stats: Object.fromEntries(all('select status, count(*) n from email_log where campaignId=? group by status', c.id).map(r => [r.status, r.n])) }));
-      return send(res, 200, { provider: mailProvider(), from: mailFrom(), limit: MAIL_LIMIT, sentToday: mailCount(), pending: one("select count(*) n from email_log where status='pending'").n,
-        subscribers: audienceOf({}).length, campaigns: camps, winback: winbackCfg(), winbackSent: one("select count(*) n from email_log where kind='winback' and status='sent'").n, tiers: TIERS.map(x => x[1]).reverse(), isOrg: !!curOrg() });
-    }
-    if (p === '/api/marketing/count' && method === 'POST') { const r = audienceOf(audOf(await readBody(req))); return send(res, 200, { count: r.length, sample: r.slice(0, 5).map(c => c.name) }); }
-    if (p === '/api/marketing/test' && method === 'POST') {
-      const b = await readBody(req, 50_000), to = normEmail(b.to), msg = msgOf(b); if (!validEmail(to)) bad(400, 'Type your email address for the test');
-      if (!mailReady()) bad(409, NO_MAIL());
-      const m = promoEmail({ name: me.name, ...msg }), unsub = baseUrl() + '/unsubscribe?test=1';
-      const r = await sendEmail({ to, subject: 'TEST: ' + m.subject, html: m.html.replaceAll('{{UNSUB}}', unsub), text: m.text.replaceAll('{{UNSUB}}', unsub), fromName: curOrg() ? curOrg().name : '', replyTo: curOrg() ? curOrg().email || '' : '' });
-      if (!r.ok) bad(502, r.error); log(me, 'test-email', 'campaigns', '', to); return send(res, 200, { ok: true });
-    }
-    if (p === '/api/marketing/send' && method === 'POST') {
-      const b = await readBody(req, 50_000), msg = msgOf(b), aud = audOf(b); if (!mailReady()) bad(409, NO_MAIL());
-      const rows = audienceOf(aud); if (!rows.length) bad(400, 'Nobody in this group has an email and said yes to promos');
-      const id = uid(); run('insert into campaigns(id,subject,body,btnText,btnUrl,audience,total,createdBy,createdAt) values(?,?,?,?,?,?,?,?,?)', id, msg.subject, msg.body, msg.btnText, msg.btnUrl, JSON.stringify(aud), rows.length, me.name, nowISO());
-      for (const c of rows) queueMarketing(c, 'campaign', msg, id);
-      log(me, 'create', 'campaigns', id, `${msg.subject} (${rows.length} people)`); setTimeout(() => processEmails().catch(() => { }), 50);
-      return send(res, 201, { id, total: rows.length, days: Math.ceil((rows.length + mailCount()) / MAIL_LIMIT) });
-    }
-    if (p === '/api/marketing/winback' && method === 'PUT') {
-      const b = await readBody(req, 50_000), cur = winbackCfg();
-      const next = { on: !!b.on, days: Math.max(14, Math.min(180, Math.round(+b.days || cur.days))), subject: String(b.subject ?? cur.subject).trim().slice(0, 150) || cur.subject, body: String(b.body ?? cur.body).trim().slice(0, 5000) || cur.body, btnText: String(b.btnText ?? cur.btnText).trim().slice(0, 40) };
-      if (next.on && !mailReady()) bad(409, NO_MAIL());
-      setSetting('winback', JSON.stringify(next)); log(me, 'settings', 'campaigns', '', 'we-miss-you email ' + (next.on ? 'on, ' + next.days + ' days' : 'off'));
-      if (next.on) runWinback(); return send(res, 200, next);
-    }
-    bad(404, 'Not found');
-  }
-  if (p === '/api/settings/test-email' && method === 'POST') {
-    adminOnly(); const to = normEmail((await readBody(req)).to); if (!validEmail(to)) bad(400, 'Invalid email address');
-    if (!mailReady()) bad(409, NO_MAIL());
-    const w = welcomeEmail({ name: me.name }), unsub = baseUrl() + '/unsubscribe?test=1';
-    const r = await sendEmail({ to, subject: 'TEST: ' + w.subject, html: w.html.replaceAll('{{UNSUB}}', unsub), text: w.text.replaceAll('{{UNSUB}}', unsub) });
-    if (!r.ok) bad(502, r.error); log(me, 'test-email', 'settings', '', to); return send(res, 200, { ok: true });
-  }
+  { const r = await PARTNER_SHOPS({ req, res, p, method, me }); if (r !== NEXT) return r; }   // src/routes/partner-shops.js
+  { const r = await MARKETING({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/marketing.js
   // ----- customer ID photos (Senior / PWD / Student discount). Private: only logged-in staff can view them, never via the public /img route. -----
   if (p === '/api/pos/idphoto' && method === 'POST') {
     const b = await readBody(req, 1_800_000), branchId = branchScope(me, b.branchId);
@@ -1871,6 +1689,9 @@ async function handleIn(req, res) {
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
 const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
 const MANAGEMENT = createManagementRoutes({ PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isBranchUser, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
+const MARKETING = createMarketingRoutes({ curOrg, uid, nowISO, all, one, run, insert, log, normEmail, validEmail, TIERS, setSetting, NO_MAIL, mailCount, baseUrl, welcomeEmail, processEmails, AUD_WHO, audienceOf, promoEmail, queueMarketing, winbackCfg, runWinback, mailProvider, mailReady, MAIL_LIMIT, mailFrom, sendEmail, bad, send, readBody });
+const PARTNER_SHOPS = createPartnerShopRoutes({ ownerUser, mainDb, curOrg, BAD_ORGS, orgRow, orgList, inOrg, uid, dOf, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, log, normEmail, validEmail, mainSet, TRIAL_DAYS, PLAN_IDS, plansNow, payInfo, addMonthsStr, orgStatus, SIGNUPS_OPEN, esc2, sendEmail, makeToken, hashPw, bad, send, readBody });
+const PUBLIC_ROUTES = createPublicRoutes({ ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody });
 const BH = mountBH({ inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 
 { const ran = migrate(mainDb); if (ran.length) console.log('migrations applied:', ran.join(', ')); }   // numbered files in src/db/migrations, once per database
