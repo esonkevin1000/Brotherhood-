@@ -1,7 +1,7 @@
 // Day board for the Brotherhood app (takes over from the POS): walk-ins, start, finish, cancel, ID photos.
 // Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
-export function createServiceRoutes({ queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
+export function createServiceRoutes({ dayRows, queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
   return async function handleServiceRecords({ req, res, p, method, q, me }) {
       if (!['owner', 'admin', 'manager', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
       const myStaffId = me.role === 'barber' ? (get('users', me.id)?.staffId || '') : '';
@@ -29,6 +29,7 @@ export function createServiceRoutes({ queueEstimates, walkinGuard, walkinOptions
           branch: { id: bid, name: get('branches', bid)?.name || '' }, branches: isBranchUser(me) ? [] : all('select id,name from branches order by rowid').filter(x => inScope(me, x.id)), date: t, role: me.role, myStaffId, locked: !!dayLocked(bid, t), attPhoto: getSetting('attPhoto') !== '0', modules: isAdmin(me) ? MODULES : modulesFor(me.role),
           menu: all('select id,name,type,price,mins,needId from items where active=1 order by type desc, price').map(i => ({ ...i, needId: !!i.needId })),
           discounts: all('select id,name,kind,value from discounts where active=1 order by name'), methods: PAY_METHODS, staff, tickets, bookings,
+          ...(me.role === 'barber' ? { myEarnings: r2(dayRows(t, t, bid).find(r => r.staffId === myStaffId)?.commission || 0) } : {}),   // T26: his own commission today
           closing: (() => { const br = get('branches', bid), [ch, cm] = String(br?.closeTime || '21:00').split(':').map(Number), n = new Date(), waiting = tickets.filter(x => x.status === 'waiting').length; return { closeTime: br?.closeTime || '21:00', waiting, needed: waiting > 0 && n.getHours() * 60 + n.getMinutes() >= ch * 60 + (cm || 0) }; })(),   // T25
           totals: { waiting: tickets.filter(x => x.status === 'waiting').length, inChair: tickets.filter(x => x.status === 'in_chair').length, done: done.length, earned: r2(sum(done, x => x.total)) }
         });
