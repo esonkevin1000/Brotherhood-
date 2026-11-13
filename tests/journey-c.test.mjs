@@ -17,7 +17,8 @@ try {
   const leo = (await call('POST', '/api/staff', { name: 'Leo', branchId: A.id, chairId: ch[1].id, pct: 50, allowance: 0 }, owner)).j;
   await call('POST', '/api/users', { name: 'Desk Dina', username: 'dina', pin: '111111', role: 'cashier', branchId: A.id }, owner);
   await call('POST', '/api/users', { name: 'Manager Mia', username: 'mia', password: 'miapass1', role: 'manager', branchIds: [A.id] }, owner);
-  const desk = (await call('POST', '/api/login', { pin: '111111' })).j.token, mia = (await call('POST', '/api/login', { username: 'mia', password: 'miapass1' })).j.token;
+  await call('POST', '/api/users', { name: 'Kev', username: 'kev', pin: '222222', role: 'barber', branchId: A.id, staffId: kev.id }, owner);
+  const desk = (await call('POST', '/api/login', { pin: '111111' })).j.token, mia = (await call('POST', '/api/login', { username: 'mia', password: 'miapass1' })).j.token, kevTok = (await call('POST', '/api/login', { pin: '222222' })).j.token;
   await call('PUT', '/api/settings', { attPhoto: false }, owner);
   await call('PUT', '/api/settings', { mvpBranches: [A.id] }, owner);
   for (const s of [kev, leo]) await call('POST', '/api/attendance', { staffId: s.id, action: 'in' }, desk);
@@ -59,6 +60,16 @@ try {
   ok('C8 the reconciliation export lists both, with the correction', csv.includes(LABEL) && csv.includes('Appointment') && csv.includes('Walk-in') && /amount ₱200 → ₱180/.test(csv) && db.prepare("select count(*) n from audit where action='records-exported'").get().n === 1);
   // C9: the front desk sees the day, not the reports
   ok('C9 the front desk cannot open the reports', (await call('GET', '/api/reports/records', null, desk)).s === 403);
+
+  // ---------- earnings half (Earnings and loyalty checkpoint) ----------
+  const ce = id => db.prepare('select * from commission_entries where orderId=? order by createdAt, rowid').all(id);
+  ok('C10 each finished visit created its commission entry: Kev ₱80 (40% of ₱200)', ce(appt).length === 1 && ce(appt)[0].amount === 80 && ce(appt)[0].staffId === kev.id, ce(appt));
+  ok("C11 the walk-in's correction to ₱180 added a correcting entry for Leo: ₱100 − ₱10 = ₱90", ce(walk).map(e => e.amount).join() === '100,-10', ce(walk));
+  const me = (await call('GET', '/api/earnings', null, kevTok)).j;
+  ok('C12 Kev sees his own entry today (₱80) and nobody else\'s', me.staff?.id === kev.id && me.today.total === 80 && me.entries.every(e => e.amount === 80), me);
+  ok("C13 Kev cannot open Leo's earnings", (await call('GET', `/api/earnings?staffId=${leo.id}`, null, kevTok)).s === 403);
+  const br = (await call('GET', `/api/earnings/branch?branch=${A.id}`, null, owner)).j, by = Object.fromEntries(br.barbers.map(b => [b.name, b.today]));
+  ok('C14 the owner sees each barber\'s commission for the branch', by.Kev === 80 && by.Leo === 90, br);
   db.close();
 } catch (e) { fail(e); }
 await S.stop();
