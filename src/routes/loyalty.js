@@ -44,6 +44,33 @@ export function createLoyalty({ uid, all, one, run, get, nowISO, log, mvpOn, isA
       staffOnly(me); if (!get('customers', cm[1])) bad(404, 'Customer not found');
       return send(res, 200, view(cm[1]));
     }
+    // ----- T38: carry-over of past visits (D-3, D-3a). First the read-only count, then the owner's explicit go. -----
+    if (p === '/api/loyalty/carry-over') {
+      if (!isAdmin(me)) bad(403, 'Only the owner can carry over past visits');
+      // past paid visits of each customer that did not already earn a point in the ledger
+      const pastVisits = () => all(`select o.customerId cid, count(*) n from orders o where o.status='paid' and ifnull(o.customerId,'')<>''
+        and not exists (select 1 from loyalty_ledger e where e.orderId=o.id and e.kind='earn') and exists (select 1 from customers c where c.id=o.customerId) group by o.customerId`);
+      const carried = () => one("select count(*) n from loyalty_ledger where kind='carry_over'").n;
+      if (method === 'GET') {
+        const rows = pastVisits(), atLeast = Object.fromEntries([...REWARDS.map(r => r.points), VIP_AT].map(k => [k, rows.filter(r => r.n >= k).length]));
+        return send(res, 200, { customers: rows.length, visits: rows.reduce((a, r) => a + r.n, 0), atLeast, done: carried() > 0, carried: carried() });
+      }
+      if (method === 'POST') {
+        const b = await readBody(req); if (b.confirm !== true) bad(400, 'Look at the count first, then confirm the carry-over');
+        let created = 0;
+        run('begin immediate');
+        try {
+          for (const r of pastVisits()) {
+            if (one("select id from loyalty_ledger where customerId=? and kind='carry_over'", r.cid)) continue;   // once per customer, ever
+            add({ customerId: r.cid, kind: 'carry_over', delta: r.n, byId: me.id, byName: me.name, reason: `${r.n} past paid visit${r.n === 1 ? '' : 's'}` }); markVip(r.cid); created++;
+          }
+          run('commit');
+        } catch (e) { try { run('rollback'); } catch { } throw e; }
+        log(me, 'loyalty-carry-over', 'loyalty_ledger', '', `${created} customers`);
+        return send(res, 200, { ok: true, created });
+      }
+      bad(405, 'Method not allowed');
+    }
     if (p === '/api/loyalty/warnings' && method === 'GET') {   // T37: visits voided after the customer redeemed; for managers and the owner
       if (!isAdmin(me) && me.role !== 'manager') bad(403, 'Not allowed for your role');
       const br = q.branch && q.branch !== 'all' ? String(q.branch) : null;

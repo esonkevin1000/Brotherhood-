@@ -665,6 +665,7 @@ function vOwner() {
   return `<div class="row" style="margin-bottom:12px;gap:10px"><button class="btn block" data-ptab="today" style="flex:1">${ic('scissors')} Today</button><a class="btn sec block" href="/backend" style="flex:1">Back office</a></div>
   <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${kpi('Sales today', peso(t.today), `${t.transactions} transactions`, 'Finished visits today in all branches, after discounts and approved corrections. Voided records are left out.')}${kpi('Sales · 7 days', peso(t.week), '', 'The same, for today and the 6 days before.')}${kpi('Bookings today', t.bookings, '', 'Bookings for today that are still booked or have arrived. Cancelled and no-shows are left out.')}${kpi('Queue now', t.waiting + t.cutting, `${t.waiting} waiting · ${t.cutting} cutting`, 'Customers waiting plus customers in the chair right now.')}</div>
   <div class="sec-h"><h2>Branches</h2><span class="mute sm">${t.onDuty} barbers on duty</span></div><div class="list">${d.branches.map(b => `<div class="card"><div class="row"><b>${esc(b.name)}</b><span class="sp"></span><b class="num" style="font-size:20px">${peso(b.today)}</b></div><div class="sm mute">${b.todayCount} transactions today · 7 days ${peso(b.week)}</div><div class="sm" style="margin-top:4px"><span class="tag">${b.onDuty} on duty</span> <span class="tag">${b.waiting} waiting</span> <span class="tag">${b.cutting} cutting</span> <span class="tag">${b.bookings} bookings</span></div></div>`).join('')}</div>
+  ${carryCard()}
   <div class="sec-h"><h2>Map pins</h2><span class="mute sm">${d.branches.filter(b => b.lat != null).length}/${d.branches.length} set</span></div><div>${d.branches.map(locEditor).join('')}</div>
   <div class="sec-h"><h2>Brotherhood app</h2></div><div class="card sm"><b>${d.members}</b> app members${d.openReports ? ` · <button class="link" data-ptab="mod">${d.openReports} reported item${d.openReports === 1 ? '' : 's'} to review</button>` : ' · nothing to review'}</div>`;
 }
@@ -678,7 +679,24 @@ const locEditor = b => `<details class="card" style="margin-top:6px;padding:10px
 async function saveLoc(id, body) {
   try { const j = await api('/pro/branch-location', { method: 'PUT', body: { branchId: id, ...body } }, S.proToken); toast('Map pin saved'); S.D = null; await loadShopOwner(); return j; } catch (x) { toast(x.message); }
 }
-async function loadShopOwner() { try { S.shopData = await api('/pro/shop', {}, S.proToken); } catch (e) { S.shopData = null; toast(e.message); } render(); }
+async function loadShopOwner() { try { S.shopData = await api('/pro/shop', {}, S.proToken); S.carry = await sapi('/loyalty/carry-over').catch(() => null); } catch (e) { S.shopData = null; toast(e.message); } render(); }   // T38: the carry-over count
+// T38: carry-over of past visits into points. The owner sees the count first (for stock planning), then decides.
+function carryCard() {
+  const c = S.carry; if (!c) return '';
+  if (c.done) return `<div class="sec-h"><h2>Points carry-over</h2></div><div class="card sm mute">Done: ${c.carried} customers got their past visits as points.</div>`;
+  const lvl = [[10, 'free haircut'], [15, 'Viro product'], [25, 'cap'], [40, 'shirt'], [50, 'VIP']];
+  return `<div class="sec-h"><h2>Points carry-over</h2><span class="mute sm">not done yet</span></div><div class="card">
+    <div class="sm">${c.customers} customers have ${c.visits} past paid visits. Each visit becomes 1 point, and rewards can be claimed right away (D-3a). Customers who would start at or above:</div>
+    <div class="list" style="margin-top:8px">${lvl.map(([k, n]) => `<div class="row sm"><span class="sp">${k} points (${n})</span><b>${c.atLeast[k] ?? 0}</b></div>`).join('')}</div>
+    <div class="sm mute" style="margin-top:8px">Check your stock of Viro products, caps and shirts before you start. This is done once and cannot be undone.</div>
+    ${c.customers ? '<button class="btn sec block" data-carrygo style="margin-top:10px">Carry over past visits now</button>' : ''}</div>`;
+}
+document.addEventListener('click', async e => {
+  if (!e.target.closest('[data-carrygo]')) return;
+  if (!confirm(`Give ${S.carry.customers} customers their ${S.carry.visits} past visits as points? This cannot be undone.`)) return;
+  try { const j = await sapi('/loyalty/carry-over', { method: 'POST', body: { confirm: true } }); toast(`Done: ${j.created} customers`); S.carry = await sapi('/loyalty/carry-over'); render(); } catch (x) { toast(x.message); }
+});
+
 async function loadDash() {
   S.dash = null; S.earn = null; if (!S.pro || !S.proSel || S.pro.desk) return;   // the front desk has no barber dashboard
   try { S.dash = await api(`/pro/dashboard?staffId=${S.proSel}&range=${S.dashRange}`, {}, S.proToken); } catch (e) { S.dash = null; toast(e.message); }
