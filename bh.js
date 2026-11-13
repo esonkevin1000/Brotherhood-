@@ -1310,7 +1310,9 @@ async function sapi(path, opt = {}) {
   return j;
 }
 async function loadToday(quiet) {
-  try { S.td = await sapi('/svc/today' + (S.tdBranch ? '?branch=' + encodeURIComponent(S.tdBranch) : '')); S.tdErr = ''; }
+  try { S.td = await sapi('/svc/today' + (S.tdBranch ? '?branch=' + encodeURIComponent(S.tdBranch) : '')); S.tdErr = '';
+    S.tdAdj = ['owner', 'admin', 'manager'].includes(S.td.role) ? await sapi(`/adjustments?status=requested&branch=${encodeURIComponent(S.td.branch.id)}`).catch(() => []) : [];   // T29
+  }
   catch (e) { S.tdErr = e.message; if (!quiet) toast(e.message); }
   if ((S.proTab === 'today' || (S.proTab === 'tools' && !S.tool)) && !document.querySelector('.lb')) render();   // the Tools tab also waits for this data
 }
@@ -1331,10 +1333,11 @@ function vToday() {
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px">${kpi('Waiting', d.totals.waiting)}${kpi('In the chair', d.totals.inChair)}${kpi(me ? 'Done · mine' : 'Done', d.totals.done, me ? 'I earned ' + peso(d.myEarnings || 0) : peso(d.totals.earned))}</div>
   ${d.locked ? '<div class="card sm" style="margin-top:10px">Today is already closed for this shop.</div>' : ''}
   ${!me && d.closing?.needed ? `<div class="card" role="alert" style="margin-top:10px;border-color:var(--gold)"><b>It is past closing time (${t12(d.closing.closeTime)})</b><div class="sm mute" style="margin:4px 0 10px">${d.closing.waiting} still waiting. Mark them as left, or carry them over to tomorrow.</div><div class="row" style="gap:8px"><button class="btn sm sp" data-tclose="left">Mark all as left</button><button class="btn sec sm" data-tclose="carry">Carry over</button></div></div>` : ''}
+  ${(S.tdAdj || []).length ? `<div class="sec-h"><h2>Corrections to approve</h2><span class="mute sm">${S.tdAdj.length}</span></div><div class="list">${S.tdAdj.map(a => `<div class="card tk"><div class="nm">${esc(a.kind === 'amount' ? `Amount ${peso(a.before.total)} → ${peso(a.after.total)}` : a.kind === 'method' ? `Payment ${a.before.method} → ${a.after.method}` : a.kind === 'barber' ? `Barber ${a.before.name || 'none'} → ${a.after.name}` : 'Void the record')}</div><div class="sm mute">${esc(a.reason)} · asked by ${esc(a.requestedBy)}</div>${a.canDecide ? `<div class="row" style="gap:8px;margin-top:10px"><button class="btn sm sp" data-tadjok="${a.id}">Approve</button><button class="btn sec sm" data-tadjno="${a.id}">Reject</button></div>` : '<div class="sm mute" style="margin-top:6px">Waiting for the owner</div>'}</div>`).join('')}</div>` : ''}
   ${d.bookings.length ? `<div class="sec-h"><h2>Booked today</h2><span class="mute sm">${d.bookings.length}</span></div><div class="list">${d.bookings.map(b => `<div class="card tk"><div class="row" style="gap:12px;align-items:flex-start"><span class="tkno">${t12(b.time)}</span><div class="sp" style="min-width:0"><div class="nm">${esc(b.customerName)}</div><div class="sm mute">${esc(b.items.join(', '))} · ${esc(b.staffName)}</div></div></div><div class="row" style="gap:8px;margin-top:12px"><button class="btn sm sp" data-tarrive="${b.id}">${ic('check')} Arrived</button><button class="btn sec sm" data-tnoshow="${b.id}">No-show</button>${b.phone ? `<a class="btn sec sm" href="tel:${esc(b.phone)}">Call</a>` : ''}</div></div>`).join('')}</div>` : ''}
   <div class="sec-h"><h2>In the chair</h2><span class="mute sm">${chair.length}</span></div><div class="list">${chair.map(x => tdCard(x, `${esc(x.barberName)} · started ${minsAgo(x.startedAt || x.createdAt)} ago`, `<button class="btn sm sp" data-tfin="${x.id}">${ic('check')} Done</button><button class="btn sec sm" data-tcan="${x.id}">Cancel</button>`)).join('') || empty('Nobody in the chair right now.')}</div>
   <div class="sec-h"><h2>Waiting</h2><span class="mute sm">${waiting.length}</span></div><div class="list">${waiting.map(x => tdCard(x, `${x.plan === 'checked_in' ? 'Booked · checked in · ' : ''}${x.barberName ? 'For ' + esc(x.barberName) : 'Any barber'} · waiting ${minsAgo(x.createdAt)}${x.estimate ? ` · starts about ${t12(x.estimate.start)}${x.barberName ? '' : ' with ' + esc(x.estimate.barber)} <span class="tag">estimate</span>` : ''}`, `<button class="btn sm sp" data-tstart="${x.id}">${me ? 'Start with me' : 'Start'}</button><button class="btn sec sm" data-tfin="${x.id}">Done</button>${me ? '' : `<button class="btn sec sm" data-tleft="${x.id}">Left</button>`}<button class="btn sec sm" data-tcan="${x.id}">Cancel</button>`)).join('') || empty('No one is waiting.')}</div>
-  <div class="sec-h"><h2>Done today</h2><span class="mute sm">${done.length} · ${peso(d.totals.earned)}</span></div><div class="list">${done.slice().reverse().map(x => tdCard(x, `${esc(x.barberName)} · ${esc(x.method)}${x.discountName ? ' · ' + esc(x.discountName) : ''}${x.invoiceNo ? ' · BIR invoice ' + esc(x.invoiceNo) : ''}`, '')).join('') || empty('No finished services yet today.')}</div>
+  <div class="sec-h"><h2>Done today</h2><span class="mute sm">${done.length} · ${peso(d.totals.earned)}</span></div><div class="list">${done.slice().reverse().map(x => tdCard(x, `${esc(x.barberName)} · ${esc(x.method)}${x.discountName ? ' · ' + esc(x.discountName) : ''}${x.invoiceNo ? ' · BIR invoice ' + esc(x.invoiceNo) : ''}${x.payStatus === 'verified' ? ' <span class="tag ok">verified</span>' : ''}`, me ? '' : `<button class="btn sec sm" data-tadj="${x.id}">Correct</button>${x.payStatus !== 'verified' && d.role !== 'cashier' ? `<button class="btn sec sm" data-tverify="${x.id}">Verify payment</button>` : ''}`)).join('') || empty('No finished services yet today.')}</div>
   <p class="sm mute" style="margin:16px 2px 0">${NOT_RECEIPT}</p></div>`;
 }
 // a photo from the phone, made small before it is sent
@@ -1433,7 +1436,10 @@ function openStart(id) {
   o.addEventListener('click', async e => { const b = e.target.closest('[data-tsb]'); if (!b || b.disabled) return; try { await sapi(`/svc/${x.id}/start`, { method: 'POST', body: { barberId: b.dataset.tsb } }); o.remove(); loadToday(); } catch (z) { toast(z.message); } });
 }
 document.addEventListener('click', async e => {
-  const t = e.target.closest('[data-twalk],[data-tfin],[data-tstart],[data-tcan],[data-tarrive],[data-tleft],[data-tnoshow],[data-tclose]'); if (!t || !S.td) return;
+  const t = e.target.closest('[data-twalk],[data-tfin],[data-tstart],[data-tcan],[data-tarrive],[data-tleft],[data-tnoshow],[data-tclose],[data-tadj],[data-tverify],[data-tadjok],[data-tadjno]'); if (!t || !S.td) return;
+  if (t.dataset.tadj) return openCorrection(t.dataset.tadj);
+  if (t.dataset.tverify) { try { await sapi(`/records/${t.dataset.tverify}/verify`, { method: 'POST', body: {} }); toast('Payment verified'); loadToday(); } catch (z) { toast(z.message); } return; }
+  if (t.dataset.tadjok || t.dataset.tadjno) { const no = !!t.dataset.tadjno, note = no ? prompt('Why is this correction rejected?') : ''; if (no && !note) return; try { await sapi(`/adjustments/${t.dataset.tadjok || t.dataset.tadjno}/approve`, { method: 'POST', body: { approve: !no, note } }); toast(no ? 'Rejected' : 'Approved'); loadToday(); } catch (z) { toast(z.message); } return; }
   if (t.dataset.tleft) { const why = prompt('The customer left without a cut. Note (optional):', 'Could not wait'); if (why === null) return; try { await sapi(`/svc/${t.dataset.tleft}/left`, { method: 'POST', body: { reason: why } }); toast('Marked as left'); loadToday(); } catch (z) { toast(z.message); } return; }
   if (t.dataset.tnoshow) { if (!confirm('Mark this booking as a no-show?')) return; try { await sapi(`/bookings/${t.dataset.tnoshow}`, { method: 'PUT', body: { status: 'noshow' } }); toast('Marked as no-show'); loadToday(); } catch (z) { toast(z.message); } return; }
   if (t.dataset.tclose) { if (!confirm(t.dataset.tclose === 'left' ? 'Mark everyone still waiting as left?' : 'Carry everyone still waiting over to tomorrow?')) return; try { const r = await sapi('/svc/close-queue', { method: 'POST', body: { branchId: S.td.branch.id, action: t.dataset.tclose } }); toast(r.left != null ? `${r.left} marked as left` : `${r.carried} carried over`); loadToday(); } catch (z) { toast(z.message); } return; }
@@ -1443,6 +1449,22 @@ document.addEventListener('click', async e => {
   if (t.dataset.tcan) { const why = prompt('Why is this visit cancelled? (for example: customer left)'); if (why === null) return; try { await sapi(`/svc/${t.dataset.tcan}/cancel`, { method: 'POST', body: { reason: why } }); toast('Cancelled'); loadToday(); } catch (z) { toast(z.message); } return; }
   if (t.dataset.tarrive) { try { await sapi(`/bookings/${t.dataset.tarrive}/arrive`, { method: 'POST', body: {} }); toast('Checked in'); loadToday(); } catch (z) { toast(z.message); } }
 });
+// T29: ask for a correction of a finished visit (never edited directly). The owner's own corrections take effect at once.
+function openCorrection(id) {
+  const d = S.td, x = d.tickets.find(t => t.id === id); if (!x) return;
+  const o = sheet(`<h3>Correct #${x.no} ${esc(x.customerName)}</h3><p class="sm mute" style="margin-top:0">${peso(x.total)} · ${esc(x.method)} · ${esc(x.barberName)}. The record is not changed until the correction is approved.</p>
+    <label class="f">What is wrong<select id="cwhat"><option value="amount">The amount</option><option value="method">How it was paid</option><option value="barber">The barber</option><option value="void">It should not count (void)</option></select></label>
+    <div id="cafter"></div><label class="f">Reason<input id="creason" maxlength="300" placeholder="e.g. wrong price entered"></label><div id="cerr"></div>
+    <div class="row" style="gap:8px;margin-top:12px"><button class="btn" id="csend">Send for approval</button><button class="btn sec" data-x>Close</button></div>`);
+  const field = () => { const k = o.querySelector('#cwhat').value; o.querySelector('#cafter').innerHTML = k === 'amount' ? `<label class="f">Correct amount (₱)<input id="cval" type="number" min="0" inputmode="decimal" value="${x.total}"></label>` : k === 'method' ? `<label class="f">Paid by<select id="cval">${(d.methods || []).map(m => `<option ${m === x.method ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></label>` : k === 'barber' ? `<label class="f">Barber who did it<select id="cval">${d.staff.map(s => `<option value="${s.id}" ${s.id === x.barberId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>` : ''; };
+  field(); o.addEventListener('change', e => { if (e.target.id === 'cwhat') field(); });
+  o.addEventListener('click', async e => {
+    if (e.target.id !== 'csend') return;
+    const kind = o.querySelector('#cwhat').value, after = o.querySelector('#cval')?.value, reason = o.querySelector('#creason').value.trim();
+    try { const r = await sapi(`/records/${x.id}/adjust`, { method: 'POST', body: { kind, after: kind === 'amount' ? +after : after, reason } }); o.remove(); toast(r.adjustment.status === 'approved' ? 'Corrected' : 'Sent for approval'); loadToday(); }
+    catch (z) { o.querySelector('#cerr').innerHTML = `<div class="err">${esc(z.message)}</div>`; }
+  });
+}
 document.addEventListener('change', e => { if (e.target.id === 'tdbranch') { S.tdBranch = e.target.value; S.td = null; render(); loadToday(); } });
 
 // ----- Tools: the rest of what the POS did, now in the app (time clock, expenses, end-of-day cash, release pay, checklist, problems, leave, inbox) -----
