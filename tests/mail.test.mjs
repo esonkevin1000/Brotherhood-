@@ -83,6 +83,12 @@ try {
   ok('a shop name, its own reply-to and the unsubscribe header are passed on', resendGot[1].body.from === 'Kingsman Cuts <hello@brotherhood.ph>' && resendGot[1].body.reply_to === 'owner@kingsman.ph' && resendGot[1].body.headers['List-Unsubscribe'] === '<https://x.ph/u>', resendGot[1]);
   resendFail = true; r = await m.send({ to: 'ana@x.ph', subject: 'Hello', html: 'x', text: 'x' });
   ok('a refusal from Resend is reported with its reason and not counted', r.ok === false && /not verified/.test(r.error) && c.n === 2, [r, c.n]);
+  // Resend that never answers: the app gives up and says so, instead of waiting until the host cuts the request
+  { const hang = http.createServer(() => { }).listen(3175); await new Promise(r => hang.once('listening', r));
+    c = counter(); m = createMailer({ env: { ...resendEnv, RESEND_URL: 'http://127.0.0.1:3175/emails', EMAIL_TIMEOUT_MS: '600' }, defaultName: 'Brotherhood', ...c });
+    const t0 = Date.now(); r = await m.send({ to: 'ana@x.ph', subject: 'Hello', html: 'x', text: 'x' });
+    ok('a Resend that never answers gives a clear error within seconds, and counts nothing', r.ok === false && /did not answer/i.test(r.error) && Date.now() - t0 < 5000 && c.n === 0, [r, Date.now() - t0]);
+    hang.closeAllConnections?.(); hang.close(); }
   m = createMailer({ env: { ...gmailEnv, ...resendEnv }, defaultName: 'Brotherhood', ...counter() });
   ok('when both are set, Gmail is used', m.provider() === 'gmail');
 } catch (e) { fail(e); }

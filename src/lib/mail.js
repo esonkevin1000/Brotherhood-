@@ -64,11 +64,11 @@ export function createMailer({ env = process.env, defaultName = 'Brotherhood', s
     let r;
     if (pv === 'gmail') r = await smtpSend(mimeMessage({ from: SMTP.user, fromName: name, to, subject, html, text, replyTo: rt, unsub }), to);
     else try {
-      const x = await fetch(env.RESEND_URL || 'https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + EMAIL.key, 'Content-Type': 'application/json' },
+      const x = await fetch(env.RESEND_URL || 'https://api.resend.com/emails', { method: 'POST', signal: AbortSignal.timeout(+env.EMAIL_TIMEOUT_MS || 20000), headers: { Authorization: 'Bearer ' + EMAIL.key, 'Content-Type': 'application/json' },
         body: JSON.stringify({ from: fromName ? `${name} <${from()}>` : EMAIL.from, to: [to], subject, html, text, ...(rt ? { reply_to: rt } : {}), ...(unsub ? { headers: { 'List-Unsubscribe': `<${unsub}>` } } : {}) }) });
       const j = await x.json().catch(() => ({}));
       r = x.ok ? { ok: true } : { ok: false, error: String(j.message || j.error || x.status).slice(0, 300) };
-    } catch (e) { r = { ok: false, error: String(e.message).slice(0, 300) }; }
+    } catch (e) { r = { ok: false, error: e.name === 'TimeoutError' || e.name === 'AbortError' ? 'The email service did not answer in time. Please try again in a moment.' : String(e.message).slice(0, 300) }; }
     if (r.ok) countSent();
     return r;
   }

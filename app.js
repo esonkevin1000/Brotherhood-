@@ -23,7 +23,7 @@ async function api(method, url, body) {
   const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(!token && orgCode && (url === '/api/login' || url === '/api/public/login-hint') ? { 'x-org': orgCode } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && url !== '/api/login') { loggedIn = false; token = ''; render(); throw new Error(j.error || 'Login required'); }
-  if (!r.ok) throw new Error(j.error || 'Request failed');
+  if (!r.ok) throw new Error(j.error || `Request failed (${r.status}). The server did not give a reason: try again in a minute, and if it keeps happening, check the Railway logs.`);
   return j;
 }
 const qs = () => `from=${ui.from}&to=${ui.to}&branch=${ui.branch}`;
