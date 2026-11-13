@@ -2,7 +2,7 @@
 // who can do it, including "Any barber". A barber with an empty list does every service (today's behaviour).
 import { startServer, checker, ymd } from './helper.mjs';
 const { ok, done, fail } = checker();
-const S = await startServer(3164);
+const S = await startServer(3167);
 const { call } = S;
 try {
   const owner = (await call('POST', '/api/login', { password: 'ownerpw' })).j.token;

@@ -29,6 +29,7 @@ const total = () => svcs().reduce((t, s) => t + s.price, 0), mins = () => Math.m
 // only barbers who do every chosen service (s.services is null when a barber does everything)
 const team = () => I.staff.filter(s => s.branchId === S.branch && (!s.services || S.items.every(i => s.services.includes(i))));
 const branch = id => I.branches.find(b => b.id === id);
+const needCode = () => !!branch(S.branch)?.verify;   // T16: this branch confirms guest bookings with an emailed code
 const ready = () => S.branch && S.items.length && S.date && S.time && S.name.trim() && S.phone.replace(/\D/g, '').length >= 10;
 const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url)}" alt="${esc(name)}" loading="lazy">` : `<span class="${cls}">${esc(initials(name))}</span>`;
 const hours = b => `${t12(b.openTime || '09:00')} – ${t12(b.closeTime || '21:00')}`;
@@ -104,7 +105,7 @@ function stepBody() {
       <div class="err">${esc(S.err)}</div>${stepNav()}</section>`;
   return `<section class="step"><h2><b>5</b>Your details</h2>
       <div class="row2"><div><label>Full name</label><input id="name" value="${esc(S.name)}" autocomplete="name"></div><div><label>Mobile number</label><input id="phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(S.phone)}" autocomplete="tel"></div></div>
-      <div class="row2"><div><label>Email (optional)</label><input id="email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(S.email)}" autocomplete="email"></div><div><label>Preferred haircut (optional)</label><input id="cut" placeholder="e.g. Low fade, no. 2 on the sides" value="${esc(S.cut)}"></div></div>
+      ${needCode() ? '<p class="mute" style="font-size:13px;margin:0 0 8px"><b>Email is required.</b> We send you a 6-digit code to confirm your booking. No email? Just walk in, we will gladly serve you.</p>' : ''}<div class="row2"><div><label>${needCode() ? 'Email' : 'Email (optional)'}</label><input id="email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(S.email)}" autocomplete="email"></div><div><label>Preferred haircut (optional)</label><input id="cut" placeholder="e.g. Low fade, no. 2 on the sides" value="${esc(S.cut)}"></div></div>
       <label class="consent"><input type="checkbox" id="consent" ${S.consent ? 'checked' : ''}><span>I agree to receive emails and promos from Brotherhood Barber, and I agree to the <a href="#" data-act="terms">Terms &amp; Conditions</a>.</span></label>
       <p class="mute" style="font-size:12px;margin:8px 0 0">Your phone number or email is used to recognise you when you come back and to keep track of your visits and loyalty points.</p>
       <div class="err">${esc(S.err)}</div>${stepNav()}</section>`;
@@ -132,6 +133,16 @@ function render() {
   const all = I.ratings ? Object.values(I.ratings) : [], n = all.reduce((s, r) => s + r.count, 0), avg = n ? all.reduce((s, r) => s + r.avg * r.count, 0) / n : 0;
   const head = `<div class="top"><img src="/logo-sm.png?v=b" alt=""><h1>${esc(I.shop)}</h1><p>Book your cut online. No waiting, no queue.</p>${n ? `<div class="stars">★ ${avg.toFixed(1)} · ${n} review${n === 1 ? '' : 's'}</div>` : ''}</div>`;
   if (S.showTerms) { app.innerHTML = head + `<div class="wrap"><div class="step"><h2>Terms &amp; Conditions</h2><div class="terms">${esc(S.terms)}</div><br><button class="go" data-act="closeterms">I understand</button></div></div>`; window.scrollTo(0, 0); return; }
+  if (S.hold) {   // T16: the time is held while the guest enters the code from the email
+    const h = S.hold, left = Math.max(0, Math.ceil((new Date(h.until) - Date.now()) / 60e3));
+    app.innerHTML = head + `<div class="wrap"><section class="step"><h2>Check your email</h2>
+      <p>We sent a 6-digit code to <b>${esc(h.email)}</b>. Your time is held for ${left > 0 ? 'about ' + left + ' minute' + (left === 1 ? '' : 's') : 'a few seconds'}.</p>
+      <label for="code">Code</label><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="123456" value="${esc(h.code || '')}" style="font-size:22px;letter-spacing:6px;text-align:center">
+      ${S.err ? `<p class="err" role="alert">${esc(S.err)}</p>` : ''}${h.note ? `<p class="mute">${esc(h.note)}</p>` : ''}
+      <button class="go" data-act="confirmcode" ${S.busy ? 'disabled' : ''}>Confirm booking</button>
+      <p class="mute" style="font-size:13px;margin-top:12px">No email? Check your spam folder. <a href="#" data-act="resendcode">Send a new code</a> · <a href="#" data-act="cancelhold">Start again</a></p></section></div>`;
+    return;
+  }
   if (S.done) {
     const b = S.done, when = new Date(b.date + 'T00:00').toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' });
     app.innerHTML = head + `<div class="wrap"><div class="step done"><div class="tick">${ic('check')}</div><h2>You're booked!</h2><p class="mute">Thank you, ${esc(b.name)}. We'll be expecting you.</p>
@@ -183,12 +194,29 @@ document.addEventListener('click', async e => {
     } catch (x) { rv.busy = false; rv.err = 'No connection. Please try again.'; render(); }
     return;
   }
+  if (d.act === 'confirmcode' || d.act === 'resendcode') {   // T16
+    e.preventDefault(); const h = S.hold; if (!h) return;
+    h.code = (document.getElementById('code')?.value || '').trim(); S.err = ''; h.note = '';
+    if (d.act === 'confirmcode' && !/^\d{6}$/.test(h.code)) { S.err = 'Enter the 6-digit code from the email.'; return render(); }
+    S.busy = true; render();
+    try {
+      const r = await fetch('/api/public/book/' + (d.act === 'confirmcode' ? 'confirm' : 'resend'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hold: h.id, code: h.code }) }), j = await r.json().catch(() => ({}));
+      S.busy = false;
+      if (r.ok && d.act === 'confirmcode') { S.hold = null; S.done = j.booking; VISIT = newVisit(); return render(); }
+      if (r.ok) { h.code = ''; h.note = 'A new code was sent. Use the newest one.'; return render(); }
+      if (r.status === 410 || (r.status === 429 && /released/.test(j.error || ''))) { S.hold = null; S.step = 4; S.time = ''; VISIT = newVisit(); await loadSlots(); S.err = j.error; return render(); }
+      S.err = j.error || 'Something went wrong. Please try again.'; render();
+    } catch (x) { S.busy = false; S.err = 'No connection. Please try again.'; render(); }
+    return;
+  }
+  if (d.act === 'cancelhold') { e.preventDefault(); S.hold = null; S.time = ''; S.step = 4; VISIT = newVisit(); await loadSlots(); return render(); }
   if (el.hasAttribute('data-go')) {
     S.busy = true; S.err = ''; render();
     try {
       const r = await fetch('/api/public/book', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idemKey() }, body: JSON.stringify({ branchId: S.branch, staffId: S.staff, date: S.date, time: S.time, itemIds: S.items, name: S.name, phone: S.phone, email: S.email, preferredCut: S.cut, consent: S.consent }) });
       const j = await r.json();
       if (!r.ok) { S.err = j.error || 'Something went wrong. Please try again.'; S.busy = false; if (r.status === 409) { if (/already used/i.test(j.error || '')) VISIT = newVisit(); S.step = 4; await loadSlots(); S.err = j.error; } return render(); }
+      if (r.status === 202 && j.pending) { S.hold = { id: j.hold, until: j.holdUntil, email: j.email, code: '' }; S.busy = false; window.scrollTo(0, 0); return render(); }
       S.done = j.booking; S.busy = false; VISIT = newVisit(); render();
     } catch (x) { S.err = 'No connection. Please try again.'; S.busy = false; render(); }
   }

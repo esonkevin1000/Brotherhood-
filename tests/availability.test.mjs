@@ -10,7 +10,7 @@ try {
   db.exec(`
 create table branches(id text primary key, name text, openTime text, closeTime text);
 create table staff(id text primary key, name text, branchId text, active integer);
-create table bookings(id text primary key, branchId text, staffId text, date text, time text, mins integer, status text);
+create table bookings(id text primary key, branchId text, staffId text, date text, time text, mins integer, status text, holdUntil text);
 create table bh_blocked(staffId text, date text, fromMin integer, toMin integer);
 create table settings(k text primary key, v text);
 create table staff_schedules(staffId text, weekday integer, startMin integer, endMin integer);
@@ -38,7 +38,7 @@ insert into staff values('kev','Kev','b1',1),('abe','Abe','b1',1),('max','Max','
   run("update leaves set status='APPROVED'");
   ok('approved leave closes the day', s('kev').length === 0);
   reset();
-  run("insert into bookings values('bk1','b1','kev',?,'10:00',30,'booked')", WED);
+  run("insert into bookings(id,branchId,staffId,date,time,mins,status) values('bk1','b1','kev',?,'10:00',30,'booked')", WED);
   ok('a booking takes its own time only', s('kev').join() === '09:00,09:30,10:30,11:00,11:30', s('kev'));
   run("insert into settings values('bufferMins','15')");
   ok('with a 15-minute buffer, the times touching it go too', s('kev').join() === '09:00,11:00,11:30', s('kev'));
@@ -59,18 +59,18 @@ insert into staff values('kev','Kev','b1',1),('abe','Abe','b1',1),('max','Max','
   // ---------- "Any barber": fewest bookings that day, then the lowest id ----------
   ok('a tie goes to the lowest id (abe before kev)', A.pickAny('b1', WED, 600, 30).id === 'abe');
   ok('and always the same one', [1, 2, 3].every(() => A.pickAny('b1', WED, 600, 30).id === 'abe'));
-  run("insert into bookings values('bk2','b1','abe',?,'09:00',30,'booked')", WED);
+  run("insert into bookings(id,branchId,staffId,date,time,mins,status) values('bk2','b1','abe',?,'09:00',30,'booked')", WED);
   ok('the barber with fewer bookings that day goes first', A.pickAny('b1', WED, 600, 30).id === 'kev');
-  run("insert into bookings values('bk3','b2','kev',?,'11:30',30,'booked'),('bk4','b2','kev',?,'09:30',30,'booked')", WED, WED);
+  run("insert into bookings(id,branchId,staffId,date,time,mins,status) values('bk3','b2','kev',?,'11:30',30,'booked'),('bk4','b2','kev',?,'09:30',30,'booked')", WED, WED);
   ok('bookings in other branches count too', A.pickAny('b1', WED, 600, 30).id === 'abe');
-  ok('nobody free: no pick', A.pickAny('b1', WED, 540, 30)?.id === 'kev' && (run("insert into bookings values('bk5','b1','kev',?,'09:00',30,'booked')", WED), A.pickAny('b1', WED, 540, 30)) === null);
+  ok('nobody free: no pick', A.pickAny('b1', WED, 540, 30)?.id === 'kev' && (run("insert into bookings(id,branchId,staffId,date,time,mins,status) values('bk5','b1','kev',?,'09:00',30,'booked')", WED), A.pickAny('b1', WED, 540, 30)) === null);
   reset();
 
   // ---------- a barber who moves to another branch (D-16) is never booked twice at once ----------
-  run("insert into bookings values('bk6','b2','max',?,'10:00',30,'booked')", WED);
+  run("insert into bookings(id,branchId,staffId,date,time,mins,status) values('bk6','b2','max',?,'10:00',30,'booked')", WED);
   run("update staff set branchId='b1' where id='max'");   // the owner moves Max to San Pablo
   ok("Max's Bay booking at 10:00 keeps that time closed in San Pablo", !s('max').includes('10:00') && s('max').includes('09:30'));
-  ok('"Any barber" never gives Max at 10:00', ['kev', 'abe'].every(id => (run("insert into bookings values(?,'b1',?,?,'10:00',30,'booked')", 'x' + id, id, WED), true)) && A.pickAny('b1', WED, 600, 30) === null);
+  ok('"Any barber" never gives Max at 10:00', ['kev', 'abe'].every(id => (run("insert into bookings(id,branchId,staffId,date,time,mins,status) values(?,'b1',?,?,'10:00',30,'booked')", 'x' + id, id, WED), true)) && A.pickAny('b1', WED, 600, 30) === null);
   reset(); run("update staff set branchId='b2' where id='max'");
 
   // ---------- a branch without the new booking system ----------

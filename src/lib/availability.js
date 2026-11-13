@@ -4,7 +4,7 @@
 //                        ∩ the barber's weekly hours        (new booking system only, T13)
 //                        − approved leave                    (new booking system only, T13)
 //                        − blocked times (breaks, training)
-//                        − bookings of that barber in ANY branch, each with the buffer after it
+//                        − bookings of that barber in ANY branch, each with the buffer after it, and guest holds (T16)
 //                        − today: times before now + 15 minutes, and barbers not clocked in
 //   slots = start times every 30 minutes (D-7) where the whole service fits in free()
 //   a barber is offered only for services they do              (new booking system only, T14)
@@ -20,7 +20,8 @@ export function createAvailability({ all, one, get, toMin, minsOfDay, todayStr, 
   const timeBlocked = (sid, date, start, mins) => { try { return all('select fromMin, toMin from bh_blocked where staffId=? and date=?', sid, date).some(r => start < r.toMin && r.fromMin < start + mins); } catch { return false; } };
   const bookedOverlap = (sid, date, start, mins) => {
     const buf = +getSetting('bufferMins') || 0;
-    return all("select * from bookings where staffId=? and date=? and status in ('booked','arrived')", sid, date).some(b => start < toMin(b.time) + b.mins + buf && toMin(b.time) < start + mins + buf) || timeBlocked(sid, date, start, mins);
+    // a guest's booking on hold (waiting for the email code, T16) keeps its time until holdUntil
+    return all("select * from bookings where staffId=? and date=? and (status in ('booked','arrived') or (status='pending' and holdUntil>?))", sid, date, new Date(now()).toISOString()).some(b => start < toMin(b.time) + b.mins + buf && toMin(b.time) < start + mins + buf) || timeBlocked(sid, date, start, mins);
   };
   const weekdayOf = date => new Date(date + 'T00:00:00Z').getUTCDay();
   // the barber's working window that day: null = no limit beyond the branch hours; [0, 0] = off

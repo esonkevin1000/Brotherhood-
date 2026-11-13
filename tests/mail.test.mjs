@@ -69,7 +69,7 @@ try {
   c = counter(); m = createMailer({ env: { ...gmailEnv, GMAIL_APP_PASSWORD: 'wrongwrongwrongw' }, defaultName: 'Brotherhood', ...c });
   r = await m.send({ to: 'dan@x.ph', subject: 'Hello', html: 'x', text: 'x' });
   ok('a wrong password explains that an App Password is needed, and counts nothing', r.ok === false && /App Password/.test(r.error) && c.n === 0, r);
-  c = counter(); m = createMailer({ env: { ...gmailEnv, SMTP_PORT: '3169' }, defaultName: 'Brotherhood', ...c });
+  c = counter(); m = createMailer({ env: { ...gmailEnv, SMTP_PORT: '3174' }, defaultName: 'Brotherhood', ...c });
   r = await m.send({ to: 'dan@x.ph', subject: 'Hello', html: 'x', text: 'x' });
   ok('an unreachable mail server gives an error, not a crash', r.ok === false && !!r.error && c.n === 0, r);
 

@@ -11,7 +11,7 @@ db.exec(`
 create table branches(id text primary key, name text, openTime text, closeTime text);
 create table staff(id text primary key, name text, branchId text, active integer, photo text);
 create table items(id text primary key, name text, type text, price real, mins integer, active integer, bookable integer);
-create table bookings(id text primary key, branchId text, staffId text, customerName text, phone text, date text, time text, mins integer, itemIds text, status text, notes text, source text, orderId text, createdAt text, customerId text, snapshot text, idemKey text);
+create table bookings(id text primary key, branchId text, staffId text, customerName text, phone text, date text, time text, mins integer, itemIds text, status text, notes text, source text, orderId text, createdAt text, customerId text, snapshot text, idemKey text, holdUntil text);
 create table bh_blocked(staffId text, date text, fromMin integer, toMin integer);
 create table booking_events(id text primary key, bookingId text, at text, actor text, fromStatus text, toStatus text, reason text);
 create table settings(k text primary key, v text);

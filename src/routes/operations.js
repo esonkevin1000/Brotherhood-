@@ -79,7 +79,8 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
       if (method === 'GET' && bkm[2] === 'history') return send(res, 200, all('select at, actor, fromStatus, toStatus, reason from booking_events where bookingId=? order by at, rowid', cur.id));
       if (method === 'PUT' && !bkm[2]) {
         const b = await readBody(req); if (!['cancelled', 'noshow'].includes(b.status)) bad(400, 'Bad status');
-        if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
+        if (cur.status !== 'booked' && !(cur.status === 'pending' && b.status === 'cancelled')) bad(409, 'Booking is already ' + cur.status);   // staff may also release a guest's hold (T16)
+        if (cur.status === 'pending') run('update email_codes set guest=null, codeHash=null where bookingId=?', cur.id);
         run('update bookings set status=? where id=?', b.status, cur.id); bookingEvent(cur.id, cur.status, b.status, me.name, b.reason); BH.freed(cur.branchId, cur.staffId, cur.date); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
       }
       if (method === 'POST' && bkm[2] === 'arrive') {

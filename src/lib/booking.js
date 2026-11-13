@@ -1,6 +1,7 @@
 // Booking rules: which times are free, making a booking, the price snapshot, and a booking's history.
 // Created once by server.js with the database helpers it needs, so the rules can also be tested on their own.
 import { createAvailability, hmOf } from './availability.js';
+export const HOLD_MINS = 10;   // T16: a guest's time is held this long while they enter the emailed code
 export { hmOf };
 // the key a phone or browser sends with a booking so that a repeated tap or a retry never makes a second booking
 export const idemKeyOf = v => { const k = String(v || '').trim(); return k.length >= 16 && k.length <= 200 ? k : ''; };
@@ -41,7 +42,9 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     return out;
   }
   const bookedSnap = orderId => { const bk = orderId ? one('select snapshot from bookings where orderId=?', orderId) : null; return bk ? snapOf(bk) : null; };
-  function createBooking(b, source, actor) {
+  // opts.hold (T16): a guest booking that waits for the email code. It starts as 'pending' and keeps the time for HOLD_MINS;
+  // the customer record is made only when the code is confirmed.
+  function createBooking(b, source, actor, opts = {}) {
     const branchId = String(b.branchId || ''); if (!get('branches', branchId)) bad(400, 'Pick a branch');
     const date = String(b.date || ''), time = String(b.time || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) bad(400, 'Invalid date or time');
@@ -56,18 +59,20 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     return tx(() => {
     if (idem) {   // the same request again (double tap, retry after a lost connection): give back the booking that was already made
       const ex = one('select * from bookings where idemKey=?', idem);
-      if (ex) { if (ex.status !== 'booked' || normPhone(ex.phone) !== normPhone(phone) || ex.branchId !== branchId || ex.date !== date || ex.time !== time) bad(409, 'This booking request was already used. Please start again.'); return { ...bookingView(ex), duplicate: true }; }
+      const liveHold = opts.hold && ex?.status === 'pending' && ex.holdUntil > new Date(now()).toISOString();
+      if (ex) { if ((ex.status !== 'booked' && !liveHold) || normPhone(ex.phone) !== normPhone(phone) || ex.branchId !== branchId || ex.date !== date || ex.time !== time) bad(409, 'This booking request was already used. Please start again.'); return { ...bookingView(ex), duplicate: true }; }
     }
     if (source === 'online') noShowGate(phone, b.email);
     const mins = bookingMins(itemIds), start = toMin(time);
     let sid = String(b.staffId || 'any');
     if (!slotsFor(branchId, date, sid, mins, itemIds).includes(time)) bad(409, 'That time is no longer available. Please pick another.');
     if (sid === 'any') sid = pickAny(branchId, date, start, mins, itemIds).id;   // fewest bookings that day, then the lowest id
-    const cust = upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos', branchId);
+    const cust = opts.hold ? null : upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos', branchId);
+    const holdUntil = opts.hold ? new Date(now().getTime() + HOLD_MINS * 60e3).toISOString() : null;
     const id = uid();
-    run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId,snapshot,idemKey) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '', JSON.stringify(bookingSnapshot(itemIds, branchId, sid, mins)), idem || null);
-    bookingEvent(id, '', 'booked', actor || (source === 'online' ? 'Customer (online)' : 'Staff'));
+    run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId,snapshot,idemKey,holdUntil) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), opts.hold ? 'pending' : 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '', JSON.stringify(bookingSnapshot(itemIds, branchId, sid, mins)), idem || null, holdUntil);
+    bookingEvent(id, '', opts.hold ? 'pending' : 'booked', actor || (source === 'online' ? 'Customer (online)' : 'Staff'));
     return bookingView(one('select * from bookings where id=?', id));
     });
   }
