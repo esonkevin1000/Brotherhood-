@@ -7,7 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { NEXT } from '../lib/http.js';
 
-export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody }) {
+export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, savedOf, setPolicy, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, p, method, q, me, admin, adminOnly, manageIn }) {
     // ----- admin data -----
@@ -109,11 +109,16 @@ export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainD
     // ----- settings: terms, email (admin) -----
     if (p === '/api/settings' && method === 'GET') {
       adminOnly();
-      return send(res, 200, { payRules: payRules(), mvpBranches: mvpBranches(), pinOnly: getSetting('pinOnly') !== '0', attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: mailReady(), provider: mailProvider(), from: mailFrom(), replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
+      return send(res, 200, { payRules: payRules(), mvpBranches: mvpBranches(), policy: Object.fromEntries(all('select id from branches order by rowid').map(b => [b.id, savedOf(b.id)])), pinOnly: getSetting('pinOnly') !== '0', attPhoto: getSetting('attPhoto') !== '0', attGeo: getSetting('attGeo') === '1', ownerUser: ownerUser(), isOwner: me.role === 'owner', google: { configured: !!G_KEY }, perms: permsAll(), modules: MODULES, terms: getTerms(), customTerms: !!getSetting('terms'), email: { configured: mailReady(), provider: mailProvider(), from: mailFrom(), replyTo: EMAIL.replyTo, baseUrl: baseUrl() },
         log: all('select id,toAddr,kind,subject,status,attempts,error,createdAt,sentAt from email_log order by createdAt desc limit 25') });
     }
     if (p === '/api/settings' && method === 'PUT') {
       adminOnly(); const b = await readBody(req, 50_000);
+      if (b.policy && typeof b.policy === 'object') {   // booking policy of one branch (T17): the owner's call, like the pilot branches
+        if (me.role !== 'owner') bad(403, 'Only the owner can change the booking policy');
+        let p; try { p = setPolicy(String(b.policy.branchId || ''), b.policy); } catch (e) { bad(400, e.message); }
+        log(me, 'settings', 'settings', '', `booking policy for ${get('branches', String(b.policy.branchId))?.name}: ${p.slotStep}-minute slots, ${p.bufferMins}-minute buffer, ${p.noshowGraceMins}-minute grace, cancel up to ${p.cancelCutoffMins} minutes before`);
+      }
       if ('mvpBranches' in b) {   // which branches use the new booking system (T11): the owner's call
         if (me.role !== 'owner') bad(403, 'Only the owner can choose the branches for the new booking system');
         try { setMvpBranches(b.mvpBranches); } catch (e) { bad(400, e.message); }

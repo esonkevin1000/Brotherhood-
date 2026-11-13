@@ -29,7 +29,10 @@ const total = () => svcs().reduce((t, s) => t + s.price, 0), mins = () => Math.m
 // only barbers who do every chosen service (s.services is null when a barber does everything)
 const team = () => I.staff.filter(s => s.branchId === S.branch && (!s.services || S.items.every(i => s.services.includes(i))));
 const branch = id => I.branches.find(b => b.id === id);
-const needCode = () => !!branch(S.branch)?.verify;   // T16: this branch confirms guest bookings with an emailed code
+const needCode = () => !!branch(S.branch)?.verify;
+const dur = m => m % 60 === 0 && m >= 60 ? (m / 60) + ' hour' + (m === 60 ? '' : 's') : m + ' minutes';
+// the booking rules shown before confirming (T17); the grace rule only where the new booking system is on
+const policyText = () => { const p = branch(S.branch)?.policy; if (!p) return ''; return (p.cancelCutoffMins ? `You can cancel up to ${dur(p.cancelCutoffMins)} before your time.` : 'You can cancel any time before your appointment.') + (needCode() && p.noshowGraceMins ? ` If you are running late, we hold your slot for ${p.noshowGraceMins} minutes; after that it goes to the next customer.` : ''); };   // T16: this branch confirms guest bookings with an emailed code
 const ready = () => S.branch && S.items.length && S.date && S.time && S.name.trim() && S.phone.replace(/\D/g, '').length >= 10;
 const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url)}" alt="${esc(name)}" loading="lazy">` : `<span class="${cls}">${esc(initials(name))}</span>`;
 const hours = b => `${t12(b.openTime || '09:00')} – ${t12(b.closeTime || '21:00')}`;
@@ -105,7 +108,7 @@ function stepBody() {
       <div class="err">${esc(S.err)}</div>${stepNav()}</section>`;
   return `<section class="step"><h2><b>5</b>Your details</h2>
       <div class="row2"><div><label>Full name</label><input id="name" value="${esc(S.name)}" autocomplete="name"></div><div><label>Mobile number</label><input id="phone" type="tel" inputmode="tel" placeholder="09XX XXX XXXX" value="${esc(S.phone)}" autocomplete="tel"></div></div>
-      ${needCode() ? '<p class="mute" style="font-size:13px;margin:0 0 8px"><b>Email is required.</b> We send you a 6-digit code to confirm your booking. No email? Just walk in, we will gladly serve you.</p>' : ''}<div class="row2"><div><label>${needCode() ? 'Email' : 'Email (optional)'}</label><input id="email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(S.email)}" autocomplete="email"></div><div><label>Preferred haircut (optional)</label><input id="cut" placeholder="e.g. Low fade, no. 2 on the sides" value="${esc(S.cut)}"></div></div>
+      ${policyText() ? `<p class="mute" style="font-size:13px;margin:0 0 8px"><b>Booking rules.</b> ${esc(policyText())}</p>` : ''}${needCode() ? '<p class="mute" style="font-size:13px;margin:0 0 8px"><b>Email is required.</b> We send you a 6-digit code to confirm your booking. No email? Just walk in, we will gladly serve you.</p>' : ''}<div class="row2"><div><label>${needCode() ? 'Email' : 'Email (optional)'}</label><input id="email" type="email" inputmode="email" placeholder="name@email.com" value="${esc(S.email)}" autocomplete="email"></div><div><label>Preferred haircut (optional)</label><input id="cut" placeholder="e.g. Low fade, no. 2 on the sides" value="${esc(S.cut)}"></div></div>
       <label class="consent"><input type="checkbox" id="consent" ${S.consent ? 'checked' : ''}><span>I agree to receive emails and promos from Brotherhood Barber, and I agree to the <a href="#" data-act="terms">Terms &amp; Conditions</a>.</span></label>
       <p class="mute" style="font-size:12px;margin:8px 0 0">Your phone number or email is used to recognise you when you come back and to keep track of your visits and loyalty points.</p>
       <div class="err">${esc(S.err)}</div>${stepNav()}</section>`;

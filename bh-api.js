@@ -1,5 +1,6 @@
 // Brotherhood customer app API (accounts, discover, barber profiles, booking history, verified reviews, pro tools).
 // Mounted from server.js under /api/bh/*. Shares the same database, staff, branches, bookings and reviews as the POS.
+import { cutoffOf, durText } from './src/lib/policy.js';
 import { loadVapid, sendPush, knownPushHost } from './bh-push.js';
 export function mountBH(c) {
   const { inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor,
@@ -490,7 +491,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const reviewed = b.orderId ? !!one('select 1 x from reviews where orderId=?', b.orderId) : false;
         const paid = b.orderId ? one("select status from orders where id=?", b.orderId)?.status === 'paid' : false;
         return { id: v.id, branchId: v.branchId, branchName: v.branchName, staffId: v.staffId, staffName: v.staffName, staffPhoto: v.staffPhoto, date: v.date, time: v.time, mins: v.mins, status: v.status,
-          items: v.items, itemIds: v.itemIds, total: v.total, branchName: org ? `${org.name} · ${v.branchName}` : v.branchName, promoCode: b.promoCode || '', promoAmt: b.promoAmt || 0, notes: v.notes || '', canCancel: v.status === 'booked' && start - now >= 3600e3, canReview: paid && !reviewed, reviewed, brand: org?.name || '' };
+          items: v.items, itemIds: v.itemIds, total: v.total, branchName: org ? `${org.name} · ${v.branchName}` : v.branchName, promoCode: b.promoCode || '', promoAmt: b.promoAmt || 0, notes: v.notes || '', canCancel: v.status === 'booked' && start - now >= cutoffOf(b) * 60e3, canReview: paid && !reviewed, reviewed, brand: org?.name || '' };
       });
       const rows = [...inMain(() => mine(null)), ...activeOrgs().flatMap(o => inOrg(o, () => mine(o)))].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).slice(0, 100);
       return send(res, 200, { bookings: rows });
@@ -500,7 +501,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       return atShop('bookings', cm[1], () => {
       const u = needUser(req), b = one('select * from bookings where id=? and userId=?', cm[1], u.id); if (!b) bad(404, 'Booking not found');
       if (b.status !== 'booked') bad(409, 'This booking is already ' + b.status);
-      if (new Date(`${b.date}T${b.time}:00`).getTime() - Date.now() < 3600e3) bad(409, 'Bookings can be cancelled up to 1 hour before. Please call the shop.');
+      if (new Date(`${b.date}T${b.time}:00`).getTime() - Date.now() < cutoffOf(b) * 60e3) bad(409, `Bookings can be cancelled up to ${durText(cutoffOf(b))} before. Please call the shop.`);   // the rule the booking was made under (T17)
       run("update bookings set status='cancelled' where id=?", b.id); bookingEvent(b.id, 'booked', 'cancelled', 'Customer (app)'); log({ name: 'App: ' + u.name }, 'booking-cancelled', 'bookings', b.id, b.customerName); freed(b.branchId, b.staffId, b.date);
       return send(res, 200, { ok: true });
       });

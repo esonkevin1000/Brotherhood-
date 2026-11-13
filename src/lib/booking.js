@@ -8,14 +8,14 @@ export const idemKeyOf = v => { const k = String(v || '').trim(); return k.lengt
 export const snapOf = b => { try { const s = b.snapshot ? JSON.parse(b.snapshot) : null; return s && Array.isArray(s.items) && s.items.length ? s : null; } catch { return null; } };
 
 // now(): the current time; a test passes its own clock.
-export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn = () => false, now = () => new Date() }) {
+export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn = () => false, policyOf, now = () => new Date() }) {
   function bookingMins(ids) {
     let m = 0;
     for (const id of ids) { const it = get('items', id); if (!it || !it.active || it.type !== 'service') bad(400, 'Unknown service'); m += it.mins || 30; }
     return Math.max(30, m);
   }
   // which times are free: src/lib/availability.js (T15)
-  const { timeBlocked, bookedOverlap, canDo, staffFree, slotsFor, pickAny } = createAvailability({ all, one, get, toMin, minsOfDay, todayStr, staffState, getSetting, bad, mvpOn, now });
+  const { timeBlocked, bookedOverlap, canDo, staffFree, slotsFor, pickAny } = createAvailability({ all, one, get, toMin, minsOfDay, todayStr, staffState, getSetting, bad, mvpOn, ...(policyOf ? { policyOf } : {}), now });
   // owner's rule: after N missed appointments in 90 days a number can no longer book online (the owner can allow a customer again)
   function noShowGate(phone, email) {
     const max = +getSetting('noshowMax') || 0; if (!max) return;
@@ -70,17 +70,17 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     const cust = opts.hold ? null : upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos', branchId);
     const holdUntil = opts.hold ? new Date(now().getTime() + HOLD_MINS * 60e3).toISOString() : null;
     const id = uid();
-    run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId,snapshot,idemKey,holdUntil) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), opts.hold ? 'pending' : 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '', JSON.stringify(bookingSnapshot(itemIds, branchId, sid, mins)), idem || null, holdUntil);
+    run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId,snapshot,idemKey,holdUntil,policy) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), opts.hold ? 'pending' : 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '', JSON.stringify(bookingSnapshot(itemIds, branchId, sid, mins)), idem || null, holdUntil, policyOf ? JSON.stringify(policyOf(branchId)) : null);   // T17: the policy shown before confirming
     bookingEvent(id, '', opts.hold ? 'pending' : 'booked', actor || (source === 'online' ? 'Customer (online)' : 'Staff'));
     return bookingView(one('select * from bookings where id=?', id));
     });
   }
   function bookingView(b) {
     // services and prices come from the snapshot taken at booking time; bookings older than the snapshot fall back to today's price list
-    const { snapshot, idemKey, ...row } = b, snap = snapOf(b);
+    const { snapshot, idemKey, policy: pol, ...row } = b, snap = snapOf(b);
     const ids = jp(b.itemIds), its = snap ? snap.items : ids.map(i => get('items', i)).filter(Boolean), s = b.staffId ? get('staff', b.staffId) : null;
-    return { ...row, itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: snap ? r2(snap.total) : r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
+    return { ...row, policy: (() => { try { return pol ? JSON.parse(pol) : null; } catch { return null; } })(), itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: snap ? r2(snap.total) : r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
   }
 
   return { bookingMins, canDo, pickAny, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };

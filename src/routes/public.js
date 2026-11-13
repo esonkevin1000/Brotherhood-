@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { NEXT } from '../lib/http.js';
 import { createLimiter } from '../lib/throttle.js';
 
-export function createPublicRoutes({ mvpOn, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody }) {
+export function createPublicRoutes({ mvpOn, policyOf, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody }) {
   // ----- guest booking confirmed by an email code (T16, D-5, D-14), only in branches on the new booking system -----
   const TRIES = 5, SENDS = 3, PER_EMAIL = 5, RESEND_WAIT = 60e3;
   // per branch, whatever the address or device: open holds at one time, and code emails a day (keeps the shop's email quota and the day's times safe from fake emails)
@@ -80,7 +80,7 @@ export function createPublicRoutes({ mvpOn, mailReady, findCustomer, upsertCusto
     // ----- public booking (customers, no login) -----
     if (p === '/api/public/info' && method === 'GET') {
       return send(res, 200, {
-        shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime,photo,mapUrl,googlePlaceId,googleUrl from branches order by rowid').map(({ googlePlaceId, googleUrl, ...b }) => ({ ...b, verify: mvpOn(b.id), photo: b.photo || siteCover(b.name), google: gInfo({ ...b, googlePlaceId, googleUrl }) })),
+        shop: SHOP, branches: all('select id,name,address,phone,openTime,closeTime,photo,mapUrl,googlePlaceId,googleUrl from branches order by rowid').map(({ googlePlaceId, googleUrl, ...b }) => ({ ...b, verify: mvpOn(b.id), policy: (({ slotStep, noshowGraceMins, cancelCutoffMins }) => ({ slotStep, noshowGraceMins, cancelCutoffMins }))(policyOf(b.id)), photo: b.photo || siteCover(b.name), google: gInfo({ ...b, googlePlaceId, googleUrl }) })),
         ratings: Object.fromEntries(all('select branchId, count(*) n, avg(rating) a from reviews group by branchId').map(s => [s.branchId, { count: s.n, avg: Math.round(s.a * 10) / 10 }])),
         services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) })),
         menu: all("select id,name,price,mins,photo,apptOnly,bookable from items where active=1 and type='service' order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name), bookable: !!s.bookable })),   // every service for the price menu; only bookable ones can be booked online

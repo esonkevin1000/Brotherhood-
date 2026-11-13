@@ -16,10 +16,10 @@ const pad = n => String(n).padStart(2, '0');
 export const hmOf = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 export const SLOT_STEP = 30;   // D-7
 
-export function createAvailability({ all, one, get, toMin, minsOfDay, todayStr, staffState, getSetting, bad, mvpOn = () => false, now = () => new Date() }) {
+export function createAvailability({ all, one, get, toMin, minsOfDay, todayStr, staffState, getSetting, bad, mvpOn = () => false, policyOf = () => ({ slotStep: SLOT_STEP, bufferMins: +getSetting('bufferMins') || 0 }), now = () => new Date() }) {
   const timeBlocked = (sid, date, start, mins) => { try { return all('select fromMin, toMin from bh_blocked where staffId=? and date=?', sid, date).some(r => start < r.toMin && r.fromMin < start + mins); } catch { return false; } };
   const bookedOverlap = (sid, date, start, mins) => {
-    const buf = +getSetting('bufferMins') || 0;
+    const buf = policyOf(get('staff', sid)?.branchId).bufferMins || 0;   // T17: the barber's branch policy
     // a guest's booking on hold (waiting for the email code, T16) keeps its time until holdUntil
     return all("select * from bookings where staffId=? and date=? and (status in ('booked','arrived') or (status='pending' and holdUntil>?))", sid, date, new Date(now()).toISOString()).some(b => start < toMin(b.time) + b.mins + buf && toMin(b.time) < start + mins + buf) || timeBlocked(sid, date, start, mins);
   };
@@ -43,7 +43,8 @@ export function createAvailability({ all, one, get, toMin, minsOfDay, todayStr, 
   function slotsFor(branchId, date, staffId, mins, itemIds = []) {
     const br = get('branches', branchId); if (!br) bad(400, 'Pick a branch');
     const open = toMin(br.openTime || '09:00'), close = toMin(br.closeTime || '21:00'), nowM = minsOfDay(now()), pool = poolOf(branchId, staffId, itemIds), out = [];
-    for (let m = open; m + mins <= close; m += SLOT_STEP) {
+    const step = policyOf(branchId).slotStep || SLOT_STEP;   // T17: the branch's slot interval
+    for (let m = open; m + mins <= close; m += step) {
       if (date === todayStr() && m < nowM + 15) continue;
       if (pool.some(s => staffFree(s, date, m, mins))) out.push(hmOf(m));
     }

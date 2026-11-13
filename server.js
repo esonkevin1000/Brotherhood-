@@ -14,6 +14,7 @@ import { createMailer } from './src/lib/mail.js';
 import { hashPw, checkPw, sha, createAuth } from './src/lib/auth.js';
 import { createLimiter, allOf, intSetting } from './src/lib/throttle.js';
 import { createFlags } from './src/lib/flags.js';
+import { createPolicy } from './src/lib/policy.js';
 import { createServiceRoutes } from './src/routes/service-records.js';
 import { createDeviceRoutes } from './src/routes/devices.js';
 import { createScheduleRoutes } from './src/routes/schedules.js';
@@ -448,6 +449,8 @@ const getSetting = k => one('select v from settings where k=?', k)?.v;
 const setSetting = (k, v) => run('insert into settings(k,v) values(?,?) on conflict(k) do update set v=excluded.v', k, v);
 // the per-branch switch for the new behaviour (T11): code asks mvpOn(branchId)
 const { mvpOn, mvpBranches, setMvpBranches } = createFlags({ getSetting, setSetting, branchExists: id => !!get('branches', id) });
+// booking policy per branch (T17): slot interval, buffer, no-show grace, cancel cutoff
+const { policyOf, savedOf, setPolicy } = createPolicy({ getSetting, setSetting, mvpOn, branchExists: id => !!get('branches', id) });
 // one-time: online booking is for Vip Compadre only (Buddy and Amigo are walk-in). The owner can change it later under Services & Products ("Show on online booking").
 // one-time: JB joins the Calauan shop with his photo; the owner sets his chair, commission and allowance in Management → Barbers / Staff
 if (!getSetting('migJB')) { const cb = one("select id, defaultPct from branches where lower(name)='calauan'"); if (cb) { if (!one("select 1 x from staff where lower(name)='jb' and branchId=?", cb.id)) insert('staff', { name: 'JB', branchId: cb.id, chairId: '', pct: cb.defaultPct || 40, allowance: 0, photo: '/site/jb.jpg', active: 1 }); setSetting('migJB', '1'); } }
@@ -744,7 +747,7 @@ const bookingBlocked = ip => recent(bookHits, ip).length >= (+process.env.BOOK_L
 // one atomic step: everything inside either happens completely or not at all
 function tx(fn) { db.exec('begin immediate'); try { const r = fn(); db.exec('commit'); return r; } catch (e) { try { db.exec('rollback'); } catch { } throw e; } }
 // the booking rules (free times, making a booking, price snapshot, history) are in src/lib/booking.js
-const { bookingMins, slotsFor, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView } = createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn });
+const { bookingMins, slotsFor, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView } = createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn, policyOf });
 // a walk-in style ticket (used when a booked customer arrives)
 function createTicket(me, branchId, customerId, name, items, barberId) {
   const t = todayStr(), tt = totals(items, null), id = uid();
@@ -1062,7 +1065,7 @@ const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, 
 const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
 const SCHEDULES = createScheduleRoutes({ all, run, get, log, tx, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
-const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
+const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, savedOf, setPolicy, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
 const MARKETING = createMarketingRoutes({ curOrg, uid, nowISO, all, one, run, insert, log, normEmail, validEmail, TIERS, setSetting, NO_MAIL, mailCount, baseUrl, welcomeEmail, processEmails, AUD_WHO, audienceOf, promoEmail, queueMarketing, winbackCfg, runWinback, mailProvider, mailReady, MAIL_LIMIT, mailFrom, sendEmail, bad, send, readBody });
 const PARTNER_SHOPS = createPartnerShopRoutes({ ownerUser, mainDb, curOrg, BAD_ORGS, orgRow, orgList, inOrg, uid, dOf, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, log, normEmail, validEmail, mainSet, TRIAL_DAYS, PLAN_IDS, plansNow, payInfo, addMonthsStr, orgStatus, SIGNUPS_OPEN, esc2, sendEmail, makeToken, hashPw, bad, send, readBody });
 // T16: guest holds that ran out are marked expired once a minute. Their time is already free (availability checks holdUntil);
@@ -1082,7 +1085,7 @@ function sweepHolds() {
   try { inMain(f); for (const o of activeOrgs()) inOrg(o, f); } catch (e) { console.error('hold sweep failed:', e.message); }
 }
 setInterval(sweepHolds, 60e3).unref();
-const PUBLIC_ROUTES = createPublicRoutes({ mvpOn, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody });
+const PUBLIC_ROUTES = createPublicRoutes({ mvpOn, policyOf, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody });
 const STAFF_TOOLS = createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, sum, all, one, run, get, clean, insert, update, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, branchScope, openShift, ID_TYPES, getSetting, setSetting, payRules, dayRows, planDeductions, adjTotal, scoreData, encBuf, decBuf, REPORTS, csv, bad, send, readBody });
 const BACK_OFFICE_DATA = createBackOfficeDataRoutes({ nowISO, one, run, get, insert, update, strip, log, isBranchUser, isManager, inScope, branchOrAll, newPin, REFS, SOFT, CRUD, checkUser, setPw, bad, send, readBody });
 const BH = mountBH({ inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
