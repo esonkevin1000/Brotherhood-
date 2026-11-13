@@ -13,6 +13,7 @@ import { migrate } from './src/db/migrate.js';
 import { createMailer } from './src/lib/mail.js';
 import { hashPw, checkPw, sha, createAuth } from './src/lib/auth.js';
 import { createLimiter, allOf, intSetting } from './src/lib/throttle.js';
+import { createFlags } from './src/lib/flags.js';
 import { createServiceRoutes } from './src/routes/service-records.js';
 import { createDeviceRoutes } from './src/routes/devices.js';
 import { createReports } from './src/lib/reports.js';
@@ -444,6 +445,8 @@ const tierOf = v => TIERS.find(([min]) => v >= min)[1];
 const nextTier = v => { const n = [...TIERS].reverse().find(([min]) => min > v); return n ? { name: n[1], visitsNeeded: n[0] - v } : null; };
 const getSetting = k => one('select v from settings where k=?', k)?.v;
 const setSetting = (k, v) => run('insert into settings(k,v) values(?,?) on conflict(k) do update set v=excluded.v', k, v);
+// the per-branch switch for the new behaviour (T11): code asks mvpOn(branchId)
+const { mvpOn, mvpBranches, setMvpBranches } = createFlags({ getSetting, setSetting, branchExists: id => !!get('branches', id) });
 // one-time: online booking is for Vip Compadre only (Buddy and Amigo are walk-in). The owner can change it later under Services & Products ("Show on online booking").
 // one-time: JB joins the Calauan shop with his photo; the owner sets his chair, commission and allowance in Management → Barbers / Staff
 if (!getSetting('migJB')) { const cb = one("select id, defaultPct from branches where lower(name)='calauan'"); if (cb) { if (!one("select 1 x from staff where lower(name)='jb' and branchId=?", cb.id)) insert('staff', { name: 'JB', branchId: cb.id, chairId: '', pct: cb.defaultPct || 40, allowance: 0, photo: '/site/jb.jpg', active: 1 }); setSetting('migJB', '1'); } }
@@ -1051,7 +1054,7 @@ async function handleIn(req, res) {
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
 const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
-const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
+const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
 const MARKETING = createMarketingRoutes({ curOrg, uid, nowISO, all, one, run, insert, log, normEmail, validEmail, TIERS, setSetting, NO_MAIL, mailCount, baseUrl, welcomeEmail, processEmails, AUD_WHO, audienceOf, promoEmail, queueMarketing, winbackCfg, runWinback, mailProvider, mailReady, MAIL_LIMIT, mailFrom, sendEmail, bad, send, readBody });
 const PARTNER_SHOPS = createPartnerShopRoutes({ ownerUser, mainDb, curOrg, BAD_ORGS, orgRow, orgList, inOrg, uid, dOf, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, log, normEmail, validEmail, mainSet, TRIAL_DAYS, PLAN_IDS, plansNow, payInfo, addMonthsStr, orgStatus, SIGNUPS_OPEN, esc2, sendEmail, makeToken, hashPw, bad, send, readBody });
 const PUBLIC_ROUTES = createPublicRoutes({ ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody });
