@@ -1,7 +1,7 @@
 // Day board for the Brotherhood app (takes over from the POS): walk-ins, start, finish, cancel, ID photos.
 // Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
-export function createServiceRoutes({ dayRows, queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
+export function createServiceRoutes({ isAppt, dayRows, queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
   return async function handleServiceRecords({ req, res, p, method, q, me }) {
       if (!['owner', 'admin', 'manager', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
       const myStaffId = me.role === 'barber' ? (get('users', me.id)?.staffId || '') : '';
@@ -11,7 +11,7 @@ export function createServiceRoutes({ dayRows, queueEstimates, walkinGuard, walk
         return { id: x.id, no: x.no, status: x.status === 'paid' ? 'done' : x.status === 'void' ? 'cancelled' : x.status, customerName: x.customerName, phone: c?.phone || '',
           barberId: x.barberId || '', barberName: x.barberId ? get('staff', x.barberId)?.name || '' : '', items: x.items.map(i => ({ itemId: i.itemId, name: i.name, type: i.type, price: i.price, qty: i.qty, needId: !!i.needId })),
           subtotal: x.subtotal, discountId: x.discountId || '', discountName: x.discountName || '', discountAmt: x.discountAmt || 0, total: x.total, method: x.tenders[0]?.method || '', invoiceNo: x.invoiceNo || '',
-          hasId: !!x.idPhoto, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '', plan: orderPlan(row) };
+          hasId: !!x.idPhoto, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '', plan: orderPlan(row), source: row.source || '', payStatus: row.payStatus || '', verifiedBy: row.verifiedBy || '' };
       };
       const ticket = id => { const o = get('orders', String(id)); if (!o) bad(404, 'Visit not found'); if (!inScope(me, o.branchId)) bad(403, 'Not your shop'); return parseOrder(o); };
       if (p === '/api/svc/today' && method === 'GET') {
@@ -121,8 +121,8 @@ export function createServiceRoutes({ dayRows, queueEstimates, walkinGuard, walk
         if (!barberId && items.some(i => i.type === 'service')) bad(409, 'Choose the barber who did the cut');
         const did = 'discountId' in b ? String(b.discountId || '') : (o.discountId || ''), disc = did ? get('discounts', did) : null; if (did && (!disc || !disc.active)) bad(400, 'Unknown discount');
         const tt = totals(items, disc), mth = PAY_METHODS.includes(b.method) ? b.method : bad(400, 'Choose how the customer paid'), inv = String(b.invoiceNo || '').trim().slice(0, 40);
-        run("update orders set status='paid', items=?, barberId=?, discountId=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId='', paidAt=?, date=?, invoiceNo=?, via='app' where id=?",
-          JSON.stringify(items), barberId, did, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify([{ method: mth, amount: tt.total }]), me.id, nowISO(), todayStr(), inv, o.id);
+        run("update orders set status='paid', items=?, barberId=?, discountId=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId='', paidAt=?, date=?, invoiceNo=?, via='app', source=?, payStatus='reported' where id=?",
+          JSON.stringify(items), barberId, did, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify([{ method: mth, amount: tt.total }]), me.id, nowISO(), todayStr(), inv, isAppt(o.id) ? 'appointment' : 'walkin', o.id);   // T28: source, and the payment as reported by the front desk (D-15)
         if (o.status === 'waiting') orderEvent(o.id, before, 'in_service', me.name, 'started and finished together');
         orderEvent(o.id, 'in_service', 'completed', me.name, `${mth}`);
         promoteNext(o.branchId, o.chairId);

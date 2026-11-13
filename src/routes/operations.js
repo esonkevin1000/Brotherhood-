@@ -4,7 +4,7 @@
 import os from 'node:os';
 import { NEXT } from '../lib/http.js';
 
-export function createOperationsRoutes({ walkinGuard, orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
+export function createOperationsRoutes({ isAppt, walkinGuard, orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, url, p, method, q, me, admin, adminOnly, manageIn }) {
     // ----- daily sales remittance (separate from expenses) -----
@@ -272,8 +272,8 @@ export function createOperationsRoutes({ walkinGuard, orderPlan, orderEvent, boo
         if (paid < tt.total) bad(409, 'Payment is less than the total');
         if (change > 0) { const cash = tenders.find(t => t.method === 'Cash'); if (!cash || cash.amount < change) bad(409, 'Change can only be given from cash'); cash.amount = r2(cash.amount - change); }
         const si = (one('select max(si) m from orders').m || 0) + 1;
-        run("update orders set status='paid', si=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId=?, paidAt=?, date=? where id=?",
-          si, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify(tenders), me.id, shift.id, nowISO(), todayStr(), o.id);
+        run("update orders set status='paid', si=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId=?, paidAt=?, date=?, source=?, payStatus='reported' where id=?",
+          si, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify(tenders), me.id, shift.id, nowISO(), todayStr(), isAppt(o.id) ? 'appointment' : 'walkin', o.id);
         orderEvent(o.id, orderPlan(cur), 'completed', me.name, 'paid at the POS');
         promoteNext(o.branchId, o.chairId);
         log(me, 'sale', 'orders', o.id, `SI-${si} ₱${tt.total}`);
