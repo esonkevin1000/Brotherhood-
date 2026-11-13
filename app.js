@@ -573,7 +573,7 @@ function vBookings() {
     <div class="row"><button class="btn" data-act="copylink">Copy link</button><a class="btn ghost" href="/book" target="_blank" style="text-decoration:none">Open</a></div></div></div>
   <div class="card overflow"><table><tr><th>Date</th><th>Time</th><th>Customer</th><th>Phone</th><th>Services</th><th>Barber</th><th>Branch</th><th>Source</th><th>Status</th><th></th></tr>
   ${rows.map(b => `<tr><td>${esc(b.date)}</td><td>${esc(b.time)}</td><td>${esc(b.customerName)}</td><td>${esc(b.phone)}</td><td>${b.items.map(i => esc(i.name)).join(', ')}</td><td>${thumb({ photo: b.staffPhoto, name: b.staffName })} ${esc(b.staffName)}</td><td>${esc(b.branchName)}</td><td>${b.source === 'online' ? 'Online' : 'Phone/POS'}</td>
-    <td><span class="tag ${b.status === 'booked' ? 'booked' : b.status === 'arrived' ? 'done' : ''}">${esc(b.status)}</span></td><td style="white-space:nowrap">${b.status === 'booked' ? `<button class="btn bad sm" data-act="bkcancel" data-id="${b.id}">Cancel</button> ` : ''}<button class="btn ghost sm" data-act="bkhistory" data-id="${b.id}">History</button></td></tr>`).join('') || '<tr><td colspan="10" class="mute">No bookings in this period.</td></tr>'}</table></div>`;
+    <td><span class="tag ${b.status === 'booked' ? 'booked' : b.status === 'arrived' ? 'done' : ''}">${esc(b.status)}</span></td><td style="white-space:nowrap">${b.status === 'booked' ? `<button class="btn ghost sm" data-act="bkmove" data-id="${b.id}">Move</button> <button class="btn bad sm" data-act="bkcancel" data-id="${b.id}">Cancel</button> ` : ''}<button class="btn ghost sm" data-act="bkhistory" data-id="${b.id}">History</button></td></tr>`).join('') || '<tr><td colspan="10" class="mute">No bookings in this period.</td></tr>'}</table></div>`;
 }
 
 function parseCSV(text) {
@@ -827,6 +827,25 @@ document.addEventListener('click', async e => {
         <div class="row" style="margin-top:14px"><button class="btn ghost" data-act="close">Close</button></div>`);
     } catch (x) { alert(x.message); }
     return;
+  }
+  if (act === 'bkmove') {   // T18: staff move a booking to another free time
+    const b = ui.bk.find(x => x.id === d.id); if (!b) return;
+    openModal(`<h2>Move booking</h2><p class="mute" style="margin-top:0">${esc(b.customerName)} · now ${esc(b.date)} ${esc(b.time)} with ${esc(b.staffName || 'any barber')}</p>
+      <label>Day</label><input type="date" id="mv-date" value="${esc(b.date)}" min="${today()}">
+      <label>Barber</label><select id="mv-staff">${S.staff.filter(s => s.branchId === b.branchId && s.active !== 0).map(s => `<option value="${esc(s.id)}" ${s.id === b.staffId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+      <label>Time</label><select id="mv-time"><option value="">Loading…</option></select><p id="mv-err" style="color:var(--bad)"></p>
+      <div class="row"><button class="btn" data-act="bkmovego" data-id="${esc(b.id)}">Move</button><button class="btn ghost" data-act="close">Cancel</button></div>`);
+    const load = async () => {
+      const sel = document.getElementById('mv-time'); if (!sel) return; sel.innerHTML = '<option value="">Loading…</option>';
+      try { const j = await (await fetch(`/api/public/slots?branch=${encodeURIComponent(b.branchId)}&date=${document.getElementById('mv-date').value}&staff=${encodeURIComponent(document.getElementById('mv-staff').value)}&items=${(b.itemIds || []).map(encodeURIComponent).join(',')}`)).json();
+        sel.innerHTML = (j.slots || []).map(t => `<option>${t}</option>`).join('') || '<option value="">No free time that day</option>'; } catch { sel.innerHTML = '<option value="">Could not load times</option>'; }
+    };
+    for (const id of ['mv-date', 'mv-staff']) document.getElementById(id)?.addEventListener('change', load);
+    load(); return;
+  }
+  if (act === 'bkmovego') {
+    const time = document.getElementById('mv-time').value; if (!time) { document.getElementById('mv-err').textContent = 'Pick a free time.'; return; }
+    run(() => api('POST', `/api/bookings/${d.id}/reschedule`, { date: document.getElementById('mv-date').value, staffId: document.getElementById('mv-staff').value, time }), document.getElementById('mv-err')); return;
   }
   if (act === 'bkcancel') { if (confirm('Cancel this booking?')) mut(() => api('PUT', `/api/bookings/${d.id}`, { status: 'cancelled' })); return; }
   if (act === 'backup') return download('/api/backup', `brotherhood-${today()}.db`);

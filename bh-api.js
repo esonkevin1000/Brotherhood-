@@ -3,7 +3,7 @@
 import { cutoffOf, durText } from './src/lib/policy.js';
 import { loadVapid, sendPush, knownPushHost } from './bh-push.js';
 export function mountBH(c) {
-  const { inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor,
+  const { rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor,
     whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName, getSetting, setSetting, queueEmail, emailReady, baseUrl, esc: escHtml, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
 
   // ---------- schema ----------
@@ -491,10 +491,20 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         const reviewed = b.orderId ? !!one('select 1 x from reviews where orderId=?', b.orderId) : false;
         const paid = b.orderId ? one("select status from orders where id=?", b.orderId)?.status === 'paid' : false;
         return { id: v.id, branchId: v.branchId, branchName: v.branchName, staffId: v.staffId, staffName: v.staffName, staffPhoto: v.staffPhoto, date: v.date, time: v.time, mins: v.mins, status: v.status,
-          items: v.items, itemIds: v.itemIds, total: v.total, branchName: org ? `${org.name} · ${v.branchName}` : v.branchName, promoCode: b.promoCode || '', promoAmt: b.promoAmt || 0, notes: v.notes || '', canCancel: v.status === 'booked' && start - now >= cutoffOf(b) * 60e3, canReview: paid && !reviewed, reviewed, brand: org?.name || '' };
+          items: v.items, itemIds: v.itemIds, total: v.total, branchName: org ? `${org.name} · ${v.branchName}` : v.branchName, promoCode: b.promoCode || '', promoAmt: b.promoAmt || 0, notes: v.notes || '', canCancel: v.status === 'booked' && start - now >= cutoffOf(b) * 60e3, canReschedule: v.status === 'booked' && start - now >= cutoffOf(b) * 60e3, canReview: paid && !reviewed, reviewed, brand: org?.name || '' };
       });
       const rows = [...inMain(() => mine(null)), ...activeOrgs().flatMap(o => inOrg(o, () => mine(o)))].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).slice(0, 100);
       return send(res, 200, { bookings: rows });
+    }
+    const rsm = sub.match(/^\/bookings\/(\w+)\/reschedule$/);
+    if (rsm && method === 'POST') {   // T18: the customer moves their own booking to another free time
+      const u = needUser(req), body = await readBody(req);
+      return atShop('bookings', rsm[1], () => {
+        const b = one('select * from bookings where id=? and userId=?', rsm[1], u.id); if (!b) bad(404, 'Booking not found');
+        const r = rescheduleBooking(b.id, body, 'Customer (app)', { customer: true });
+        log({ name: 'App: ' + u.name }, 'booking-rescheduled', 'bookings', b.id, `${b.date} ${b.time} -> ${r.booking.date} ${r.booking.time}`); freed(b.branchId, b.staffId, b.date);
+        return send(res, 200, { ok: true, booking: { id: r.booking.id, date: r.booking.date, time: r.booking.time, staff: r.booking.staffName, branch: r.booking.branchName } });
+      });
     }
     const cm = sub.match(/^\/bookings\/(\w+)\/cancel$/);
     if (cm && method === 'POST') {

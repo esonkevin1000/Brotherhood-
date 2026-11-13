@@ -1,6 +1,7 @@
 // Booking rules: which times are free, making a booking, the price snapshot, and a booking's history.
 // Created once by server.js with the database helpers it needs, so the rules can also be tested on their own.
 import { createAvailability, hmOf } from './availability.js';
+import { cutoffOf, durText } from './policy.js';
 export const HOLD_MINS = 10;   // T16: a guest's time is held this long while they enter the emailed code
 export { hmOf };
 // the key a phone or browser sends with a booking so that a repeated tap or a retry never makes a second booking
@@ -76,6 +77,27 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     return bookingView(one('select * from bookings where id=?', id));
     });
   }
+  // T18: move a booking to another free time. Same booking id; the old time frees only when the move is saved (one transaction);
+  // a refused move changes nothing. opts.customer: the customer is moving it, so the booking's cancel cutoff applies.
+  function rescheduleBooking(id, b, actor, opts = {}) {
+    return tx(() => {
+      const cur = one('select * from bookings where id=?', String(id)); if (!cur) bad(404, 'Booking not found');
+      if (cur.status !== 'booked') bad(409, 'This booking is already ' + cur.status);
+      if (opts.customer && new Date(`${cur.date}T${cur.time}:00`).getTime() - now().getTime() < cutoffOf(cur) * 60e3) bad(409, `Bookings can be changed up to ${durText(cutoffOf(cur))} before. Please call the shop.`);
+      const date = String(b.date || ''), time = String(b.time || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) bad(400, 'Invalid date or time');
+      if (date < todayStr()) bad(400, 'Date is in the past');
+      if (date > dOf(new Date(now().getTime() + 60 * 864e5))) bad(400, 'Too far ahead (max 60 days)');
+      const itemIds = jp(cur.itemIds), mins = cur.mins || bookingMins(itemIds), start = toMin(time);
+      let sid = String(b.staffId || cur.staffId);
+      if (!slotsFor(cur.branchId, date, sid, mins, itemIds, cur.id).includes(time)) bad(409, 'That time is not available. Please pick another.');
+      if (sid === 'any') sid = pickAny(cur.branchId, date, start, mins, itemIds, cur.id).id;
+      run('update bookings set date=?, time=?, staffId=? where id=?', date, time, sid, cur.id);
+      const nm = x => get('staff', x)?.name || 'any barber';
+      bookingEvent(cur.id, 'booked', 'booked', actor, `rescheduled from ${cur.date} ${cur.time} (${nm(cur.staffId)}) to ${date} ${time} (${nm(sid)})`);
+      return { before: cur, booking: bookingView(one('select * from bookings where id=?', cur.id)) };
+    });
+  }
   function bookingView(b) {
     // services and prices come from the snapshot taken at booking time; bookings older than the snapshot fall back to today's price list
     const { snapshot, idemKey, policy: pol, ...row } = b, snap = snapOf(b);
@@ -83,5 +105,5 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     return { ...row, policy: (() => { try { return pol ? JSON.parse(pol) : null; } catch { return null; } })(), itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: snap ? r2(snap.total) : r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
   }
 
-  return { bookingMins, canDo, pickAny, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };
+  return { bookingMins, rescheduleBooking, canDo, pickAny, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };
 }

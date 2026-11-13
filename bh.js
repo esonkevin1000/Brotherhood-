@@ -319,9 +319,9 @@ function vBookings() {
   const today = ymd(new Date()), up = S.mine.filter(b => b.status === 'booked' && b.date >= today).reverse(), past = S.mine.filter(b => !up.includes(b));
   const card = b => `<div class="card pop"><div class="row"><b>${fmtDate(b.date)} · ${t12(b.time)}</b><span class="sp"></span><span class="tag ${b.status === 'booked' ? 'on' : b.status === 'cancelled' || b.status === 'noshow' ? 'bad' : 'ok'}">${b.status === 'arrived' ? 'completed' : b.status === 'noshow' ? 'no-show' : esc(b.status)}</span></div>
     <div class="sm mute">${esc(b.items.map(i => i.name).join(' + '))} · ${peso(b.total)}</div><div class="sm mute">${esc(b.staffName || 'Any barber')} · ${esc(b.branchName)}</div>
-    <div class="row" style="margin-top:10px;flex-wrap:wrap">${b.canCancel ? `<button class="btn danger sm" data-cancel="${b.id}">Cancel</button>` : ''}${b.canReview ? `<button class="btn sm" data-review="${b.id}">Rate your cut</button>` : ''}${b.reviewed ? '<span class="tag ok">Reviewed</span>' : ''}${b.status !== 'booked' ? `<button class="btn sec sm" data-rebook="${b.id}">Book again</button>` : ''}</div></div>`;
+    <div class="row" style="margin-top:10px;flex-wrap:wrap">${b.canReschedule ? `<button class="btn sec sm" data-resched="${b.id}">Change time</button>` : ''}${b.canCancel ? `<button class="btn danger sm" data-cancel="${b.id}">Cancel</button>` : ''}${b.canReview ? `<button class="btn sm" data-review="${b.id}">Rate your cut</button>` : ''}${b.reviewed ? '<span class="tag ok">Reviewed</span>' : ''}${b.status !== 'booked' ? `<button class="btn sec sm" data-rebook="${b.id}">Book again</button>` : ''}</div></div>`;
   const wl = (S.wait || []).length ? `<div class="sec-h"><h2>Waitlist</h2></div><div class="list">${S.wait.map(w => `<div class="card row"><div class="sp"><b>${fmtDate(w.date)}</b><div class="sm mute">${esc(w.staffName || 'Any barber')} · ${esc(w.branchName)} · we will notify you if a slot opens</div></div><button class="btn danger sm" data-wldel="${w.id}">Remove</button></div>`).join('')}</div>` : '';
-  const upCard = b => ticket(b, `<div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px"><span class="sm mute">${peso(b.total)}</span><span class="sp"></span>${b.canCancel ? `<button class="btn danger sm" data-cancel="${b.id}">Cancel</button>` : ''}</div>`);
+  const upCard = b => ticket(b, `<div class="row" style="margin-top:10px;flex-wrap:wrap;gap:8px"><span class="sm mute">${peso(b.total)}</span><span class="sp"></span>${b.canReschedule ? `<button class="btn sec sm" data-resched="${b.id}">Change time</button>` : ''}${b.canCancel ? `<button class="btn danger sm" data-cancel="${b.id}">Cancel</button>` : ''}</div>`);
   return header('My bookings') + wl + `<div class="sec-h"><h2>Upcoming</h2></div><div class="list">${up.map(upCard).join('') || emptyBox('cal', 'No upcoming cuts', 'Find a barber and book a time that suits you.', '<button class="btn sm" data-go="/discover">Find a barber</button>')}</div>
   <div class="sec-h"><h2>History</h2></div><div class="list">${past.map(card).join('') || emptyBox('scissors', 'No visits yet', 'Your past cuts and receipts will show here.')}</div>`;
 }
@@ -1131,7 +1131,7 @@ app.addEventListener('submit', async e => {
   }
 });
 app.addEventListener('click', async e => {
-  const t = e.target.closest('[data-qbook],[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-nsallow],[data-ics],[data-mailto],[data-open],[data-insthelp],[data-pushon],[data-pushoff],[data-pushtest],[data-vcheck],[data-vclaim],[data-promoadd],[data-rewards],[data-rewardadd],[data-rewardtoggle],[data-rewarddel],[data-usevoucher],[data-promotoggle],[data-promodel],[data-promoapply],[data-blockadd],[data-blockdel],[data-idays],[data-ldays],[data-client],[data-copylink],[data-sharelink],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
+  const t = e.target.closest('[data-qbook],[data-go],[data-shop],[data-avail],[data-branchf],[data-spec],[data-tab],[data-fav],[data-book],[data-bstaff],[data-bsvc],[data-bday],[data-btime],[data-confirm],[data-cancel],[data-resched],[data-review],[data-rebook],[data-authmode],[data-logout],[data-delete],[data-lb],[data-pdel],[data-prologout],[data-ptab],[data-drange],[data-propin],[data-nsallow],[data-ics],[data-mailto],[data-open],[data-insthelp],[data-pushon],[data-pushoff],[data-pushtest],[data-vcheck],[data-vclaim],[data-promoadd],[data-rewards],[data-rewardadd],[data-rewardtoggle],[data-rewarddel],[data-usevoucher],[data-promotoggle],[data-promodel],[data-promoapply],[data-blockadd],[data-blockdel],[data-idays],[data-ldays],[data-client],[data-copylink],[data-sharelink],[data-dpkg],[data-fpkg],[data-bookpkg],[data-rmpkg],[data-offsave],[data-mcovdel],[data-mphotodel],[data-mfollow],[data-covdel],[data-fsheet],[data-fsort],[data-frate],[data-fver],[data-floc],[data-fstyle],[data-dstyle],[data-dsee],[data-dreset],[data-svc],[data-fresh],[data-bookany],[data-cverify],[data-certdel],[data-btab],[data-bstyle],[data-cut],[data-pedit],[data-locate],[data-locurl],[data-locgps],[data-locsave],[data-ngo],[data-install],[data-noinstall],[data-wl],[data-wldel],[data-bookshop],[data-rreply],[data-snote],[data-sface],[data-shair],[data-scare],[data-sgo],[data-sagain],[data-ssave],[data-sbook],[data-ctab],[data-cstyle],[data-cscope],[data-compose],[data-psave],[data-ctile],[data-plike],[data-pcomm],[data-pfollow],[data-preport],[data-pblock],[data-mod]');
   if (!t) return; const D = t.dataset;
   if (D.go != null) return nav(D.go || '/');
   if (D.shop) return nav('/shop/' + D.shop);
@@ -1171,6 +1171,7 @@ app.addEventListener('click', async e => {
   if (D.bday) { S.bk.date = D.bday; return loadSlots(); }
   if (D.btime) { S.bk.time = D.btime; return render(); }
   if (D.confirm != null) return confirmBooking();
+  if (D.resched) { openReschedule(D.resched); return; }
   if (D.cancel) { if (!confirm('Cancel this booking?')) return; try { await api(`/bookings/${D.cancel}/cancel`, { method: 'POST' }); toast('Booking cancelled'); await loadBookings(); } catch (x) { toast(x.message); } return render(); }
   if (D.rebook) { const b = S.mine.find(x => x.id === D.rebook); startBooking(b.branchId, b.staffId); S.bk.items = b.itemIds.filter(id => svcFor(b.branchId).some(s => s.id === id)); if (!S.token) return nav('/auth'); return loadSlots(); }
   if (D.review) { openReview(D.review); return; }
@@ -1682,6 +1683,35 @@ document.addEventListener('change', async e => {
 });
 document.addEventListener('input', e => { const t = e.target; if (t.dataset.chkn !== undefined && S.chkDraft) S.chkDraft.items[+t.dataset.chkn].note = t.value; });
 
+// T18: move a booking to another free time (same barber; before the booking's cancel cutoff)
+function openReschedule(id) {
+  const b = (S.mine || []).find(x => x.id === id); if (!b) return;
+  const pad = n => String(n).padStart(2, '0'), ymdOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(Date.now() + i * 864e5); return { v: ymdOf(d), l: d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' }) }; });
+  let date = b.date, time = '';
+  const o = sheet(`<h3>Change time</h3><p class="sm mute" style="margin-top:0">Now: ${esc(b.date)} at ${esc(b.time)} with ${esc(b.staffName || 'any barber')}</p>
+    <label class="f">Day<select id="rsday">${days.map(d => `<option value="${d.v}" ${d.v === date ? 'selected' : ''}>${esc(d.l)}</option>`).join('')}</select></label>
+    <div id="rstimes" class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px"><span class="mute sm">Loading times…</span></div><div id="rserr"></div>
+    <div class="row" style="margin-top:14px;gap:8px"><button class="btn" id="rssave" disabled>Move my booking</button><button class="btn sec" data-x>Keep it</button></div>`);
+  const load = async () => {
+    const box = o.querySelector('#rstimes'); time = ''; o.querySelector('#rssave').disabled = true; box.innerHTML = '<span class="mute sm">Loading times…</span>';
+    try {
+      const j = await (await fetch(`/api/public/slots?branch=${encodeURIComponent(b.branchId)}&date=${date}&staff=${encodeURIComponent(b.staffId || 'any')}&items=${(b.itemIds || []).map(encodeURIComponent).join(',')}`)).json();
+      box.innerHTML = (j.slots || []).map(t => `<button type="button" class="chip" data-rst="${t}">${t}</button>`).join('') || '<span class="mute sm">No free times that day. Try another day.</span>';
+    } catch { box.innerHTML = '<span class="mute sm">Could not load the times. Check your connection.</span>'; }
+  };
+  o.addEventListener('change', e => { if (e.target.id === 'rsday') { date = e.target.value; load(); } });
+  o.addEventListener('click', async e => {
+    const c = e.target.closest('[data-rst]');
+    if (c) { time = c.dataset.rst; o.querySelectorAll('[data-rst]').forEach(x => x.classList.toggle('on', x === c)); o.querySelector('#rssave').disabled = false; return; }
+    if (e.target.id === 'rssave' && time) {
+      e.target.disabled = true;
+      try { const r = await api(`/bookings/${b.id}/reschedule`, { method: 'POST', body: { date, time } }); o.remove(); toast(`Moved to ${r.booking.date} at ${r.booking.time}`); await loadBookings(); render(); }
+      catch (x) { o.querySelector('#rserr').innerHTML = `<div class="err">${esc(x.message)}</div>`; e.target.disabled = false; load(); }
+    }
+  });
+  load();
+}
 function openReview(bookingId) {
   let rating = 0; const o = document.createElement('div'); o.className = 'lb'; o.style.alignItems = 'end';
   o.innerHTML = `<div class="card pop" style="width:100%;max-width:720px;border-radius:22px 22px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom))"><h2 style="font-size:20px">How was your cut?</h2><div class="stars-in" style="margin:8px 0">${[1, 2, 3, 4, 5].map(n => `<button data-n="${n}">★</button>`).join('')}</div><textarea rows="3" maxlength="600" placeholder="Tell others about your visit (optional)"></textarea><div id="rverr"></div><div class="row" style="margin-top:12px"><button class="btn ghost sp" data-x>Not now</button><button class="btn sp" data-send>Post review</button></div></div>`;

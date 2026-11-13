@@ -4,7 +4,7 @@
 import os from 'node:os';
 import { NEXT } from '../lib/http.js';
 
-export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
+export function createOperationsRoutes({ rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, url, p, method, q, me, admin, adminOnly, manageIn }) {
     // ----- daily sales remittance (separate from expenses) -----
@@ -72,7 +72,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
       const bk = createBooking({ ...b, idemKey: req.headers['idempotency-key'] }, 'pos', me.name); if (bk.duplicate) return send(res, 200, bk);
       log(me, 'booking', 'bookings', bk.id, `${bk.customerName} ${bk.date} ${bk.time}`); return send(res, 201, bk);
     }
-    const bkm = p.match(/^\/api\/bookings\/(\w+)(?:\/(arrive|history))?$/);
+    const bkm = p.match(/^\/api\/bookings\/(\w+)(?:\/(arrive|history|reschedule))?$/);
     if (bkm) {
       const cur = one('select * from bookings where id=?', bkm[1]); if (!cur) bad(404, 'Not found');
       if (!inScope(me, cur.branchId)) bad(403, 'Not your branch');
@@ -82,6 +82,12 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
         if (cur.status !== 'booked' && !(cur.status === 'pending' && b.status === 'cancelled')) bad(409, 'Booking is already ' + cur.status);   // staff may also release a guest's hold (T16)
         if (cur.status === 'pending') run('update email_codes set guest=null, codeHash=null where bookingId=?', cur.id);
         run('update bookings set status=? where id=?', b.status, cur.id); bookingEvent(cur.id, cur.status, b.status, me.name, b.reason); BH.freed(cur.branchId, cur.staffId, cur.date); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
+      }
+      if (method === 'POST' && bkm[2] === 'reschedule') {   // T18: staff can move a booking at any time
+        const r = rescheduleBooking(cur.id, await readBody(req), me.name);
+        log(me, 'booking-rescheduled', 'bookings', cur.id, `${cur.date} ${cur.time} -> ${r.booking.date} ${r.booking.time}`); BH.freed(cur.branchId, cur.staffId, cur.date);
+        if (cur.userId) BH.notify(cur.userId, 'booking', `Your booking moved to ${r.booking.date} ${r.booking.time} with ${r.booking.staffName || 'any barber'}`, '#/bookings', 'rs-' + cur.id + '-' + r.booking.date + r.booking.time);
+        return send(res, 200, { booking: r.booking });
       }
       if (method === 'POST' && bkm[2] === 'arrive') {
         if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
