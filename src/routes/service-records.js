@@ -62,11 +62,12 @@ export function createServiceRoutes({ dayRows, queueEstimates, walkinGuard, walk
         if (me.role === 'barber') bad(403, 'The front desk closes the queue');
         const b = await readBody(req), bid = branchScope(me, b.branchId), act = b.action;
         if (!['left', 'carry'].includes(act)) bad(400, 'Choose: mark as left, or carry over to tomorrow');
+        if (dayLocked(bid, todayStr())) bad(409, 'Today is already closed for this shop.');
         const pad = n => String(n).padStart(2, '0'), d = new Date(Date.now() + 864e5), tmr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
         const pick = Array.isArray(b.ids) ? new Set(b.ids.map(String)) : null;
         const rows = all("select * from orders where branchId=? and date=? and status='waiting' order by no", bid, todayStr()).filter(o => !pick || pick.has(o.id));
         for (const o of rows) {
-          if (act === 'left') { run("update orders set status='left' where id=? and status='waiting'", o.id); orderEvent(o.id, orderPlan(o), 'left', me.name, 'end of day'); }
+          if (act === 'left') { if (Number(run("update orders set status='left' where id=? and status='waiting'", o.id).changes) === 1) orderEvent(o.id, orderPlan(o), 'left', me.name, 'end of day'); }
           else { const no = (one('select max(no) m from orders where branchId=? and date=?', bid, tmr).m || 0) + 1; run('update orders set date=?, no=? where id=?', tmr, no, o.id); orderEvent(o.id, orderPlan(o), orderPlan(o), me.name, `carried over to ${tmr}`); }
         }
         log(me, act === 'left' ? 'queue-closed' : 'queue-carried', 'orders', bid, `${rows.length} waiting`);
@@ -82,7 +83,7 @@ export function createServiceRoutes({ dayRows, queueEstimates, walkinGuard, walk
       if (hm && method === 'GET') { const o = ticket(hm[1]); return send(res, 200, all('select at, actor, fromStatus "from", toStatus "to", reason from order_events where orderId=? order by rowid', o.id)); }   // T22
       const sa = p.match(/^\/api\/svc\/(\w+)\/(start|finish|cancel|left)$/);
       if (sa && method === 'POST') {
-        const o = ticket(sa[1]), act = sa[2], b = await readBody(req);
+        const b = await readBody(req), o = ticket(sa[1]), act = sa[2];   // the visit is read after the body arrived (a slow connection must not act on an old state)
         if (!['waiting', 'in_chair'].includes(o.status)) {   // closed already: say what happened and who did it (T27: two staff acting at once)
           const to = { paid: 'completed', left: 'left', void: 'cancelled' }[o.status], ev = one('select actor from order_events where orderId=? and toStatus=? order by rowid desc limit 1', o.id, to), by = ev ? ' by ' + ev.actor : '';
           bad(409, o.status === 'paid' ? 'This visit is already done' + by + '.' : o.status === 'left' ? 'This customer was already marked as left' + by + '.' : 'This visit was already cancelled' + by + '.');
@@ -94,14 +95,14 @@ export function createServiceRoutes({ dayRows, queueEstimates, walkinGuard, walk
           const bar = me.role === 'barber' ? myStaffId : String(b.barberId || o.barberId || ''); if (!bar) bad(400, 'Choose the barber');
           walkinGuard(o, bar);   // T23 (D-8)
           const a = checkAssign(o, { barberId: bar }, o.id);
-          run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), o.id);
+          if (Number(run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=? and status='waiting'", a.barber.id, a.chairId, nowISO(), o.id).changes) !== 1) bad(409, 'This visit just changed. Please refresh.');
           orderEvent(o.id, before, 'in_service', me.name, 'with ' + a.barber.name);
           log(me, 'visit-start', 'orders', o.id, `#${o.no} ${a.barber.name}`); return send(res, 200, svcView(get('orders', o.id)));
         }
         if (act === 'left') {   // T25: a waiting customer walked away: no service record, no loyalty point
           if (o.status !== 'waiting') bad(409, 'Only a customer who is still waiting can be marked as left');
           const why = String(b.reason || 'Left without a cut').trim().slice(0, 200) || 'Left without a cut';
-          run("update orders set status='left', voidReason=? where id=?", why, o.id); orderEvent(o.id, before, 'left', me.name, why);
+          if (Number(run("update orders set status='left', voidReason=? where id=? and status='waiting'", why, o.id).changes) !== 1) bad(409, 'This visit just changed. Please refresh.'); orderEvent(o.id, before, 'left', me.name, why);
           log(me, 'visit-left', 'orders', o.id, `#${o.no} ${why}`); return send(res, 200, { ok: true });
         }
         if (act === 'cancel') {

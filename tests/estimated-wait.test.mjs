@@ -10,6 +10,7 @@ const near = (hm, mins) => hm && Math.abs(at(hm) - (mnow() + mins)) <= 2;
 try {
   const owner = (await call('POST', '/api/login', { password: 'ownerpw' })).j.token;
   const st = (await call('GET', '/api/state', null, owner)).j, A = st.branches[0], ch = st.chairs.filter(c => c.branchId === A.id);
+  for (const b of [A]) await call('PUT', `/api/branches/${b.id}`, { openTime: '00:00', closeTime: '23:59' }, owner);   // the test does not depend on the time of day
   const trim = (await call('POST', '/api/items', { name: 'Quick Trim', price: 150, type: 'service', mins: 30, bookable: 1, active: 1 }, owner)).j;
   const kev = (await call('POST', '/api/staff', { name: 'Kev', branchId: A.id, chairId: ch[0].id, pct: 40, allowance: 0 }, owner)).j;
   const leo = (await call('POST', '/api/staff', { name: 'Leo', branchId: A.id, chairId: ch[1].id, pct: 40, allowance: 0 }, owner)).j;

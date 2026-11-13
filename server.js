@@ -414,8 +414,9 @@ const orderMins = o => { const its = typeof o.items === 'string' ? jp(o.items) :
 function barberFit(staffId, mins, exceptOrderId = '', ignoreBusy = false) {
   const now = minsNow(), s = get('staff', staffId), br = get('branches', s?.branchId || '');
   const cur = one("select * from orders where barberId=? and status='in_chair' and id<>?", staffId, exceptOrderId);
-  const busyUntil = cur && !ignoreBusy ? Math.max(now, minsAt(cur.startedAt || nowISO()) + orderMins(cur)) : now;
-  const bookings = all("select time, mins from bookings where staffId=? and date=? and status='booked'", staffId, todayStr()).map(b => ({ start: toMin(b.time), mins: b.mins || 30 }));
+  const busyUntil = cur && !ignoreBusy ? Math.max(now + 5, minsAt(cur.startedAt || nowISO()) + orderMins(cur)) : now;   // a cut running long: still busy
+  const bookings = all("select time, mins from bookings where staffId=? and date=? and status='booked'", staffId, todayStr()).map(b => ({ start: toMin(b.time), mins: b.mins || 30 }))
+    .concat(all("select * from orders where barberId=? and status='waiting' and id<>?", staffId, exceptOrderId).filter(o => isAppt(o.id)).map(o => ({ start: now, mins: orderMins(o) })));   // a booked customer already checked in and waiting for him
   const fit = walkinFit({ now, mins, busyUntil, bookings, buffer: WALKIN_BUFFER, close: toMin(br?.closeTime || '21:00') });
   const next = bookings.filter(b => b.start + b.mins > now).sort((x, y) => x.start - y.start)[0];
   return { ...fit, busyUntil, next: next ? next.start : null };
@@ -424,7 +425,7 @@ function barberFit(staffId, mins, exceptOrderId = '', ignoreBusy = false) {
 function walkinOptions(branchId, mins) {
   const rule = mvpOn(branchId), t = todayStr();
   return all('select * from staff where branchId=? and active=1 order by name', branchId).filter(s => { const d = onDuty(s.id, t); return d && !d.breakStartedAt; }).map(s => {
-    const f = barberFit(s.id, mins), busy = f.busyUntil > minsNow(), load = one("select count(*) n from orders where barberId=? and date=? and status in ('in_chair','paid')", s.id, t).n;
+    const f = barberFit(s.id, mins), busy = !!one("select 1 x from orders where barberId=? and status='in_chair'", s.id), load = one("select count(*) n from orders where barberId=? and date=? and status in ('in_chair','paid')", s.id, t).n;
     return { staffId: s.id, name: s.name, busy, safe: rule ? f.safeNow : !busy, earliest: f.earliest == null ? null : hm24(f.earliest), nextBooking: f.next == null ? '' : hm24(f.next), load };
   }).sort((a, b) => (b.safe - a.safe) || (a.load - b.load) || a.name.localeCompare(b.name));
 }
@@ -457,13 +458,16 @@ function queueEstimates(branchId) {
 function promoteNext(branchId, chairId) {
   if (!chairId) return;
   if (one("select 1 x from orders where status='in_chair' and chairId=?", chairId)) return;
-  const nxt = one("select * from orders where status='waiting' and branchId=? and chairId=? and date=? and ifnull(barberId,'')<>'' order by no limit 1", branchId, chairId, todayStr());
-  if (!nxt) return;
-  const d = onDuty(nxt.barberId, todayStr()); if (!d || d.breakStartedAt) return;
-  if (one("select 1 x from orders where status='in_chair' and barberId=?", nxt.barberId)) return;
-  try { walkinGuard(nxt, nxt.barberId); } catch (e) { if (e instanceof HttpError) return; throw e; }   // T23: wait rather than run into a booking
-  run("update orders set status='in_chair', startedAt=? where id=?", nowISO(), nxt.id);
-  orderEvent(nxt.id, orderPlan(nxt), 'in_service', 'System', 'the chair became free');
+  const line = all("select * from orders where status='waiting' and branchId=? and chairId=? and date=? and ifnull(barberId,'')<>'' order by no", branchId, chairId, todayStr());
+  const ordered = [...line.filter(o => isAppt(o.id)), ...line.filter(o => !isAppt(o.id))];   // checked-in booked customers first
+  for (const nxt of ordered) {
+    const d = onDuty(nxt.barberId, todayStr()); if (!d || d.breakStartedAt) continue;
+    if (one("select 1 x from orders where status='in_chair' and barberId=?", nxt.barberId)) continue;
+    try { walkinGuard(nxt, nxt.barberId); } catch (e) { if (e instanceof HttpError) continue; throw e; }   // T23: wait rather than run into a booking
+    if (Number(run("update orders set status='in_chair', startedAt=? where id=? and status='waiting'", nowISO(), nxt.id).changes) !== 1) continue;
+    orderEvent(nxt.id, orderPlan(nxt), 'in_service', 'System', 'the chair became free');
+    return;
+  }
 }
 function checkAssign(order, b, orderId) {
   const barber = get('staff', b.barberId);
@@ -819,7 +823,7 @@ function createTicket(me, branchId, customerId, name, items, barberId, opts = {}
   const first = opts.booked ? 'checked_in' : 'waiting'; orderEvent(id, '', first, me.name);
   if (barberId) {
     try { if (!opts.booked) walkinGuard({ id, branchId, items: JSON.stringify(items) }, barberId); const a = checkAssign({ id, branchId }, { barberId }); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); orderEvent(id, first, 'in_service', me.name, 'with ' + a.barber.name); }
-    catch (e) { if (!(e instanceof HttpError)) throw e; }   // preferred barber busy/off: customer simply waits
+    catch (e) { if (!(e instanceof HttpError)) throw e; if (opts.booked) { const s = get('staff', barberId); if (s && s.branchId === branchId) run('update orders set barberId=?, chairId=? where id=?', s.id, s.chairId || '', id); } }   // preferred barber busy/off: the customer waits (a booked one stays in his barber's line)
   }
   return parseOrder(get('orders', id));
 }

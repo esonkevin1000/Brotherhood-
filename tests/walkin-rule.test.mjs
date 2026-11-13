@@ -23,6 +23,7 @@ try {
     const { call } = S;
     const owner = (await call('POST', '/api/login', { password: 'ownerpw' })).j.token;
     const st = (await call('GET', '/api/state', null, owner)).j, [A, B] = st.branches;
+  for (const b of [A, B]) await call('PUT', `/api/branches/${b.id}`, { openTime: '00:00', closeTime: '23:59' }, owner);   // the test does not depend on the time of day
     const trim = (await call('POST', '/api/items', { name: 'Quick Trim', price: 150, type: 'service', mins: 30, bookable: 1, active: 1 }, owner)).j;
     const mk = async (name, br, k) => (await call('POST', '/api/staff', { name, branchId: br.id, chairId: st.chairs.filter(c => c.branchId === br.id)[k].id, pct: 40, allowance: 0 }, owner)).j;
     const kev = await mk('Kev', A, 0), leo = await mk('Leo', A, 1), bob = await mk('Bob', B, 0);

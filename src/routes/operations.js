@@ -222,13 +222,14 @@ export function createOperationsRoutes({ walkinGuard, orderPlan, orderEvent, boo
     }
     const om = p.match(/^\/api\/orders\/(\w+)(?:\/(pay|void))?$/);
     if (om) {
+      const body = method === 'PUT' || method === 'POST' ? await readBody(req) : null;   // read first: the order is then read in its current state
       const cur = get('orders', om[1]); if (!cur) bad(404, 'Not found');
       if (!inScope(me, cur.branchId)) bad(403, 'Not your branch');
       const o = parseOrder(cur), act = om[2];
       if (method === 'GET' && !act) return send(res, 200, withCust(o));
       if (method === 'PUT' && !act) {
         if (!['waiting', 'in_chair'].includes(o.status)) bad(409, 'Order is already closed');
-        const b = await readBody(req); const upd = {}; let queued = false;
+        const b = body; const upd = {}; let queued = false;
         if (!admin && Object.keys(b).some(k => !['barberId', 'chairId'].includes(k))) needAny(me, 'pos');
         if ('items' in b) {
           const items = priceBooked(bookedSnap(o.id), b.items), tt = totals(items, null), need = idNeeded(items);
@@ -246,6 +247,7 @@ export function createOperationsRoutes({ walkinGuard, orderPlan, orderEvent, boo
           const barber = all('select * from staff where chairId=? and active=1 and branchId=? order by name', ch.id, o.branchId).find(s => { const d = onDuty(s.id, todayStr()); return d && !d.breakStartedAt; });
           if (!barber) bad(409, `No barber is on duty at ${ch.name}`);
           const busy = one("select 1 x from orders where status='in_chair' and id<>? and (chairId=? or barberId=?)", o.id, ch.id, barber.id);
+          if (!busy && o.status !== 'in_chair') walkinGuard(cur, barber.id);   // T23 (D-8)
           upd.barberId = barber.id; upd.chairId = ch.id;
           if (busy) { upd.status = 'waiting'; upd.startedAt = null; queued = true; } else { upd.status = 'in_chair'; upd.startedAt = nowISO(); }
         } else if ('barberId' in b) {
@@ -262,7 +264,7 @@ export function createOperationsRoutes({ walkinGuard, orderPlan, orderEvent, boo
         if (!o.items.length) bad(409, 'Add at least one service or product');
         if (!o.barberId && o.items.some(i => i.type === 'service')) bad(409, 'Assign a barber first');
         const shift = openShift(o.branchId); if (!shift) bad(409, 'Open a shift first (Cash management)');
-        const b = await readBody(req), did = 'discountId' in b ? b.discountId : cur.discountId, disc = did ? get('discounts', String(did)) : null;
+        const b = body, did = 'discountId' in b ? b.discountId : cur.discountId, disc = did ? get('discounts', String(did)) : null;
         if (did && (!disc || !disc.active)) bad(400, 'Unknown discount');
         const tt = totals(o.items, disc);
         const tenders = (Array.isArray(b.tenders) ? b.tenders : []).map(t => ({ method: String(t.method || '').slice(0, 30), amount: r2(t.amount) })).filter(t => t.method && t.amount > 0);
@@ -278,7 +280,7 @@ export function createOperationsRoutes({ walkinGuard, orderPlan, orderEvent, boo
         return send(res, 200, { ...parseOrder(get('orders', o.id)), change });
       }
       if (method === 'POST' && act === 'void') {
-        const b = await readBody(req);
+        const b = body;
         if (o.status === 'paid' && !admin && !isManager(me)) bad(403, 'Only an admin or the branch manager can void a paid sale');
         if (o.status === 'paid') {   // a paid sale is final for staff; the owner/admin may only void it with a reason, and never once it is inside a sales reading
           const zl = dayLocked(o.branchId, o.date); if (zl) bad(409, `This sale is already included in the sales reading (Z-${zl.no}), so it can no longer be voided.`);
