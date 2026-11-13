@@ -26,7 +26,8 @@ let VISIT = newVisit();   // renewed after every successful booking
 const idemKey = () => [VISIT, S.branch, S.staff, S.date, S.time, S.items.join('.')].join('|').slice(0, 200);
 const svcs = () => I.services.filter(s => S.items.includes(s.id));
 const total = () => svcs().reduce((t, s) => t + s.price, 0), mins = () => Math.max(30, svcs().reduce((t, s) => t + (s.mins || 30), 0));
-const team = () => I.staff.filter(s => s.branchId === S.branch);
+// only barbers who do every chosen service (s.services is null when a barber does everything)
+const team = () => I.staff.filter(s => s.branchId === S.branch && (!s.services || S.items.every(i => s.services.includes(i))));
 const branch = id => I.branches.find(b => b.id === id);
 const ready = () => S.branch && S.items.length && S.date && S.time && S.name.trim() && S.phone.replace(/\D/g, '').length >= 10;
 const pic = (url, name, cls = 'av') => url ? `<img class="${cls}" src="${esc(url)}" alt="${esc(name)}" loading="lazy">` : `<span class="${cls}">${esc(initials(name))}</span>`;
@@ -152,7 +153,7 @@ document.addEventListener('click', async e => {
   const d = el.dataset;
   if (el.tagName === 'A') e.preventDefault();
   if (d.branch) { if (S.branch !== d.branch) { S.staff = 'any'; S.lock = false; S.time = ''; S.slots = null; } S.branch = d.branch; S.err = ''; S.rv.branchId ||= d.branch; loadReviews(); loadGoogle(d.branch); return goStep(2); }
-  if (d.svc) { S.items = S.items.includes(d.svc) ? S.items.filter(x => x !== d.svc) : [...S.items, d.svc]; S.err = ''; S.time = ''; S.slots = null; return render(); }
+  if (d.svc) { S.items = S.items.includes(d.svc) ? S.items.filter(x => x !== d.svc) : [...S.items, d.svc]; S.err = ''; S.time = ''; S.slots = null; if (S.staff !== 'any' && !S.lock && !team().some(m => m.id === S.staff)) S.staff = 'any'; return render(); }
   if (d.staff) { S.staff = d.staff; S.lock = false; S.time = ''; S.slots = null; return render(); }
   if (d.act === 'next') { if (stepOk(S.step)) goStep(S.lock && S.step === 2 ? 4 : S.step + 1); return; }   // a barber chosen from the promo site skips the barber step
   if (d.act === 'back') return goStep(S.lock && S.step === 4 ? 2 : Math.max(firstStep(), S.step - 1));

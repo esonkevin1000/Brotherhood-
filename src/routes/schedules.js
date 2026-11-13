@@ -8,6 +8,7 @@ const pad = n => String(n).padStart(2, '0'), hm = m => `${pad(Math.floor(m / 60)
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function createScheduleRoutes({ all, run, get, log, tx, bad, send, readBody }) {
+  const servicesOf = staffId => all('select itemId from staff_services where staffId=? order by itemId', staffId).map(r => r.itemId);
   // the week of one barber: 7 entries, each null (branch hours), 'off', or { start, end }
   const weekOf = staffId => {
     const days = Array(7).fill(null);
@@ -38,6 +39,22 @@ export function createScheduleRoutes({ all, run, get, log, tx, bad, send, readBo
       const text = rows.map(([wd, a, z]) => `${DAYS[wd]} ${a === z ? 'off' : hm(a) + '-' + hm(z)}`).join(', ') || 'branch hours every day';
       log(me, 'schedule', 'staff', s.id, `${s.name}: ${text}`);
       return send(res, 200, { staffId: s.id, days: weekOf(s.id) });
+    }
+    // ----- which services each barber does (T14): an empty list = every service -----
+    if (p === '/api/staff-services' && method === 'GET') {
+      const br = get('branches', String(q.branch || '')); if (!br) bad(400, 'Pick a branch');
+      manageIn(br.id);
+      return send(res, 200, all('select id, name from staff where branchId=? and active=1 order by name', br.id).map(s => ({ staffId: s.id, name: s.name, itemIds: servicesOf(s.id) })));
+    }
+    const svm = p.match(/^\/api\/staff\/(\w+)\/services$/);
+    if (svm && method === 'PUT') {
+      const s = get('staff', svm[1]); if (!s) bad(404, 'Barber not found');
+      manageIn(s.branchId);
+      const b = await readBody(req), ids = [...new Set((Array.isArray(b.itemIds) ? b.itemIds : []).map(String))];
+      for (const id of ids) { const it = get('items', id); if (!it || it.type !== 'service') bad(400, 'Pick services only'); }
+      tx(() => { run('delete from staff_services where staffId=?', s.id); for (const id of ids) run('insert into staff_services(staffId, itemId) values(?,?)', s.id, id); });
+      log(me, 'barber-services', 'staff', s.id, `${s.name}: ${ids.length ? ids.map(i => get('items', i)?.name).join(', ') : 'every service'}`);
+      return send(res, 200, { staffId: s.id, itemIds: servicesOf(s.id) });
     }
     return NEXT;
   };

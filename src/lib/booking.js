@@ -26,11 +26,18 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     return r ? [r.startMin, r.endMin] : null;
   }
   const inHours = (s, date, start, mins) => { const w = workWindow(s, date); return !w || (start >= w[0] && start + mins <= w[1]); };
+  // T14, only in branches using the new booking system: a barber with a list of services does only those (no list = every service)
+  const canDo = (s, itemIds) => {
+    if (!itemIds?.length || !mvpOn(s.branchId)) return true;
+    const mine = all('select itemId from staff_services where staffId=?', s.id).map(r => r.itemId);
+    return !mine.length || itemIds.every(i => mine.includes(String(i)));
+  };
   const staffFree = (s, date, start, mins) => s.active && inHours(s, date, start, mins) && !(date === todayStr() && staffState(s.id, date).state === 'off') && !bookedOverlap(s.id, date, start, mins);
-  function slotsFor(branchId, date, staffId, mins) {
+  function slotsFor(branchId, date, staffId, mins, itemIds = []) {
     const br = get('branches', branchId); if (!br) bad(400, 'Pick a branch');
     const open = toMin(br.openTime || '09:00'), close = toMin(br.closeTime || '21:00'), nowM = minsOfDay(now());
-    const pool = staffId === 'any' ? all('select * from staff where branchId=? and active=1', branchId) : [get('staff', staffId)].filter(s => s && s.branchId === branchId);
+    let pool = staffId === 'any' ? all('select * from staff where branchId=? and active=1', branchId) : [get('staff', staffId)].filter(s => s && s.branchId === branchId);
+    pool = pool.filter(s => canDo(s, itemIds));
     const out = [];
     for (let m = open; m + mins <= close; m += 30) {
       if (date === todayStr() && m < nowM + 15) continue;
@@ -84,10 +91,10 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     if (source === 'online') noShowGate(phone, b.email);
     const mins = bookingMins(itemIds), start = toMin(time);
     let sid = String(b.staffId || 'any');
-    if (!slotsFor(branchId, date, sid, mins).includes(time)) bad(409, 'That time is no longer available. Please pick another.');
+    if (!slotsFor(branchId, date, sid, mins, itemIds).includes(time)) bad(409, 'That time is no longer available. Please pick another.');
     if (sid === 'any') {
       const load = s => one("select count(*) n from bookings where staffId=? and date=? and status in ('booked','arrived')", s.id, date).n;
-      const free = all('select * from staff where branchId=? and active=1', branchId).filter(s => staffFree(s, date, start, mins)).sort((x, y) => load(x) - load(y));
+      const free = all('select * from staff where branchId=? and active=1', branchId).filter(s => canDo(s, itemIds) && staffFree(s, date, start, mins)).sort((x, y) => load(x) - load(y));
       sid = free[0].id;
     }
     const cust = upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos', branchId);
@@ -105,5 +112,5 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     return { ...row, itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: snap ? r2(snap.total) : r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
   }
 
-  return { bookingMins, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };
+  return { bookingMins, canDo, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };
 }

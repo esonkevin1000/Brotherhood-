@@ -38,7 +38,7 @@ async function loadView() {
     else if (v === 'slip') { [ui.slip, ui.adj] = await Promise.all([api('GET', `/api/payslips?${qs()}`), api('GET', '/api/adjustments')]); }
     else if (v === 'prob') ui.prob = await api('GET', `/api/problems?branch=${ui.branch}&status=${ui.pstatus || ''}`);
     else if (v === 'att') ui.att = await api('GET', `/api/attendance/log?${qs()}&flagged=${ui.aflag ? 1 : 0}`);
-    else if (v === 'sched') ui.sched = ui.branch === 'all' ? null : await api('GET', `/api/schedules?branch=${ui.branch}`);
+    else if (v === 'sched') [ui.sched, ui.svcs] = ui.branch === 'all' ? [null, null] : await Promise.all([api('GET', `/api/schedules?branch=${ui.branch}`), api('GET', `/api/staff-services?branch=${ui.branch}`)]);
     else if (v === 'adv') ui.adv = await api('GET', `/api/advances?branch=${ui.branch}&status=${ui.astatus || ''}`);
     else if (v === 'exp') ui.exp = await api('GET', `/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}`);
     else if (v === 'remit') ui.remit = await api('GET', `/api/remittances?${qs()}&status=${ui.rstatus || ''}`);
@@ -314,7 +314,13 @@ function vSched() {
   if (!ui.sched) return head + '<p class="mute">Loading…</p>';
   const cell = (d, wd) => { const off = d === 'off', c = d && d !== 'off' ? d : { start: '', end: '' };
     return `<td style="min-width:104px"><label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-weight:500;margin:0 0 4px"><input type="checkbox" data-off data-wd="${wd}" ${off ? 'checked' : ''} style="width:16px;height:16px">Off</label><input type="time" data-a data-wd="${wd}" value="${esc(c.start)}" aria-label="${WDAYS[wd]} start" style="display:block;margin-bottom:4px;width:100px;min-width:0;padding:5px"><input type="time" data-z data-wd="${wd}" value="${esc(c.end)}" aria-label="${WDAYS[wd]} end" style="display:block;width:100px;min-width:0;padding:5px"></td>`; };
-  return head + `<div class="card overflow"><div style="overflow-x:auto"><table><tr><th>Barber</th>${WDAYS.map(d => `<th>${d}</th>`).join('')}<th></th></tr>${ui.sched.map(r => `<tr data-sid="${esc(r.staffId)}"><td><b>${esc(r.name)}</b></td>${r.days.map(cell).join('')}<td style="white-space:nowrap"><button class="btn sm" data-act="schedsave" data-id="${esc(r.staffId)}">Save</button> <button class="btn ghost sm" data-act="schedclear" data-id="${esc(r.staffId)}">Branch hours</button></td></tr>`).join('') || '<tr><td colspan="9" class="mute">No barbers in this branch.</td></tr>'}</table></div></div>`;
+  return head + `<div class="card overflow"><div style="overflow-x:auto"><table><tr><th>Barber</th>${WDAYS.map(d => `<th>${d}</th>`).join('')}<th></th></tr>${ui.sched.map(r => `<tr data-sid="${esc(r.staffId)}"><td><b>${esc(r.name)}</b></td>${r.days.map(cell).join('')}<td style="white-space:nowrap"><button class="btn sm" data-act="schedsave" data-id="${esc(r.staffId)}">Save</button> <button class="btn ghost sm" data-act="schedclear" data-id="${esc(r.staffId)}">Branch hours</button></td></tr>`).join('') || '<tr><td colspan="9" class="mute">No barbers in this branch.</td></tr>'}</table></div></div>` + vSvcs();
+}
+// which services each barber does (T14): none ticked = every service
+function vSvcs() {
+  const svcs = S.items.filter(i => i.type === 'service' && i.active !== 0); if (!ui.svcs || !svcs.length) return '';
+  return `<h3 style="margin-top:22px">Services each barber does</h3><p class="mute" style="font-size:13px;margin:-4px 0 10px">Leave all unticked if a barber does every service. In branches on the new booking system, customers only see a barber for services ticked here.</p>
+  <div class="card overflow"><table><tr><th>Barber</th><th>Services</th><th></th></tr>${ui.svcs.map(r => `<tr data-sid="${esc(r.staffId)}"><td><b>${esc(r.name)}</b><div class="mute" style="font-size:12px">${r.itemIds.length ? r.itemIds.length + ' selected' : 'every service'}</div></td><td><div class="row" style="flex-wrap:wrap;gap:4px 14px">${svcs.map(s => `<label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-weight:500;margin:0"><input type="checkbox" data-svc value="${esc(s.id)}" ${r.itemIds.includes(s.id) ? 'checked' : ''} style="width:16px;height:16px">${esc(s.name)}</label>`).join('')}</div></td><td><button class="btn sm" data-act="svcsave" data-id="${esc(r.staffId)}">Save</button></td></tr>`).join('')}</table></div>`;
 }
 function vAdv() {
   const r = ui.adv, st = ui.astatus || '';
@@ -664,6 +670,10 @@ document.addEventListener('click', async e => {
     try { await api('PUT', '/api/attendance/' + d.id + '/correct', { timeIn: v('fx-in'), timeOut: v('fx-out') || undefined, reason: v('fx-reason') }); closeModal(); await loadView(); render(); } catch (x) { document.getElementById('fx-err').textContent = x.message; } return;
   }
   if (act === 'saverules') { try { await api('PUT', '/api/settings', { payRules: { lunchAmount: document.getElementById('pr-lunch').value, lunchLateMins: document.getElementById('pr-ll').value, allowLateMins: document.getElementById('pr-al').value } }); await loadView(); render(); alert('Pay rules saved. They apply to attendance from now on and to unpaid days.'); } catch (x) { alert(x.message); } return; }
+  if (act === 'svcsave') {
+    const ids = [...el.closest('tr').querySelectorAll('[data-svc]:checked')].map(x => x.value);
+    try { await api('PUT', `/api/staff/${d.id}/services`, { itemIds: ids }); await loadView(); render(); alert(ids.length ? 'Saved.' : 'Saved: this barber does every service.'); } catch (x) { alert(x.message); } return;
+  }
   if (act === 'schedsave' || act === 'schedclear') {
     const row = el.closest('tr'); let days = null;
     if (act === 'schedsave') {

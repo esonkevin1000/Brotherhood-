@@ -2,7 +2,7 @@
 // Created once by server.js; the handler gets the request on each call.
 import { NEXT } from '../lib/http.js';
 
-export function createPublicRoutes({ ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody }) {
+export function createPublicRoutes({ mvpOn, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, p, method, q, ip }) {
     if (p === '/api/public/terms' && method === 'GET') return send(res, 200, { terms: getTerms() });
@@ -65,13 +65,14 @@ export function createPublicRoutes({ ownerUser, SHOP, mainDb, curOrg, orgRow, in
         services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) })),
         menu: all("select id,name,price,mins,photo,apptOnly,bookable from items where active=1 and type='service' order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name), bookable: !!s.bookable })),   // every service for the price menu; only bookable ones can be booked online
         categories: all("select id,name from categories where type='service'"),
-        staff: all('select id,name,photo,branchId from staff where active=1 order by name')
+        // T14: in branches on the new booking system, the services each barber does (null = every service), so the page can hide the others
+        staff: all('select id,name,photo,branchId from staff where active=1 order by name').map(s => { const l = mvpOn(s.branchId) ? all('select itemId from staff_services where staffId=?', s.id).map(r => r.itemId) : []; return { ...s, services: l.length ? l : null }; })
       });
     }
     if (p === '/api/public/slots' && method === 'GET') {
       const date = String(q.date || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < todayStr()) return send(res, 200, { slots: [] });
       const ids = String(q.items || '').split(',').filter(Boolean); if (!ids.length) return send(res, 200, { slots: [] });
-      return send(res, 200, { slots: slotsFor(String(q.branch || ''), date, String(q.staff || 'any'), bookingMins(ids)) });
+      return send(res, 200, { slots: slotsFor(String(q.branch || ''), date, String(q.staff || 'any'), bookingMins(ids), ids) });
     }
     if (p === '/api/public/reviews' && method === 'GET') {
       const brId = q.branch && get('branches', String(q.branch)) ? String(q.branch) : null;
