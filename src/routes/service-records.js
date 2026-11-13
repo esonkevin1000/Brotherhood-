@@ -75,7 +75,10 @@ export function createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowI
       const sa = p.match(/^\/api\/svc\/(\w+)\/(start|finish|cancel|left)$/);
       if (sa && method === 'POST') {
         const o = ticket(sa[1]), act = sa[2], b = await readBody(req);
-        if (!['waiting', 'in_chair'].includes(o.status)) bad(409, o.status === 'paid' ? 'This visit is already done.' : o.status === 'left' ? 'This customer already left.' : 'This visit was cancelled.');
+        if (!['waiting', 'in_chair'].includes(o.status)) {   // closed already: say what happened and who did it (T27: two staff acting at once)
+          const to = { paid: 'completed', left: 'left', void: 'cancelled' }[o.status], ev = one('select actor from order_events where orderId=? and toStatus=? order by rowid desc limit 1', o.id, to), by = ev ? ' by ' + ev.actor : '';
+          bad(409, o.status === 'paid' ? 'This visit is already done' + by + '.' : o.status === 'left' ? 'This customer was already marked as left' + by + '.' : 'This visit was already cancelled' + by + '.');
+        }
         if (me.role === 'barber' && o.barberId && o.barberId !== myStaffId) bad(403, 'This customer is with another barber.');
         const before = orderPlan(o);
         if (act === 'start') {
