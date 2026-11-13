@@ -16,6 +16,7 @@ import { createLimiter, allOf, intSetting } from './src/lib/throttle.js';
 import { createFlags } from './src/lib/flags.js';
 import { createServiceRoutes } from './src/routes/service-records.js';
 import { createDeviceRoutes } from './src/routes/devices.js';
+import { createScheduleRoutes } from './src/routes/schedules.js';
 import { createReports } from './src/lib/reports.js';
 import { createBookings, idemKeyOf, snapOf } from './src/lib/booking.js';
 import { HttpError, bad, MIME, send, readBody, noteGzip, staticServer, NEXT } from './src/lib/http.js';
@@ -743,7 +744,7 @@ const bookingBlocked = ip => recent(bookHits, ip).length >= (+process.env.BOOK_L
 // one atomic step: everything inside either happens completely or not at all
 function tx(fn) { db.exec('begin immediate'); try { const r = fn(); db.exec('commit'); return r; } catch (e) { try { db.exec('rollback'); } catch { } throw e; } }
 // the booking rules (free times, making a booking, price snapshot, history) are in src/lib/booking.js
-const { bookingMins, slotsFor, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView } = createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad });
+const { bookingMins, slotsFor, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView } = createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn });
 // a walk-in style ticket (used when a booked customer arrives)
 function createTicket(me, branchId, customerId, name, items, barberId) {
   const t = todayStr(), tt = totals(items, null), id = uid();
@@ -1046,6 +1047,7 @@ async function handleIn(req, res) {
   if (p.startsWith('/api/svc/')) return SERVICE_RECORDS({ req, res, p, method, q, me });   // src/routes/service-records.js
 
   { const r = await DEVICES({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/devices.js
+  { const r = await SCHEDULES({ req, res, p, q, method, me, manageIn }); if (r !== NEXT) return r; }   // src/routes/schedules.js
   { const r = await MANAGEMENT({ req, res, p, method, q, me, admin, adminOnly, manageIn }); if (r !== NEXT) return r; }   // src/routes/management.js
   { const r = await PARTNER_SHOPS({ req, res, p, method, me }); if (r !== NEXT) return r; }   // src/routes/partner-shops.js
   { const r = await MARKETING({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/marketing.js
@@ -1058,6 +1060,7 @@ async function handleIn(req, res) {
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
 const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
+const SCHEDULES = createScheduleRoutes({ all, run, get, log, tx, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
 const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
 const MARKETING = createMarketingRoutes({ curOrg, uid, nowISO, all, one, run, insert, log, normEmail, validEmail, TIERS, setSetting, NO_MAIL, mailCount, baseUrl, welcomeEmail, processEmails, AUD_WHO, audienceOf, promoEmail, queueMarketing, winbackCfg, runWinback, mailProvider, mailReady, MAIL_LIMIT, mailFrom, sendEmail, bad, send, readBody });

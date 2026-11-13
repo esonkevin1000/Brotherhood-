@@ -38,6 +38,7 @@ async function loadView() {
     else if (v === 'slip') { [ui.slip, ui.adj] = await Promise.all([api('GET', `/api/payslips?${qs()}`), api('GET', '/api/adjustments')]); }
     else if (v === 'prob') ui.prob = await api('GET', `/api/problems?branch=${ui.branch}&status=${ui.pstatus || ''}`);
     else if (v === 'att') ui.att = await api('GET', `/api/attendance/log?${qs()}&flagged=${ui.aflag ? 1 : 0}`);
+    else if (v === 'sched') ui.sched = ui.branch === 'all' ? null : await api('GET', `/api/schedules?branch=${ui.branch}`);
     else if (v === 'adv') ui.adv = await api('GET', `/api/advances?branch=${ui.branch}&status=${ui.astatus || ''}`);
     else if (v === 'exp') ui.exp = await api('GET', `/api/expense-claims?${qs()}&status=${ui.estatus || ''}&category=${encodeURIComponent(ui.ecat || '')}`);
     else if (v === 'remit') ui.remit = await api('GET', `/api/remittances?${qs()}&status=${ui.rstatus || ''}`);
@@ -122,7 +123,7 @@ function renderBase() {
     <div id="navgroups">${navGroups(on)}</div>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
   document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { mb.textContent = ui.notif && ui.notif.total ? '🔔 ' + ui.notif.total : '🔔'; mb.style.color = ui.notif && ui.notif.total ? '#e5384a' : ''; }
-  view.innerHTML = secretBar() + orgBar() + branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'mkt' ? vMkt() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
+  view.innerHTML = secretBar() + orgBar() + branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'mkt' ? vMkt() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'sched' ? vSched() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
   paginateTables();
 }
 // Branch picker shown at the top of every page (not only in the side menu), so it is one tap on phones too
@@ -188,7 +189,7 @@ const NAVG = [
   ['Release Pay & Payroll', [['adv', 'Release Pay', 'tag'], ['rep:payroll'], ['rep:commissions'], ['slip', 'Payslips', 'doc']]],
   ['Expenses & Receipts', [['exp', 'Expenses & Receipts', 'wallet']]],
   ['Daily Sales Remittance', [['remit', 'Daily Remittance', 'coin']]],
-  ['Employees & Performance', [['mgmt:staff'], ['rep:scorecard'], ['leave', 'Leave Requests', 'calendar']]],
+  ['Employees & Performance', [['mgmt:staff'], ['sched', 'Barber Hours', 'clock'], ['rep:scorecard'], ['leave', 'Leave Requests', 'calendar']]],
   ['Inbox & Communications', [['inbox', 'Inbox', 'users']]],
   ['Problem Reports', [['prob', 'Problem Reports', 'gear']]],
   ['Daily Checklists', [['chk', 'Checklists', 'doc']]],
@@ -304,6 +305,16 @@ function vAtt() {
     <td style="white-space:normal;min-width:170px">${a.flagged ? `<span class="tag" style="color:var(--bad);background:rgba(255,93,108,.13)">FLAGGED</span><br><span class="mute" style="font-size:11px">${esc(a.flagReason)}</span>` : ''}${a.corrected ? `<span class="tag">corrected</span> <a href="#" data-act="atthist" data-id="${a.id}" style="font-size:11px">history</a>` : ''}</td>
     <td><button class="btn ghost sm" data-act="attfix" data-id="${a.id}">Correct</button></td></tr>`).join('') || '<tr><td colspan="12" class="mute">No attendance records in this period.</td></tr>'}</table></div>
   ${r.absences.length ? `<div class="card overflow" style="margin-top:14px"><h3>No time-in recorded (possible absences)</h3><table><tr><th>Date</th><th>Barber</th><th>Branch</th></tr>${r.absences.slice(0, 200).map(x => `<tr><td>${esc(x.date)}</td><td>${esc(x.staffName)}</td><td>${esc(x.branchName)}</td></tr>`).join('')}</table></div>` : ''}` : '<p class="mute">Loading…</p>'}`;
+}
+// ---------- barber weekly hours (T13) ----------
+const WDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function vSched() {
+  const head = '<h2>Barber Hours</h2><p class="mute" style="font-size:13px;margin:-4px 0 12px">Set when each barber works. Leave a day empty to use the branch opening hours, tick Off for a day off, or enter a start and end time. Online booking follows these hours (and approved leave and blocked times) in branches on the new booking system (Settings).</p>';
+  if (ui.branch === 'all') return head + '<div class="card">Pick a branch above.</div>';
+  if (!ui.sched) return head + '<p class="mute">Loading…</p>';
+  const cell = (d, wd) => { const off = d === 'off', c = d && d !== 'off' ? d : { start: '', end: '' };
+    return `<td style="min-width:104px"><label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-weight:500;margin:0 0 4px"><input type="checkbox" data-off data-wd="${wd}" ${off ? 'checked' : ''} style="width:16px;height:16px">Off</label><input type="time" data-a data-wd="${wd}" value="${esc(c.start)}" aria-label="${WDAYS[wd]} start" style="display:block;margin-bottom:4px;width:100px;min-width:0;padding:5px"><input type="time" data-z data-wd="${wd}" value="${esc(c.end)}" aria-label="${WDAYS[wd]} end" style="display:block;width:100px;min-width:0;padding:5px"></td>`; };
+  return head + `<div class="card overflow"><div style="overflow-x:auto"><table><tr><th>Barber</th>${WDAYS.map(d => `<th>${d}</th>`).join('')}<th></th></tr>${ui.sched.map(r => `<tr data-sid="${esc(r.staffId)}"><td><b>${esc(r.name)}</b></td>${r.days.map(cell).join('')}<td style="white-space:nowrap"><button class="btn sm" data-act="schedsave" data-id="${esc(r.staffId)}">Save</button> <button class="btn ghost sm" data-act="schedclear" data-id="${esc(r.staffId)}">Branch hours</button></td></tr>`).join('') || '<tr><td colspan="9" class="mute">No barbers in this branch.</td></tr>'}</table></div></div>`;
 }
 function vAdv() {
   const r = ui.adv, st = ui.astatus || '';
@@ -653,6 +664,17 @@ document.addEventListener('click', async e => {
     try { await api('PUT', '/api/attendance/' + d.id + '/correct', { timeIn: v('fx-in'), timeOut: v('fx-out') || undefined, reason: v('fx-reason') }); closeModal(); await loadView(); render(); } catch (x) { document.getElementById('fx-err').textContent = x.message; } return;
   }
   if (act === 'saverules') { try { await api('PUT', '/api/settings', { payRules: { lunchAmount: document.getElementById('pr-lunch').value, lunchLateMins: document.getElementById('pr-ll').value, allowLateMins: document.getElementById('pr-al').value } }); await loadView(); render(); alert('Pay rules saved. They apply to attendance from now on and to unpaid days.'); } catch (x) { alert(x.message); } return; }
+  if (act === 'schedsave' || act === 'schedclear') {
+    const row = el.closest('tr'); let days = null;
+    if (act === 'schedsave') {
+      days = [];
+      for (let wd = 0; wd < 7; wd++) {
+        const off = row.querySelector(`[data-off][data-wd="${wd}"]`).checked, a = row.querySelector(`[data-a][data-wd="${wd}"]`).value, z = row.querySelector(`[data-z][data-wd="${wd}"]`).value;
+        if (off) days.push('off'); else if (a && z) days.push({ start: a, end: z }); else if (a || z) return alert(WDAYS[wd] + ': enter both a start and an end time, or leave both empty for the branch hours.'); else days.push(null);
+      }
+    }
+    try { await api('PUT', '/api/schedules/' + d.id, { days }); await loadView(); render(); alert(days ? 'Hours saved.' : 'Back to the branch opening hours.'); } catch (x) { alert(x.message); } return;
+  }
   if (act === 'savemvp') { const ids = [...document.querySelectorAll('[data-mvp]:checked')].map(x => x.value); try { await api('PUT', '/api/settings', { mvpBranches: ids }); await loadView(); render(); alert(ids.length ? 'Saved. The new booking system is on in: ' + ids.map(brName).join(', ') + '.' : 'Saved. The new booking system is off in every branch.'); } catch (x) { alert(x.message); } return; }
   if (act === 'savepinonly') { try { await api('PUT', '/api/settings', { pinOnly: document.getElementById('pin-only').checked }); await loadView(); render(); alert('Saved.'); } catch (x) { alert(x.message); } return; }
   if (act === 'devoff') { if (!confirm('Switch off this phone? Staff can no longer log in on it until it is set up again. If it was lost, also reset the PINs of the people who used it (see Activity).')) return; try { await api('DELETE', '/api/devices/' + el.dataset.id); await loadView(); render(); } catch (x) { alert(x.message); } return; }

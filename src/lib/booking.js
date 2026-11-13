@@ -7,7 +7,7 @@ export const idemKeyOf = v => { const k = String(v || '').trim(); return k.lengt
 export const snapOf = b => { try { const s = b.snapshot ? JSON.parse(b.snapshot) : null; return s && Array.isArray(s.items) && s.items.length ? s : null; } catch { return null; } };
 
 // now(): the current time; a test passes its own clock.
-export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, now = () => new Date() }) {
+export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn = () => false, now = () => new Date() }) {
   function bookingMins(ids) {
     let m = 0;
     for (const id of ids) { const it = get('items', id); if (!it || !it.active || it.type !== 'service') bad(400, 'Unknown service'); m += it.mins || 30; }
@@ -16,7 +16,17 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
   // a barber's blocked time (breaks, training, day off) and the owner's buffer between cuts both close slots
   const timeBlocked = (sid, date, start, mins) => { try { return all('select fromMin, toMin from bh_blocked where staffId=? and date=?', sid, date).some(r => start < r.toMin && r.fromMin < start + mins); } catch { return false; } };
   const bookedOverlap = (sid, date, start, mins) => { const buf = +getSetting('bufferMins') || 0; return all("select * from bookings where staffId=? and date=? and status in ('booked','arrived')", sid, date).some(b => start < toMin(b.time) + b.mins + buf && toMin(b.time) < start + mins + buf) || timeBlocked(sid, date, start, mins); };
-  const staffFree = (s, date, start, mins) => s.active && !(date === todayStr() && staffState(s.id, date).state === 'off') && !bookedOverlap(s.id, date, start, mins);
+  // T13, only in branches using the new booking system: approved leave closes the day, and the barber's weekly hours
+  // (a custom start and end, or a day off) narrow the branch hours. null = no limit beyond the branch hours (today's behaviour).
+  const weekdayOf = date => new Date(date + 'T00:00:00Z').getUTCDay();
+  function workWindow(s, date) {
+    if (!mvpOn(s.branchId)) return null;
+    try { if (one("select 1 x from leaves where staffId=? and status='APPROVED' and from_date<=? and to_date>=?", s.id, date, date)) return [0, 0]; } catch { }
+    const r = one('select startMin, endMin from staff_schedules where staffId=? and weekday=?', s.id, weekdayOf(date));
+    return r ? [r.startMin, r.endMin] : null;
+  }
+  const inHours = (s, date, start, mins) => { const w = workWindow(s, date); return !w || (start >= w[0] && start + mins <= w[1]); };
+  const staffFree = (s, date, start, mins) => s.active && inHours(s, date, start, mins) && !(date === todayStr() && staffState(s.id, date).state === 'off') && !bookedOverlap(s.id, date, start, mins);
   function slotsFor(branchId, date, staffId, mins) {
     const br = get('branches', branchId); if (!br) bad(400, 'Pick a branch');
     const open = toMin(br.openTime || '09:00'), close = toMin(br.closeTime || '21:00'), nowM = minsOfDay(now());
