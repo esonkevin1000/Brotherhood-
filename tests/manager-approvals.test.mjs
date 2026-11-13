@@ -9,7 +9,7 @@ try {
   const mkBarber = async br => (await call('POST', '/api/staff', { name: 'Barber ' + br.name, branchId: br.id, chairId: st.chairs.find(c => c.branchId === br.id)?.id, pct: 40, allowance: 0 }, owner)).j;
   const bA = await mkBarber(A), bC = await mkBarber(C);
   await call('POST', '/api/users', { name: 'Manager Mia', username: 'mia', password: 'miapass1', role: 'manager', branchIds: [A.id, B.id] }, owner);
-  const mia = (await call('POST', '/api/login', { username: 'mia', password: 'miapass1' })).j.token;
+  let mia = (await call('POST', '/api/login', { username: 'mia', password: 'miapass1' })).j.token;
   let r; const today = ymd(new Date()), later = ymd(new Date(Date.now() + 7 * 864e5));
 
   // things to review, made by the owner in branch A and branch C
@@ -52,6 +52,11 @@ try {
   ok('and only their chairs, barbers and staff logins', r.j.chairs.every(c => [A.id, B.id].includes(c.branchId)) && r.j.staff.every(s => [A.id, B.id].includes(s.branchId)) && r.j.users.every(u => [A.id, B.id].includes(u.branchId)), r.j.users);
   ok('services and prices come along (read only)', Array.isArray(r.j.items) && r.j.items.length > 0);
   ok('no login-security warnings for managers', !('secretWarnings' in r.j));
+
+  const miaId = (await call('GET', '/api/state', null, mia)).j.me.id;
+  r = await call('POST', `/api/users/${miaId}/reset`, null, owner);
+  ok('resetting a manager gives a new password, never a PIN', r.s === 200 && r.j.password && !r.j.pin, r.j);
+  r = await call('POST', '/api/login', { username: 'mia', password: r.j.password }); ok('which works', r.s === 200); mia = r.j.token;
 
   // ---------- still owner/admin only ----------
   ok('shop settings, activity log, reviews and commission rates stay admin only', (await call('GET', '/api/settings', null, mia)).s === 403 && (await call('GET', '/api/audit', null, mia)).s === 403

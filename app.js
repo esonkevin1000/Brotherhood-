@@ -49,7 +49,8 @@ async function loadView() {
   } catch (e) { if (loggedIn) alert(e.message); }
 }
 async function load(viewToo = true) {
-  try { S = await api('GET', '/api/state'); loggedIn = true; loadErr = ''; if (viewToo && S.me?.role !== 'cashier') await loadView(); }
+  try { S = await api('GET', '/api/state'); loggedIn = true; loadErr = '';
+    if (isMgr()) { if (!S.branches.some(b => b.id === ui.branch)) ui.branch = S.branches[0]?.id || 'all'; if (MANAGER_HIDE.has(ui.view)) ui.view = 'dashboard'; } if (viewToo && S.me?.role !== 'cashier') await loadView(); }
   catch (e) { loadErr = e.message; loggedIn = false; }
   if (!modal.open) render();
 }
@@ -67,6 +68,9 @@ async function download(url, name) {
 }
 
 // ---------- lookups / formatting ----------
+const isMgr = () => S.me?.role === 'manager';
+// pages a branch manager does not get: shop-wide settings, prices, marketing, reviews, barbers, chairs, branches, equipment
+const MANAGER_HIDE = new Set(['reviews', 'mkt', 'mgmt:items', 'mgmt:categories', 'mgmt:discounts', 'mgmt:staff', 'mgmt:equipment', 'mgmt:branches', 'mgmt:chairs', 'settings', 'activity']);
 const brName = id => S.branches.find(b => b.id === id)?.name || '';
 const chName = id => { const c = S.chairs.find(x => x.id === id); return c ? `${brName(c.branchId)} · ${c.name}` : ''; };
 const catName = id => S.categories.find(c => c.id === id)?.name || '';
@@ -127,7 +131,7 @@ function branchBar() {
   if (['settings', 'activity', 'inbox', 'mkt'].includes(ui.view)) return '';
   const dated = DATE_VIEWS.includes(ui.view) || ui.view.startsWith('rep:');
   const date = dated ? `<label for="dpreset" style="margin-left:8px">Date</label><select id="dpreset">${PRESETS.map(([k, l]) => `<option value="${k}" ${ui.rp === k ? 'selected' : ''}>${l}</option>`).join('')}</select>${ui.rp === 'custom' ? `<input type="date" id="rfrom" value="${ui.from}"><span class="mute">to</span><input type="date" id="rto" value="${ui.to}">` : `<span class="mute">${ui.rp === 'all' ? 'Everything' : ui.from === ui.to ? ui.from : ui.from + ' → ' + ui.to}</span>`}` : '';
-  return `<div class="pagebar"><label for="branchsel2">Branch</label><select id="branchsel2"><option value="all">All branches</option>${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>${date}</div>`;
+  return `<div class="pagebar"><label for="branchsel2">Branch</label><select id="branchsel2">${isMgr() ? '' : '<option value="all">All branches</option>'}${S.branches.map(b => `<option value="${b.id}" ${ui.branch === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>${date}</div>`;
 }
 
 // ---------- long tables, page by page ----------
@@ -223,9 +227,9 @@ function navGroups(on = k => (ui.view === k ? 'on' : '')) {
     const items = list.map(([v, l, i]) => {
       if (!l) { const k = v.slice(v.indexOf(':') + 1), r = (v.startsWith('rep:') ? REPORTS : MGMT).find(x => x[0] === k); if (!r) return null; l = r[1]; i = r[2]; }
       return { v, l, i };
-    }).filter(Boolean);
+    }).filter(Boolean).filter(x => !(isMgr() && MANAGER_HIDE.has(x.v)));
     const shown = q ? (h.toLowerCase().includes(q) ? items : items.filter(x => x.l.toLowerCase().includes(q))) : items;
-    if (q && !shown.length) return '';
+    if (!shown.length) return '';
     const closed = !q && ui.navClosed.has(h), cnt = list.reduce((a, [v]) => a + (notifCount(v) || 0), 0);
     const body = shown.map(x => `<button class="${on(x.v)}" data-view="${x.v}" style="width:100%">${ic(x.i)}${x.l.replace('&', '&amp;')}${badge(x.v)}</button>`).join('');
     return `<div class="navh" data-grp="${esc(h)}"><span class="car">${closed ? '▸' : '▾'}</span>${h.replace('&', '&amp;')}${closed && cnt ? `<span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${cnt}</span>` : ''}</div>` + (closed ? '' : body);
@@ -373,13 +377,14 @@ const M = {
       ['price', 'Price (₱)', 'number'], ['commission', 'Barber commission per piece sold (₱, products only)', 'number', { def: 100 }], ['mins', 'Minutes', 'number', { def: 30 }], ['photo', 'Photo', 'photo', { req: false }], ['bookable', 'Show on online booking', 'select', { opts: [[1, 'Yes'], [0, 'No']] }], ['apptOnly', 'Appointment only (not for walk-ins)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['needId', 'Requires a photo of the customer ID (Senior / PWD / Student)', 'select', { opts: [[0, 'No'], [1, 'Yes']] }], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   discounts: { cols: [['name', 'Name'], ['kind', 'Kind'], ['value', 'Value'], ['active', 'Active', yn]], rows: () => S.discounts,
     form: () => [['name', 'Name', 'text'], ['kind', 'Kind', 'select', { opts: [['amount', 'Amount off (₱)'], ['percent', 'Percent off (%)']] }], ['value', 'Value', 'number'], ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
-  users: { cols: [['name', 'Name'], ['username', 'Username'], ['role', 'Role'], ['branchId', 'Branch', v => v ? brName(v) : 'All'], ['active', 'Active', yn]], rows: () => S.users,
+  users: { cols: [['name', 'Name'], ['username', 'Username'], ['role', 'Role'], ['branchLabel', 'Branch'], ['active', 'Active', yn]], rows: () => S.users.map(u => ({ ...u, branchLabel: u.role === 'manager' ? (u.branchIds || []).map(brName).join(', ') : u.branchId ? brName(u.branchId) : 'All' })),
     form: () => [['name', 'Full name', 'text'], ['username', 'Username', 'text'],
-      ['role', 'Role', 'select', { opts: [['cashier', 'Front desk (one branch)'], ['barber', 'Barber (one branch)'], ['admin', 'Admin (all branches)'], ...(S.me?.role === 'owner' ? [['owner', 'Owner (everything; own password, no PIN)']] : [])] }],
-      ['branchId', 'Branch', 'select', { opts: [['', '— all —'], ...BR()], req: false, hint: 'required for cashier and barber' }],
+      ['role', 'Role', 'select', { opts: [['cashier', 'Front desk (one branch)'], ['barber', 'Barber (one branch)'], ...(isMgr() ? [] : [['manager', 'Manager (the branches ticked below)'], ['admin', 'Admin (all branches)']]), ...(S.me?.role === 'owner' ? [['owner', 'Owner (everything; own password, no PIN)']] : [])] }],
+      ['branchId', 'Branch', 'select', { opts: isMgr() ? BR() : [['', '— all —'], ...BR()], req: false, hint: 'required for cashier and barber' }],
+      ...(isMgr() ? [] : [['branchIds', 'Branches this manager runs', 'checks', { opts: BR(), req: false, hint: 'managers only' }]]),
       ['staffId', 'Linked barber profile', 'select', { opts: [['', '— not linked —'], ...S.staff.map(s => [s.id, s.name + ' · ' + brName(s.branchId)])], req: false, hint: 'Link a barber login to their profile so they can see their own performance and payslips' }],
-      ['pin', 'PIN', 'text', { req: false, hint: '6 digits, for cashier and barber; blank = keep current' }],
-      ['password', 'Password', 'password', { req: false, hint: 'admins and owners only; blank = keep current; at least 6 characters (owners: 10)' }],
+      ...(isMgr() ? [] : [['pin', 'PIN', 'text', { req: false, hint: '6 digits, for cashier and barber; blank = keep current' }],
+      ['password', 'Password', 'password', { req: false, hint: 'owners, admins and managers; blank = keep current; at least 6 characters (owners: 10)' }]]),
       ['active', 'Active', 'select', { opts: [[1, 'Yes'], [0, 'No']] }]] },
   branches: { cols: [['photo', ''], ['name', 'Name'], ['phone', 'Phone'], ['address', 'Address'], ['openTime', 'Opens'], ['closeTime', 'Closes'], ['graceMins', 'Late grace (min)'], ['defaultPct', 'Default commission', v => v == null || v === '' ? '—' : v + '%']], rows: () => S.branches,
     form: () => [['name', 'Name', 'text'], ['photo', 'Branch photo (shown on the booking site)', 'photo', { req: false }], ['phone', 'Phone', 'text', { req: false }], ['address', 'Address', 'text', { req: false }],
@@ -391,7 +396,7 @@ function vMgmt(kind) {
   const rows = m.rows().filter(r => ui.branch === 'all' || !('branchId' in r) || r.branchId === ui.branch || kind === 'users' || kind === 'branches');
   return `<div class="row" style="justify-content:space-between;margin-bottom:14px"><h2 style="margin:0">${title()}</h2><button class="btn" data-act="edit" data-kind="${kind}">+ Add</button></div>
   <div class="card overflow"><table><tr>${m.cols.map(c => `<th>${c[1]}</th>`).join('')}<th></th></tr>
-  ${rows.map(r => `<tr style="${r.active === 0 ? 'opacity:.5' : ''}">${m.cols.map(([k, , f]) => k === 'photo' ? `<td>${thumb(r)}</td>` : `<td>${esc(f ? f(r[k]) : r[k])}</td>`).join('')}<td>${kind === 'users' ? `<button class="btn ghost sm" data-act="resetuser" data-id="${r.id}">Reset ${r.role === 'admin' ? 'password' : 'PIN'}</button> ` : ''}<button class="btn ghost sm" data-act="edit" data-kind="${kind}" data-id="${r.id}">Edit</button> <button class="btn bad sm" data-act="del" data-kind="${kind}" data-id="${r.id}">Delete</button></td></tr>`).join('') || `<tr><td colspan="${m.cols.length + 1}" class="mute">Nothing here yet.</td></tr>`}</table></div>`;
+  ${rows.map(r => `<tr style="${r.active === 0 ? 'opacity:.5' : ''}">${m.cols.map(([k, , f]) => k === 'photo' ? `<td>${thumb(r)}</td>` : `<td>${esc(f ? f(r[k]) : r[k])}</td>`).join('')}<td>${kind === 'users' ? `<button class="btn ghost sm" data-act="resetuser" data-id="${r.id}">Reset ${['admin', 'owner', 'manager'].includes(r.role) ? 'password' : 'PIN'}</button> ` : ''}<button class="btn ghost sm" data-act="edit" data-kind="${kind}" data-id="${r.id}">Edit</button> <button class="btn bad sm" data-act="del" data-kind="${kind}" data-id="${r.id}">Delete</button></td></tr>`).join('') || `<tr><td colspan="${m.cols.length + 1}" class="mute">Nothing here yet.</td></tr>`}</table></div>`;
 }
 const tierBadge = t => `<span class="tier ${t}">${esc(t)}</span>`;
 function vCustomers() {
@@ -521,6 +526,7 @@ function form(kind, id) {
     const val = n === 'password' ? '' : (o[n] ?? x.def ?? '');
     const req = x.req === false ? '' : 'required';
     const ctl = t === 'photo' ? `<div class="photo"><div class="pv" id="pv">${val ? `<img src="${esc(val)}" alt="">` : 'No photo'}</div><div style="flex:1"><input type="file" accept="image/*" data-photo="${n}" style="padding:8px"><input type="hidden" name="${n}" value="${esc(val)}"><p class="mute" id="phmsg" style="margin:6px 0 0;font-size:12px">JPG or PNG. It is resized automatically.</p></div></div>`
+      : t === 'checks' ? `<div class="row" style="flex-wrap:wrap;gap:6px 14px">${x.opts.map(([v, lab]) => `<label style="display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0;font-weight:500"><input type="checkbox" name="${n}" value="${esc(v)}" ${(Array.isArray(val) ? val : []).includes(v) ? 'checked' : ''} style="width:18px;height:18px">${esc(lab)}</label>`).join('')}</div>`
       : t === 'textarea' ? `<textarea name="${n}">${esc(val)}</textarea>`
       : t === 'select' ? `<select name="${n}">${x.opts.map(([v, lab]) => `<option value="${esc(v)}" ${String(val) === String(v) ? 'selected' : ''}>${esc(lab)}</option>`).join('')}</select>`
         : `<input name="${n}" type="${t}" value="${esc(val)}" ${req} ${t === 'number' ? 'step="any"' : ''} ${t === 'password' ? 'autocomplete="new-password"' : ''}>`;
@@ -707,7 +713,7 @@ document.addEventListener('click', async e => {
   if (act === 'export') return download(`/api/reports/${d.name}?${qs()}&format=csv`, `${d.name}-${ui.from}_${ui.to}.csv`);
   if (act === 'delreview') { if (confirm('Delete this review? It will disappear from the booking site.')) mut(async () => { await api('DELETE', `/api/reviews/${d.id}`); await loadView(); }); return; }
   if (act === 'resetuser') {
-    const u = S.users.find(x => x.id === d.id); if (!u || !confirm(`Reset the ${u.role === 'admin' ? 'password' : 'PIN'} of ${u.name}? Their current sign-in stops working immediately.`)) return;
+    const u = S.users.find(x => x.id === d.id); if (!u || !confirm(`Reset the ${['admin', 'owner', 'manager'].includes(u.role) ? 'password' : 'PIN'} of ${u.name}? Their current sign-in stops working immediately.`)) return;
     try { const r = await api('POST', `/api/users/${d.id}/reset`); openModal(`<h2>New ${r.pin ? 'PIN' : 'password'}</h2><p>For <b>${esc(u.name)}</b>. Write it down and give it to them now. It will not be shown again.</p><div style="font:700 34px Oswald,sans-serif;letter-spacing:6px;text-align:center;background:var(--s3);border-radius:14px;padding:16px;margin:10px 0 18px">${esc(r.pin || r.password)}</div><button class="btn" data-act="close">Done</button>`); } catch (x) { alert(x.message); }
     return;
   }
@@ -856,8 +862,9 @@ document.addEventListener('submit', e => {
     return;
   }
   const o = {};
-  for (const [k, v] of fd.entries()) { if (k === 'password' && !v) continue; o[k] = ['price', 'commission', 'mins', 'pct', 'allowance', 'active', 'value', 'sort', 'graceMins', 'defaultPct', 'bookable', 'apptOnly', 'consent'].includes(k) ? +v : v; }
-  run(() => id ? api('PUT', `/api/${kind}/${id}`, o) : api('POST', `/api/${kind}`, o), err);
+  for (const [k, v] of fd.entries()) { if ((k === 'password' && !v) || k === 'branchIds') continue; o[k] = ['price', 'commission', 'mins', 'pct', 'allowance', 'active', 'value', 'sort', 'graceMins', 'defaultPct', 'bookable', 'apptOnly', 'consent'].includes(k) ? +v : v; }
+  if (kind === 'users' && o.role === 'manager') o.branchIds = fd.getAll('branchIds');
+  run(async () => { const r = await (id ? api('PUT', `/api/${kind}/${id}`, o) : api('POST', `/api/${kind}`, o)); if (r && r.pin) alert(`New PIN for ${r.name}: ${r.pin}\nGive it to them now. It is shown only once.`); }, err);
 });
 
 fetch('/api/public/login-hint').then(r => r.json()).then(j => { ui.ownerNamed = !!j.ownerNamed; if (!loggedIn) render(); }).catch(() => { });

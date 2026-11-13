@@ -102,7 +102,7 @@ export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainD
       if (isManager(me)) { if (!u || !['cashier', 'barber'].includes(u.role) || !inScope(me, u.branchId)) bad(403, 'A manager can reset PINs of their own branches only'); } else adminOnly();
       if (!u) bad(404, 'Not found');
       if ((u.role === 'admin' || u.role === 'owner') && me.role !== 'owner') bad(403, 'Only the owner can reset an admin');
-      if (u.role === 'admin' || u.role === 'owner') { const pw = crypto.randomBytes(u.role === 'owner' ? 12 : 6).toString('base64url'); run('update users set passHash=? where id=?', hashPw(pw), u.id); log(me, 'reset-password', 'users', u.id, u.name); return send(res, 200, { password: pw }); }
+      if (u.role === 'admin' || u.role === 'owner' || u.role === 'manager') { const pw = crypto.randomBytes(u.role === 'owner' ? 12 : 6).toString('base64url'); run('update users set passHash=? where id=?', hashPw(pw), u.id); log(me, 'reset-password', 'users', u.id, u.name); return send(res, 200, { password: pw }); }
       let pin; do { pin = String(100000 + crypto.randomInt(900000)); } while (one('select 1 x from users where pinKey=?', pinKeyOf(pin)));
       run('update users set pinKey=? where id=?', pinKeyOf(pin), u.id); log(me, 'reset-pin', 'users', u.id, u.name); return send(res, 200, { pin });
     }
