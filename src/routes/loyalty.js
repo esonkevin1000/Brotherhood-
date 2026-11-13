@@ -32,6 +32,7 @@ export function createLoyalty({ uid, all, one, run, get, nowISO, log, mvpOn, isA
   const staffOnly = me => { if (!(isAdmin(me) || ['manager', 'cashier'].includes(me.role))) bad(403, 'Not allowed for your role'); };
   function view(cid) {
     const c = get('customers', cid), bal = balanceOf(cid), earned = earnedOf(cid);
+    markVip(cid);
     return { customer: c ? { id: c.id, name: c.name } : { id: cid, name: '' }, balance: bal, earned, vip: !!vipSince(cid), vipSince: vipSince(cid), vipAt: VIP_AT,
       blocked: bal < 0, rewards: REWARDS.map(r => ({ ...r, reachable: bal >= r.points })),
       history: all('select * from loyalty_ledger where customerId=? order by createdAt desc, rowid desc limit 200', cid).map(e => ({ id: e.id, kind: e.kind, delta: e.delta, reward: e.reward || '', reason: e.reason || '', by: e.byName || '', at: e.createdAt })) };
@@ -42,6 +43,21 @@ export function createLoyalty({ uid, all, one, run, get, nowISO, log, mvpOn, isA
     if (cm && method === 'GET' && !cm[2]) {   // the front desk, managers and the owner, in any branch (D-19)
       staffOnly(me); if (!get('customers', cm[1])) bad(404, 'Customer not found');
       return send(res, 200, view(cm[1]));
+    }
+    if (cm && method === 'POST' && cm[2]) {   // T36: staff redeem a reward for the customer, with a balance check; counted once per request key
+      staffOnly(me);
+      const b = await readBody(req), c = get('customers', cm[1]); if (!c) bad(404, 'Customer not found');
+      const r = REWARDS.find(x => x.key === b.reward || x.points === Number(b.reward)); if (!r) bad(400, 'Choose a reward');
+      const key = String(b.requestKey || ''); if (!/^[\w-]{8,64}$/.test(key)) bad(400, 'Missing request key');
+      // from here on there is no await, so the balance check and the insert run as one step
+      const same = one('select * from loyalty_ledger where requestKey=?', key);
+      if (same) { if (same.customerId !== c.id) bad(409, 'That request key was already used'); return send(res, 200, { ok: true, again: true, balance: balanceOf(c.id) }); }
+      const bal = balanceOf(c.id);
+      if (bal < 0) bad(409, `This customer's points are below zero (${bal}) after a cancelled visit. No reward until the balance is positive again.`);
+      if (bal < r.points) bad(409, `Not enough points: ${bal} of ${r.points}.`);
+      add({ customerId: c.id, kind: 'redeem', delta: -r.points, reward: r.name, branchId: me.branchId || (me.branchIds || [])[0] || '', byId: me.id, byName: me.name, reason: `${r.name} (${r.points} points)`, requestKey: key });
+      log(me, 'loyalty-redeemed', 'customers', c.id, `${c.name}: ${r.name} (${r.points} points)`);
+      return send(res, 201, { ok: true, reward: r.name, balance: balanceOf(c.id) });
     }
     return NEXT;
   }

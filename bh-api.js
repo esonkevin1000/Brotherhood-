@@ -4,7 +4,7 @@ import { cutoffOf, durText } from './src/lib/policy.js';
 import { loadVapid, sendPush, knownPushHost } from './bh-push.js';
 export function mountBH(c) {
   const { bookingMessage, rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor,
-    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName, getSetting, setSetting, queueEmail, emailReady, baseUrl, esc: escHtml, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
+    whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName, getSetting, setSetting, queueEmail, emailReady, baseUrl, esc: escHtml, addCol, toMin, scoreData, serviceNet, parseOrder, dOf, loyaltyView } = c;
 
   // ---------- schema ----------
   db.exec(`
@@ -319,7 +319,8 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     if (sub === '/loyalty' && method === 'GET') {   // visits and tier come from the POS loyalty tiers (1 paid visit = 1 point) for the customer record linked to this account's bookings
       const u = needUser(req), cid = u.customerId || one("select customerId c from bookings where userId=? and customerId<>'' order by createdAt desc", u.id)?.c || '';
       const visits = cid ? one("select count(*) n from orders where customerId=? and status='paid'", cid).n : 0;
-      const rs = rewardState(u); return send(res, 200, { linked: !!cid, visits, tier: tierOf(visits), next: nextTier(visits), balance: rs.balance, rewards: rs.rewards, vouchers: rs.vouchers });
+      // T36: the new points ledger (balance, history, reachable rewards, VIP), beside the old visit count while branches switch over
+      const rs = rewardState(u); return send(res, 200, { linked: !!cid, visits, tier: tierOf(visits), next: nextTier(visits), balance: rs.balance, rewards: rs.rewards, vouchers: rs.vouchers, points: cid && loyaltyView ? loyaltyView(cid) : null });
     }
     const rdm = sub.match(/^\/rewards\/(\w+)\/redeem$/);
     if (rdm && method === 'POST') {

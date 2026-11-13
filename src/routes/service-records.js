@@ -8,7 +8,7 @@ export function createServiceRoutes({ syncRecord, isAppt, dayRows, queueEstimate
       const PAY_METHODS = ['Cash', 'GCash', 'Maya', 'Card', 'Bank transfer', 'Other'];
       const svcView = row => {
         const x = parseOrder(row), c = x.customerId ? get('customers', x.customerId) : null;
-        return { id: x.id, no: x.no, status: x.status === 'paid' ? 'done' : x.status === 'void' ? 'cancelled' : x.status, customerName: x.customerName, phone: c?.phone || '',
+        return { id: x.id, no: x.no, customerId: x.customerId || '', status: x.status === 'paid' ? 'done' : x.status === 'void' ? 'cancelled' : x.status, customerName: x.customerName, phone: c?.phone || '',
           barberId: x.barberId || '', barberName: x.barberId ? get('staff', x.barberId)?.name || '' : '', items: x.items.map(i => ({ itemId: i.itemId, name: i.name, type: i.type, price: i.price, qty: i.qty, needId: !!i.needId })),
           subtotal: x.subtotal, discountId: x.discountId || '', discountName: x.discountName || '', discountAmt: x.discountAmt || 0, total: x.total, method: x.tenders[0]?.method || '', invoiceNo: x.invoiceNo || '',
           hasId: !!x.idPhoto, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '', plan: orderPlan(row), source: row.source || '', payStatus: row.payStatus || '', verifiedBy: row.verifiedBy || '' };
