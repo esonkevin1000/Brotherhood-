@@ -7,7 +7,7 @@ const KINDS = ['amount', 'method', 'barber', 'void'];
 const PAY_METHODS = ['Cash', 'GCash', 'Maya', 'Card', 'Bank transfer', 'Other'];
 const peso = n => '₱' + Number(n || 0).toLocaleString('en-PH');
 
-export function createRecordRoutes({ syncCommission, uid, all, one, run, get, nowISO, log, orderEvent, isAdmin, inScope, branchOrAll, dayLocked, jp, r2, bad, send, readBody }) {
+export function createRecordRoutes({ syncRecord, uid, all, one, run, get, nowISO, log, orderEvent, isAdmin, inScope, branchOrAll, dayLocked, jp, r2, bad, send, readBody }) {
   const view = a => ({ id: a.id, orderId: a.orderId, kind: a.kind, before: jp(a.before), after: jp(a.after), reason: a.reason, status: a.status, requestedBy: a.requestedBy, createdAt: a.createdAt, decidedBy: a.decidedBy || '', decidedAt: a.decidedAt || '', note: a.note || '' });
   const methodOf = o => (jp(o.tenders)[0] || {}).method || '';
   const staffName = id => get('staff', id)?.name || '';
@@ -37,7 +37,7 @@ export function createRecordRoutes({ syncCommission, uid, all, one, run, get, no
     }
     const what = describe(a);
     orderEvent(o.id, 'completed', a.kind === 'void' ? 'cancelled' : 'completed', me.name, `${what}: ${a.reason}`);
-    syncCommission(o.id, `${what}: ${a.reason}`, a.id);   // T33: a correcting commission entry when the commission changes
+    syncRecord(o.id, `${what}: ${a.reason}`, a.id);   // T33: a correcting commission entry when the commission changes
     log(me, 'record-corrected', 'orders', o.id, `#${o.no} ${what} (${a.reason}); asked by ${a.requestedBy}`);
   }
   // the whole correction, or none of it

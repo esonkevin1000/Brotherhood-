@@ -1,7 +1,7 @@
 // Day board for the Brotherhood app (takes over from the POS): walk-ins, start, finish, cancel, ID photos.
 // Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
-export function createServiceRoutes({ syncCommission, isAppt, dayRows, queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
+export function createServiceRoutes({ syncRecord, isAppt, dayRows, queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
   return async function handleServiceRecords({ req, res, p, method, q, me }) {
       if (!['owner', 'admin', 'manager', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
       const myStaffId = me.role === 'barber' ? (get('users', me.id)?.staffId || '') : '';
@@ -125,7 +125,7 @@ export function createServiceRoutes({ syncCommission, isAppt, dayRows, queueEsti
           JSON.stringify(items), barberId, did, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify([{ method: mth, amount: tt.total }]), me.id, nowISO(), todayStr(), inv, isAppt(o.id) ? 'appointment' : 'walkin', o.id);   // T28: source, and the payment as reported by the front desk (D-15)
         if (o.status === 'waiting') orderEvent(o.id, before, 'in_service', me.name, 'started and finished together');
         orderEvent(o.id, 'in_service', 'completed', me.name, `${mth}`);
-        syncCommission(o.id, 'visit finished');   // T33
+        syncRecord(o.id, 'visit finished');   // T33
         promoteNext(o.branchId, o.chairId);
         log(me, 'visit-done', 'orders', o.id, `#${o.no} ₱${tt.total} ${mth}`);
         return send(res, 200, svcView(get('orders', o.id)));

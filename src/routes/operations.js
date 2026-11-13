@@ -5,7 +5,7 @@ import os from 'node:os';
 import { NEXT } from '../lib/http.js';
 import { INTERNAL_LABEL } from '../lib/reports.js';
 
-export function createOperationsRoutes({ syncCommission, isAppt, walkinGuard, orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
+export function createOperationsRoutes({ syncRecord, isAppt, walkinGuard, orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, url, p, method, q, me, admin, adminOnly, manageIn }) {
     // ----- daily sales remittance (separate from expenses) -----
@@ -278,7 +278,7 @@ export function createOperationsRoutes({ syncCommission, isAppt, walkinGuard, or
         run("update orders set status='paid', si=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId=?, paidAt=?, date=?, source=?, payStatus='reported' where id=?",
           si, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify(tenders), me.id, shift.id, nowISO(), todayStr(), isAppt(o.id) ? 'appointment' : 'walkin', o.id);
         orderEvent(o.id, orderPlan(cur), 'completed', me.name, 'paid at the POS');
-        syncCommission(o.id, 'paid at the POS');   // T33
+        syncRecord(o.id, 'paid at the POS');   // T33
         promoteNext(o.branchId, o.chairId);
         log(me, 'sale', 'orders', o.id, `SI-${si} ₱${tt.total}`);
         return send(res, 200, { ...parseOrder(get('orders', o.id)), change });
@@ -296,7 +296,7 @@ export function createOperationsRoutes({ syncCommission, isAppt, walkinGuard, or
         run("update orders set status='void', voidReason=? where id=?", String(b.reason || '').slice(0, 200), o.id);
         orderEvent(o.id, orderPlan(cur), 'cancelled', me.name, String(b.reason || '').slice(0, 200));
         if (o.status === 'paid') {
-          syncCommission(o.id, 'voided at the POS: ' + String(b.reason || '').slice(0, 150));   // T33
+          syncRecord(o.id, 'voided at the POS: ' + String(b.reason || '').slice(0, 150));   // T33
           run("insert into record_adjustments(id,orderId,branchId,kind,before,after,reason,status,requestedById,requestedBy,createdAt,decidedBy,decidedAt) values(?,?,?,'void',?,?,?,'approved',?,?,?,?,?)", uid() + uid(), o.id, o.branchId, JSON.stringify({ status: 'paid' }), JSON.stringify({ status: 'void' }), String(b.reason || '').slice(0, 300), me.id, me.name, nowISO(), me.name, nowISO());
           run("update record_adjustments set status='rejected', decidedBy=?, decidedAt=?, note='The record was voided.' where orderId=? and status='requested'", me.name, nowISO(), o.id);
         }
