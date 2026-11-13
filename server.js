@@ -388,6 +388,27 @@ const serviceNet = o => { const svc = sum(o.items.filter(i => i.type === 'servic
 // barber commission on a ticket = their % of the services + a fixed amount for every product they sold (saved on the ticket line; older tickets use the product's current amount)
 const productComm = o => sum(o.items.filter(i => i.type === 'product'), i => (i.comm !== undefined ? i.comm : (get('items', i.itemId)?.commission || 0)) * i.qty);
 const commissionOf = (o, pct) => r2(serviceNet(o) * (pct || 0) / 100 + productComm(o));
+// T33 (E1, D-10): commission entries linked to the service record. Works out what each barber should have from this record now, and
+// adds a row for any difference: the first row is 'earn', later ones 'adjust'. Rows are never changed, so the history stays.
+// The barber keeps the % he had when the visit was finished; a barber who takes over later is paid at his own current %.
+// Runs synchronously (no await), so two requests cannot interleave inside it.
+function syncCommission(orderId, reason, adjustmentId = '') {
+  const raw = get('orders', orderId); if (!raw) return;
+  const o = parseOrder(raw), rows = all('select * from commission_entries where orderId=? order by createdAt, rowid', orderId);
+  const have = new Map(); for (const r of rows) have.set(r.staffId, r2((have.get(r.staffId) || 0) + r.amount));
+  const want = new Map();
+  if (o.status === 'paid' && o.barberId) {
+    const first = rows.find(r => r.staffId === o.barberId), pct = first ? first.pct : (get('staff', o.barberId)?.pct || 0);
+    want.set(o.barberId, { pct, base: r2(serviceNet(o)), prod: r2(productComm(o)), amount: commissionOf(o, pct), from: first ? 'kept from the first entry' : 'barber %' });
+  }
+  for (const sid of new Set([...have.keys(), ...want.keys()])) {
+    const w = want.get(sid), diff = r2((w?.amount || 0) - (have.get(sid) || 0)), kind = rows.length ? 'adjust' : 'earn';
+    if (!diff && !(kind === 'earn' && w)) continue;   // the first entry is written even when it is ₱0
+    run('insert into commission_entries(id,orderId,staffId,branchId,date,orderDate,kind,base,pct,productComm,amount,rule,reason,adjustmentId,createdAt) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      uid() + uid(), o.id, sid, o.branchId, todayStr(), o.date, kind, w ? w.base : 0, w ? w.pct : 0, w ? w.prod : 0, diff,
+      JSON.stringify(w ? { pct: w.pct, from: w.from, productComm: w.prod } : { removed: true }), String(reason || '').slice(0, 200), adjustmentId, nowISO());
+  }
+}
 
 function onDuty(staffId, date) { return one("select * from attendance where staffId=? and date=? and timeOut is null and ifnull(status,'present')='present'", staffId, date); }
 // roster state for one barber today: none | present | late | break | off | out
@@ -1131,8 +1152,8 @@ async function handleIn(req, res) {
 
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
-const SERVICE_RECORDS = createServiceRoutes({ isAppt, dayRows, queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
-const RECORDS = createRecordRoutes({ uid, all, one, run, get, nowISO, log, orderEvent, isAdmin, inScope, branchOrAll, dayLocked, jp, r2, bad, send, readBody });
+const SERVICE_RECORDS = createServiceRoutes({ syncCommission, isAppt, dayRows, queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
+const RECORDS = createRecordRoutes({ syncCommission, uid, all, one, run, get, nowISO, log, orderEvent, isAdmin, inScope, branchOrAll, dayLocked, jp, r2, bad, send, readBody });
 const SCHEDULES = createScheduleRoutes({ all, run, get, log, tx, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
 const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, savedOf, setPolicy, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
@@ -1160,7 +1181,7 @@ const STAFF_TOOLS = createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, 
 const BACK_OFFICE_DATA = createBackOfficeDataRoutes({ nowISO, one, run, get, insert, update, strip, log, isBranchUser, isManager, inScope, branchOrAll, newPin, REFS, SOFT, CRUD, checkUser, setPw, bad, send, readBody });
 const BH = mountBH({ bookingMessage, rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => mailReady(), baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 // created after BH because the bookings routes notify app customers through it
-const OPERATIONS = createOperationsRoutes({ isAppt, walkinGuard, orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
+const OPERATIONS = createOperationsRoutes({ syncCommission, isAppt, walkinGuard, orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
 
 { const ran = migrate(mainDb); if (ran.length) console.log('migrations applied:', ran.join(', ')); }   // numbered files in src/db/migrations, once per database
 schemaReady = true; ORG_DBS.clear();
