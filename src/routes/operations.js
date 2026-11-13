@@ -80,6 +80,11 @@ export function createOperationsRoutes({ rescheduleBooking, db, uid, dOf, todayS
       if (method === 'PUT' && !bkm[2]) {
         const b = await readBody(req); if (!['cancelled', 'noshow'].includes(b.status)) bad(400, 'Bad status');
         if (cur.status !== 'booked' && !(cur.status === 'pending' && b.status === 'cancelled')) bad(409, 'Booking is already ' + cur.status);   // staff may also release a guest's hold (T16)
+        if (b.status === 'noshow') {   // T19 (D-7): only after the start time plus the late grace the booking was made under
+          const grace = (() => { try { const g = JSON.parse(cur.policy || 'null')?.noshowGraceMins; return Number.isFinite(g) ? g : 0; } catch { return 0; } })();
+          const from = new Date(new Date(`${cur.date}T${cur.time}:00`).getTime() + grace * 60e3);
+          if (Date.now() < from.getTime()) bad(409, `This customer can be marked as a no-show from ${String(from.getHours()).padStart(2, '0')}:${String(from.getMinutes()).padStart(2, '0')}${from.toDateString() === new Date().toDateString() ? '' : ' on ' + cur.date} (start time${grace ? ` + ${grace}-minute grace` : ''}).`);
+        }
         if (cur.status === 'pending') run('update email_codes set guest=null, codeHash=null where bookingId=?', cur.id);
         run('update bookings set status=? where id=?', b.status, cur.id); bookingEvent(cur.id, cur.status, b.status, me.name, b.reason); BH.freed(cur.branchId, cur.staffId, cur.date); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
       }
