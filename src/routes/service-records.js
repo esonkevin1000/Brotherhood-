@@ -28,6 +28,7 @@ export function createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowI
           branch: { id: bid, name: get('branches', bid)?.name || '' }, branches: isBranchUser(me) ? [] : all('select id,name from branches order by rowid').filter(x => inScope(me, x.id)), date: t, role: me.role, myStaffId, locked: !!dayLocked(bid, t), attPhoto: getSetting('attPhoto') !== '0', modules: isAdmin(me) ? MODULES : modulesFor(me.role),
           menu: all('select id,name,type,price,mins,needId from items where active=1 order by type desc, price').map(i => ({ ...i, needId: !!i.needId })),
           discounts: all('select id,name,kind,value from discounts where active=1 order by name'), methods: PAY_METHODS, staff, tickets, bookings,
+          closing: (() => { const br = get('branches', bid), [ch, cm] = String(br?.closeTime || '21:00').split(':').map(Number), n = new Date(), waiting = tickets.filter(x => x.status === 'waiting').length; return { closeTime: br?.closeTime || '21:00', waiting, needed: waiting > 0 && n.getHours() * 60 + n.getMinutes() >= ch * 60 + (cm || 0) }; })(),   // T25
           totals: { waiting: tickets.filter(x => x.status === 'waiting').length, inChair: tickets.filter(x => x.status === 'in_chair').length, done: done.length, earned: r2(sum(done, x => x.total)) }
         });
       }
@@ -54,12 +55,27 @@ export function createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowI
         log(me, 'walk-in', 'orders', o.id, `#${o.no} ${name}`);
         return send(res, 201, svcView(get('orders', o.id)));
       }
+      // T25: at closing time, anyone still waiting is marked left or carried over to tomorrow (front desk, manager, owner)
+      if (p === '/api/svc/close-queue' && method === 'POST') {
+        if (me.role === 'barber') bad(403, 'The front desk closes the queue');
+        const b = await readBody(req), bid = branchScope(me, b.branchId), act = b.action;
+        if (!['left', 'carry'].includes(act)) bad(400, 'Choose: mark as left, or carry over to tomorrow');
+        const pad = n => String(n).padStart(2, '0'), d = new Date(Date.now() + 864e5), tmr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        const pick = Array.isArray(b.ids) ? new Set(b.ids.map(String)) : null;
+        const rows = all("select * from orders where branchId=? and date=? and status='waiting' order by no", bid, todayStr()).filter(o => !pick || pick.has(o.id));
+        for (const o of rows) {
+          if (act === 'left') { run("update orders set status='left' where id=? and status='waiting'", o.id); orderEvent(o.id, orderPlan(o), 'left', me.name, 'end of day'); }
+          else { const no = (one('select max(no) m from orders where branchId=? and date=?', bid, tmr).m || 0) + 1; run('update orders set date=?, no=? where id=?', tmr, no, o.id); orderEvent(o.id, orderPlan(o), orderPlan(o), me.name, `carried over to ${tmr}`); }
+        }
+        log(me, act === 'left' ? 'queue-closed' : 'queue-carried', 'orders', bid, `${rows.length} waiting`);
+        return send(res, 200, act === 'left' ? { ok: true, left: rows.length } : { ok: true, carried: rows.length, date: tmr });
+      }
       const hm = p.match(/^\/api\/svc\/(\w+)\/history$/);
       if (hm && method === 'GET') { const o = ticket(hm[1]); return send(res, 200, all('select at, actor, fromStatus "from", toStatus "to", reason from order_events where orderId=? order by rowid', o.id)); }   // T22
-      const sa = p.match(/^\/api\/svc\/(\w+)\/(start|finish|cancel)$/);
+      const sa = p.match(/^\/api\/svc\/(\w+)\/(start|finish|cancel|left)$/);
       if (sa && method === 'POST') {
         const o = ticket(sa[1]), act = sa[2], b = await readBody(req);
-        if (!['waiting', 'in_chair'].includes(o.status)) bad(409, o.status === 'paid' ? 'This visit is already done.' : 'This visit was cancelled.');
+        if (!['waiting', 'in_chair'].includes(o.status)) bad(409, o.status === 'paid' ? 'This visit is already done.' : o.status === 'left' ? 'This customer already left.' : 'This visit was cancelled.');
         if (me.role === 'barber' && o.barberId && o.barberId !== myStaffId) bad(403, 'This customer is with another barber.');
         const before = orderPlan(o);
         if (act === 'start') {
@@ -69,6 +85,12 @@ export function createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowI
           run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), o.id);
           orderEvent(o.id, before, 'in_service', me.name, 'with ' + a.barber.name);
           log(me, 'visit-start', 'orders', o.id, `#${o.no} ${a.barber.name}`); return send(res, 200, svcView(get('orders', o.id)));
+        }
+        if (act === 'left') {   // T25: a waiting customer walked away: no service record, no loyalty point
+          if (o.status !== 'waiting') bad(409, 'Only a customer who is still waiting can be marked as left');
+          const why = String(b.reason || 'Left without a cut').trim().slice(0, 200) || 'Left without a cut';
+          run("update orders set status='left', voidReason=? where id=?", why, o.id); orderEvent(o.id, before, 'left', me.name, why);
+          log(me, 'visit-left', 'orders', o.id, `#${o.no} ${why}`); return send(res, 200, { ok: true });
         }
         if (act === 'cancel') {
           run("update orders set status='void', voidReason=? where id=?", String(b.reason || 'Cancelled').trim().slice(0, 200) || 'Cancelled', o.id);
