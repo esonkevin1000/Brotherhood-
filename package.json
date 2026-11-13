@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "private": true,
-  "scripts": { "start": "node server.js", "test": "node tests/run.mjs" },
+  "scripts": { "start": "node server.js", "test": "node tests/run.mjs", "restore-check": "node scripts/restore-check.mjs" },
   "engines": {
     "node": ">=24"
   }
