@@ -818,6 +818,14 @@ const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST), LANDING_HOST = normHost(process.env.LANDING_HOST);
 // LANDING_HOST = a separate domain (e.g. brotherhoodbarberph.com) whose home page is the BrotherhoodBarber shop website. The public domain's home page is the Brotherhood product site, and the app is at /member.
 const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/brotherhood', '/member', '/bh.js', '/bh.webmanifest', '/bh-icon-192.png', '/bh-icon-512.png', '/bh-apple-touch.png', '/bh-mark.png', '/logo.png', '/logo-sm.png', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/unsubscribe', '/barbershop', '/privacy', '/terms', '/delete-account', '/signup', '/shop-terms', '/.well-known/assetlinks.json']);
+// Security headers on every answer (T8). The Content-Security-Policy lets pages run only our own script files, the Leaflet map
+// from unpkg, and the few inline scripts we wrote (allowed by their SHA-256 fingerprint, read from the HTML files at start-up).
+// A script slipped into a name, a review or a message cannot run. Styles stay open to inline style attributes (used everywhere).
+const INLINE_SCRIPT_HASHES = (() => { const out = new Set(); for (const f of ['.', 'site'].flatMap(d => { try { return fs.readdirSync(path.join(DIR, d)).filter(x => x.endsWith('.html')).map(x => path.join(d, x)); } catch { return []; } })) { try { for (const m of fs.readFileSync(path.join(DIR, f), 'utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)) out.add("'sha256-" + crypto.createHash('sha256').update(m[1].replace(/\r\n?/g, '\n')).digest('base64') + "'"); } catch { } } return [...out]; })();   // browsers turn CRLF into LF before checking the fingerprint
+const CSP = ["default-src 'self'", "script-src 'self' https://unpkg.com " + INLINE_SCRIPT_HASHES.join(' '), "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
+  "font-src 'self' https://fonts.gstatic.com data:", "img-src 'self' data: blob: https:", "connect-src 'self'", "media-src 'self' blob:", "worker-src 'self'", "manifest-src 'self'",
+  "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'self'"].join('; ');
+const SECURITY_HEADERS = { 'Content-Security-Policy': CSP, 'Strict-Transport-Security': 'max-age=15552000', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin' };
 // App version = hash of every file the apps load. It changes on each deploy, which is what makes phones offer the "Update app" button.
 const APP_VERSION = (() => { const h = crypto.createHash('sha1'); for (const f of Object.values(STATIC).filter((v, i, a) => a.indexOf(v) === i && v !== 'sw.js').sort()) { try { h.update(fs.readFileSync(path.join(DIR, f))); } catch { } } return h.digest('hex').slice(0, 12); })();
 const REFS = {
@@ -1058,6 +1066,7 @@ schemaReady = true; ORG_DBS.clear();
 for (const o of orgList()) { try { orgDb(o.id); } catch { } }   // partner shops are migrated at startup too, not on their first request
 http.createServer(async (req, res) => {
   noteGzip(req, res);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   try { await handle(req, res); }
   catch (e) { if (!res.headersSent) send(res, e instanceof HttpError ? e.code : 400, { error: e.message }); }
 }).listen(PORT, () => console.log(`${SHOP} running → http://localhost:${PORT}`));

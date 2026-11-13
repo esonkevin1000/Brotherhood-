@@ -483,7 +483,7 @@ async function openClient(key) {
     catch (x) { o.querySelector('#cerr').innerHTML = `<div class="err">${esc(x.message)}</div>`; btn.disabled = false; }
   };
 }
-const linkCard = sel => { const url = `${location.origin}/b/${sel.id}`; return `<div class="sec-h"><h2>My booking link</h2></div><div class="card"><div class="sm mute" style="margin-bottom:8px">Put this in your Facebook, Instagram and TikTok bio, or send it to your regulars. It opens your profile so they can book you.</div><div class="row" style="gap:8px"><input readonly value="${esc(url)}" id="blink" onclick="this.select()" style="flex:1;min-width:0"><button class="btn sm" data-copylink="${esc(url)}">Copy</button></div>${navigator.share ? `<button class="btn sec sm block" style="margin-top:8px" data-sharelink="${esc(url)}" data-sname="${esc(sel.name)}">Share…</button>` : ''}</div>`; };
+const linkCard = sel => { const url = `${location.origin}/b/${sel.id}`; return `<div class="sec-h"><h2>My booking link</h2></div><div class="card"><div class="sm mute" style="margin-bottom:8px">Put this in your Facebook, Instagram and TikTok bio, or send it to your regulars. It opens your profile so they can book you.</div><div class="row" style="gap:8px"><input readonly value="${esc(url)}" id="blink" data-selall style="flex:1;min-width:0"><button class="btn sm" data-copylink="${esc(url)}">Copy</button></div>${navigator.share ? `<button class="btn sec sm block" style="margin-top:8px" data-sharelink="${esc(url)}" data-sname="${esc(sel.name)}">Share…</button>` : ''}</div>`; };
 // ----- member loyalty card (points and tier come from the POS) -----
 const TIER_MIN = { Member: 0, Bronze: 5, Silver: 16, Gold: 26, VIP: 51 };
 function loyaltyCard() {
@@ -1767,3 +1767,6 @@ app.addEventListener('submit', async e => {
   } catch (x) { S.proErr = x.message; }
   S.devBusy = false; render();
 });
+
+// the booking link box selects all its text when tapped (in place of an inline onclick, which the security policy blocks)
+document.addEventListener('focusin', e => { if (e.target.matches?.('[data-selall]')) e.target.select(); });
