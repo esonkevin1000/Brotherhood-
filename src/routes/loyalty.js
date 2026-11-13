@@ -44,6 +44,15 @@ export function createLoyalty({ uid, all, one, run, get, nowISO, log, mvpOn, isA
       staffOnly(me); if (!get('customers', cm[1])) bad(404, 'Customer not found');
       return send(res, 200, view(cm[1]));
     }
+    if (p === '/api/loyalty/warnings' && method === 'GET') {   // T37: visits voided after the customer redeemed; for managers and the owner
+      if (!isAdmin(me) && me.role !== 'manager') bad(403, 'Not allowed for your role');
+      const br = q.branch && q.branch !== 'all' ? String(q.branch) : null;
+      if (br && !inScope(me, br)) bad(403, 'Not your branch');
+      if (!br && !isAdmin(me)) bad(400, 'Choose a branch');
+      const rows = all(`select e.*, c.name customerName, o.no orderNo, o.date orderDate from loyalty_ledger e left join customers c on c.id=e.customerId left join orders o on o.id=e.orderId
+        where e.kind='reverse' and e.warn=1${br ? ' and e.branchId=?' : ''} order by e.createdAt desc limit 100`, ...(br ? [br] : []));
+      return send(res, 200, rows.filter(e => inScope(me, e.branchId)).map(e => ({ id: e.id, customerId: e.customerId, customerName: e.customerName || '', orderNo: e.orderNo, orderDate: e.orderDate, at: e.createdAt, reason: e.reason, balance: balanceOf(e.customerId) })));
+    }
     if (cm && method === 'POST' && cm[2]) {   // T36: staff redeem a reward for the customer, with a balance check; counted once per request key
       staffOnly(me);
       const b = await readBody(req), c = get('customers', cm[1]); if (!c) bad(404, 'Customer not found');

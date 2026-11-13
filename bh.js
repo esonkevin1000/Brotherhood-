@@ -1340,6 +1340,7 @@ async function sapi(path, opt = {}) {
 async function loadToday(quiet) {
   try { S.td = await sapi('/svc/today' + (S.tdBranch ? '?branch=' + encodeURIComponent(S.tdBranch) : '')); S.tdErr = '';
     S.tdAdj = ['owner', 'admin', 'manager'].includes(S.td.role) ? await sapi(`/adjustments?status=requested&branch=${encodeURIComponent(S.td.branch.id)}`).catch(() => []) : [];   // T29
+    S.tdWarn = ['owner', 'admin', 'manager'].includes(S.td.role) ? await sapi(`/loyalty/warnings?branch=${encodeURIComponent(S.td.branch.id)}`).catch(() => []) : [];   // T37
     S.tdEarn = S.td.role === 'barber' ? await sapi('/earnings').catch(() => null) : ['owner', 'admin', 'manager'].includes(S.td.role) ? await sapi(`/earnings/branch?branch=${encodeURIComponent(S.td.branch.id)}`).catch(() => null) : null;   // T34
   }
   catch (e) { S.tdErr = e.message; if (!quiet) toast(e.message); }
@@ -1367,8 +1368,13 @@ function vToday() {
   <div class="sec-h"><h2>In the chair</h2><span class="mute sm">${chair.length}</span></div><div class="list">${chair.map(x => tdCard(x, `${esc(x.barberName)} · started ${minsAgo(x.startedAt || x.createdAt)} ago`, `<button class="btn sm sp" data-tfin="${x.id}">${ic('check')} Done</button><button class="btn sec sm" data-tcan="${x.id}">Cancel</button>`)).join('') || empty('Nobody in the chair right now.')}</div>
   <div class="sec-h"><h2>Waiting</h2><span class="mute sm">${waiting.length}</span></div><div class="list">${waiting.map(x => tdCard(x, `${x.plan === 'checked_in' ? 'Booked · checked in · ' : ''}${x.barberName ? 'For ' + esc(x.barberName) : 'Any barber'} · waiting ${minsAgo(x.createdAt)}${x.estimate ? ` · starts about ${t12(x.estimate.start)}${x.barberName ? '' : ' with ' + esc(x.estimate.barber)} <span class="tag">estimate</span>` : ''}`, `<button class="btn sm sp" data-tstart="${x.id}">${me ? 'Start with me' : 'Start'}</button><button class="btn sec sm" data-tfin="${x.id}">Done</button>${me ? '' : `<button class="btn sec sm" data-tleft="${x.id}">Left</button>`}<button class="btn sec sm" data-tcan="${x.id}">Cancel</button>`)).join('') || empty('No one is waiting.')}</div>
   <div class="sec-h"><h2>Done today</h2><span class="mute sm">${done.length} · ${peso(d.totals.earned)}</span></div><div class="list">${done.slice().reverse().map(x => tdCard(x, `${esc(x.barberName)} · ${esc(x.method)}${x.discountName ? ' · ' + esc(x.discountName) : ''}${x.invoiceNo ? ' · BIR invoice ' + esc(x.invoiceNo) : ''}${x.payStatus === 'verified' ? ' <span class="tag ok">verified</span>' : ''}`, me ? '' : `${x.customerId ? `<button class="btn sec sm" data-tpts="${x.customerId}">Points</button>` : ''}<button class="btn sec sm" data-tadj="${x.id}">Correct</button>${x.payStatus !== 'verified' && d.role !== 'cashier' ? `<button class="btn sec sm" data-tverify="${x.id}">Verify payment</button>` : ''}`)).join('') || empty('No finished services yet today.')}</div>
-  ${earnSection(d)}
+  ${warnSection()}${earnSection(d)}
   <p class="sm mute" style="margin:16px 2px 0">${NOT_RECEIPT}</p></div>`;
+}
+// T37: visits voided after the customer had redeemed points (D-19: the reward is not taken back; the manager is told)
+function warnSection() {
+  const w = S.tdWarn || []; if (!w.length) return '';
+  return `<div class="sec-h"><h2>Points warnings</h2><span class="mute sm">${w.length}</span></div><div class="list">${w.slice(0, 10).map(x => `<div class="card" style="padding:10px 12px"><div class="row"><b>${esc(x.customerName)}</b><span class="sp"></span><span class="sm ${x.balance < 0 ? '' : 'mute'}" style="${x.balance < 0 ? 'color:var(--bad, #e5484d)' : ''}">${x.balance} points</span></div><div class="sm mute">Visit #${esc(String(x.orderNo ?? ''))} (${esc(x.orderDate || '')}) was voided after a reward was given. The reward is not taken back; rewards stay blocked while the balance is below zero.</div></div>`).join('')}</div>`;
 }
 // T34: a barber's own commission entries (today, this week, history); managers and the owner see each barber's totals
 function earnSection(d) {
