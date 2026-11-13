@@ -72,7 +72,10 @@ try {
   r = await call('PUT', '/api/bookings/' + b11.id, { status: 'cancelled', reason: 'Customer called' }, desk);
   h = (await call('GET', `/api/bookings/${b11.id}/history`, null, desk)).j;
   ok('cancelling adds a history row with the reason', r.s === 200 && h.length === 2 && h[1].toStatus === 'cancelled' && h[1].reason === 'Customer called', h);
-  const b12 = (await list()).find(b => b.time === '12:00'); await call('PUT', '/api/bookings/' + b12.id, { status: 'noshow' }, owner);
+  const b12 = (await list()).find(b => b.time === '12:00');
+  // T19: a no-show can be marked only after the start time plus the grace, so this booking is moved into the past first
+  { const db0 = new DatabaseSync(S.dbFile), t = new Date(Date.now() - 20 * 60e3), p = n => String(n).padStart(2, '0'); db0.prepare('update bookings set date=?, time=? where id=?').run(`${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, `${p(t.getHours())}:${p(t.getMinutes())}`, b12.id); db0.close(); }
+  await call('PUT', '/api/bookings/' + b12.id, { status: 'noshow' }, owner);
   h = (await call('GET', `/api/bookings/${b12.id}/history`, null, owner)).j; ok('no-show is in the history', h[1]?.toStatus === 'noshow', h);
   r = await call('GET', `/api/bookings/${mine.id}/history`); ok('history needs a staff login', r.s === 401, r.s);
   const other = st.branches[1]; await call('POST', '/api/users', { name: 'Desk2', username: 'desk2', pin: '222222', role: 'cashier', branchId: other.id }, owner);
