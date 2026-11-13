@@ -2,7 +2,7 @@
 // sending any email or push message. scripts/restore-check.mjs does it; this test runs it on a backup made here.
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+import fs from 'node:fs'; import { DatabaseSync } from 'node:sqlite'; import os from 'node:os'; import path from 'node:path';
 import { startServer, checker, ROOT } from './helper.mjs';
 const { ok, done, fail } = checker();
 const sha = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
@@ -19,7 +19,10 @@ try {
   await S.stop();
   ok('the backup downloads', r.status === 200 && fs.statSync(file).size > 10000);
 
+  // a phone subscribed to push messages, as on the live server
+  { const d = new DatabaseSync(file); d.exec("insert or replace into settings(k,v) values('vapidKeys','{}')"); d.exec("insert into bh_push(id,userId,endpoint,p256dh,auth,createdAt) values('p1','u1','https://push.example/abc','k','a','2026-11-13')"); d.close(); }
   const before = sha(file), out = check(file), text = out.stdout + out.stderr;
+  ok('push messages are switched off on the copy', /push\s+switched off/i.test(text), text);
   ok('the restore check passes on a good backup', out.status === 0 && /RESTORE CHECK PASSED/.test(text), text);
   ok('it reports what is inside (branches, users, customers, visits, bookings)', /branches\s*\d+/i.test(text) && /users\s*\d+/i.test(text) && /customers\s*\d+/i.test(text) && /visits\s*\d+/i.test(text) && /bookings\s*\d+/i.test(text), text);
   ok('it confirms every migration ran on the copy', /migrations\s*\d+ of \d+/i.test(text) && !/missing migration/i.test(text), text);

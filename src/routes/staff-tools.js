@@ -69,7 +69,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     }
     const exm = p.match(/^\/api\/expense-claims\/(\w+)\/review$/);
     if (exm && method === 'PUT') {
-      const x = get('expense_claims', exm[1]); if (!x) bad(404, 'Not found'); manageIn(x.branchId);
+      const x = get('expense_claims', exm[1]); if (!x) bad(404, 'Not found'); manageIn(x.branchId, x);
       const b = await readBody(req), act = { approve: 'APPROVED', reject: 'REJECTED' }[b.action], note = String(b.note || '').trim().slice(0, 300);
       if (!act) bad(400, 'Choose approve or reject'); if (act === 'REJECTED' && !note) bad(400, 'A note is required to reject an expense');
       const hist = jp(x.history); hist.push({ at: nowISO(), by: me.name, action: act, note });
@@ -102,7 +102,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     }
     const avm = p.match(/^\/api\/advances\/(\w+)\/(approve|reject|release|cancel)$/);
     if (avm && method === 'PUT') {
-      const a = get('advances', avm[1]); if (!a) bad(404, 'Not found'); manageIn(a.branchId); const b = await readBody(req), note = String(b.note || '').trim().slice(0, 300), hist = jp(a.history), act = avm[2];
+      const a = get('advances', avm[1]); if (!a) bad(404, 'Not found'); manageIn(a.branchId, a); const b = await readBody(req), note = String(b.note || '').trim().slice(0, 300), hist = jp(a.history), act = avm[2];
       const push = (action, n) => hist.push({ at: nowISO(), by: me.name, action, note: n });
       if (act === 'cancel') { if (!['REQUESTED', 'APPROVED'].includes(a.status)) bad(409, 'Only requests that are not yet released can be cancelled'); push('CANCELLED', note); run("update advances set status='CANCELLED', history=? where id=?", JSON.stringify(hist), a.id); }
       else if (act === 'reject') { if (a.status !== 'REQUESTED') bad(409, 'This request was already handled'); if (!note) bad(400, 'A note is required to reject a request'); push('REJECTED', note); run("update advances set status='REJECTED', reviewedBy=?, reviewedAt=?, reviewNote=?, history=? where id=?", me.name, nowISO(), note, JSON.stringify(hist), a.id); }
@@ -278,7 +278,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     }
     const lvm = p.match(/^\/api\/leaves\/(\w+)\/review$/);
     if (lvm && method === 'PUT') {
-      const l = get('leaves', lvm[1]); if (!l) bad(404, 'Not found'); manageIn(l.branchId); const b = await readBody(req), act = { approve: 'APPROVED', reject: 'REJECTED' }[b.action], note = String(b.note || '').trim().slice(0, 300);
+      const l = get('leaves', lvm[1]); if (!l) bad(404, 'Not found'); manageIn(l.branchId, l); const b = await readBody(req), act = { approve: 'APPROVED', reject: 'REJECTED' }[b.action], note = String(b.note || '').trim().slice(0, 300);
       if (!act) bad(400, 'Choose approve or reject'); if (act === 'REJECTED' && !note) bad(400, 'A note is required to reject leave');
       run('update leaves set status=?, reviewedBy=?, reviewedAt=?, reviewNote=? where id=?', act, me.name, nowISO(), note, l.id); log(me, 'leave-' + b.action, 'leaves', l.id, note); return send(res, 200, leaveView(get('leaves', l.id)));
     }
@@ -287,13 +287,13 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     const ADJ_KINDS = ['Bonus', 'Incentive', 'Other earning'];
     if (p === '/api/adjustments' && method === 'GET') { if (!isManager(me)) adminOnly(); const rows = all(`select a.*, s.name staffName from staff_adjustments a join staff s on s.id=a.staffId${q.staffId ? ' where a.staffId=?' : ''} order by a.date desc, a.createdAt desc limit 300`, ...(q.staffId ? [String(q.staffId)] : [])).filter(a => inScope(me, a.branchId)); return send(res, 200, { rows }); }
     if (p === '/api/adjustments' && method === 'POST') {
-      const b = await readBody(req), s = get('staff', String(b.staffId || '')); if (!s) bad(400, 'Choose the employee'); manageIn(s.branchId);
+      const b = await readBody(req), s = get('staff', String(b.staffId || '')); if (!s) bad(400, 'Choose the employee'); manageIn(s.branchId, { staffId: s.id });
       const kind = ADJ_KINDS.includes(b.kind) ? b.kind : bad(400, 'Choose Bonus, Incentive or Other earning'), amount = r2(b.amount); if (!(amount > 0)) bad(400, 'Enter the amount');
       const note = String(b.note || '').trim().slice(0, 200); if (note.length < 3) bad(400, 'Enter a short note (what is it for?)'); const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : todayStr(), id = uid();
       run('insert into staff_adjustments(id,staffId,branchId,date,kind,amount,note,byName,createdAt) values(?,?,?,?,?,?,?,?,?)', id, s.id, s.branchId, date, kind, amount, note, me.name, nowISO()); log(me, 'adjustment', 'staff_adjustments', id, `${s.name} ${kind} ${amount}`); return send(res, 201, get('staff_adjustments', id));
     }
     const adm = p.match(/^\/api\/adjustments\/(\w+)$/);
-    if (adm && method === 'DELETE') { const a = get('staff_adjustments', adm[1]); if (!a) bad(404, 'Not found'); manageIn(a.branchId); if (a.payrollDate) bad(409, 'This was already paid in payroll and cannot be removed'); run('delete from staff_adjustments where id=?', a.id); log(me, 'adjustment-removed', 'staff_adjustments', a.id, `${a.kind} ${a.amount}`); return send(res, 200, { ok: true }); }
+    if (adm && method === 'DELETE') { const a = get('staff_adjustments', adm[1]); if (!a) bad(404, 'Not found'); manageIn(a.branchId, a); if (a.payrollDate) bad(409, 'This was already paid in payroll and cannot be removed'); run('delete from staff_adjustments where id=?', a.id); log(me, 'adjustment-removed', 'staff_adjustments', a.id, `${a.kind} ${a.amount}`); return send(res, 200, { ok: true }); }
     // ----- digital payslips: every payroll payment, with a full breakdown -----
     const payslipRows = (from, to, br, staffId) => {
       const days = all(`select pd.*, s.name staffName from payroll_days pd join staff s on s.id=pd.staffId where date(pd.paidAt,'localtime')>=? and date(pd.paidAt,'localtime')<=?${br ? ' and pd.branchId=?' : ''}${staffId ? ' and pd.staffId=?' : ''} order by pd.paidAt desc, pd.date`, from, to, ...(br ? [br] : []), ...(staffId ? [staffId] : [])), by = new Map();

@@ -600,7 +600,7 @@ document.addEventListener('click', async e => {
   }
   if (act === 'slipprint') {
     const x = ui.slip.rows[+d.i], w = window.open('', '_blank'); if (!w) return alert('Allow pop-ups to print the payslip.');
-    w.document.write('<!doctype html><title>Payslip ' + esc(x.staffName) + '</title><body style="font:14px Arial;max-width:440px;margin:24px auto">' + payslipHtml(x) + '<script>window.print()<\/script>'); w.document.close(); return;
+    w.document.write('<!doctype html><title>Payslip ' + esc(x.staffName) + '</title><body style="font:14px Arial;max-width:440px;margin:24px auto">' + payslipHtml(x)); w.document.close(); w.focus(); w.print(); return;
   }
   if (act === 'addadj') {
     return openModal(`<h2 style="margin-top:0">Bonus, incentive or other earning</h2><p class="mute" style="font-size:13px">It is added to the employee's next payslip.</p>
@@ -627,8 +627,8 @@ document.addEventListener('click', async e => {
     w.document.write(`<!doctype html><title>Payslip</title><body style="font:14px Arial;max-width:420px;margin:24px auto"><div style="text-align:center"><img src="/logo.png?v=b" width="80" style="border-radius:50%"><h2 style="margin:6px 0">BROTHERHOOD BARBER</h2><div>PAYSLIP</div></div><hr>
       <p><b>${esc(x.staffName)}</b><br>${esc(x.branchName)}<br>Paid on ${esc(x.paidAt.slice(0, 10))} · Days: ${esc(x.days[0])}${x.days.length > 1 ? ' to ' + esc(x.days[x.days.length - 1]) : ''} (${x.days.length} day${x.days.length > 1 ? 's' : ''})</p>
       <table style="width:100%;border-collapse:collapse">${row('Commission', peso(x.commission))}${row('Daily allowance top-up', peso(x.topup))}${x.lunch ? row('Free lunch allowance', peso(x.lunch)) : ''}${row('Gross pay', peso(x.gross), 1)}${row('Less: advances taken during the day', '−' + peso(x.advance))}${x.deductionItems.map(d => row('Less: release pay installment ' + d.seq + ' (' + esc(d.type) + ')', '−' + peso(d.amount))).join('')}${row('NET PAY', peso(x.net), 1)}</table>
-      <p style="font-size:11px;color:#666;margin-top:24px">Prepared by ${esc(x.paidBy || '')}. Deductions were authorized in writing by the employee.</p><script>window.print()<\/script>`);
-    w.document.close(); return;
+      <p style="font-size:11px;color:#666;margin-top:24px">Prepared by ${esc(x.paidBy || '')}. Deductions were authorized in writing by the employee.</p>`);
+    w.document.close(); w.focus(); w.print(); return;
   }
   if (act === 'probhist') {
     const x = ui.prob.rows.find(r => r.id === d.id);

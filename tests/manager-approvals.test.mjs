@@ -45,6 +45,21 @@ try {
   ok("cannot remove branch C's adjustment", (await call('DELETE', '/api/adjustments/' + adjC.id, null, mia)).s === 403);
   ok('pays out branch A only', (await call('POST', '/api/payroll/pay', { staffIds: [bA.id], to: today }, mia)).s === 200 && (await call('POST', '/api/payroll/pay', { staffIds: [bA.id, bC.id], to: today }, mia)).s === 403);
 
+  // ---------- no self-approval, no paying out another branch's days (checkpoint review) ----------
+  const ownClaim = (await call('POST', '/api/expense-claims', { branchId: A.id, amount: 80, category: 'Supplies', method: 'Cash', description: 'Wax', noReceiptReason: 'No receipt given' }, mia)).j;
+  ok('a manager cannot approve their own expense', !!ownClaim.id && (await call('PUT', `/api/expense-claims/${ownClaim.id}/review`, { action: 'approve' }, mia)).s === 403);
+  ok('the owner can', (await call('PUT', `/api/expense-claims/${ownClaim.id}/review`, { action: 'approve' }, owner)).s === 200);
+  { const { DatabaseSync } = await import('node:sqlite'); const db = new DatabaseSync(S.dbFile);
+    db.prepare("insert into staff_adjustments(id,staffId,branchId,date,kind,amount,note,byName,createdAt) values('xadj',?,?,?,'Bonus',75,'Covered at C','Owner',?)").run(bA.id, C.id, today, new Date().toISOString()); db.close(); }
+  r = await call('POST', '/api/payroll/pay', { staffIds: [bA.id], to: today }, mia);
+  ok("a barber with unpaid extras at branch C is not paid out by branch A's manager", r.s === 409 && /another branch/.test(r.j.error), r);
+  ok('the owner can pay it out', (await call('POST', '/api/payroll/pay', { staffIds: [bA.id], to: today }, owner)).s === 200);
+  const miaUser = (await call('GET', '/api/state', null, owner)).j.users.find(u => u.username === 'mia');
+  ok('the owner links Mia to a barber profile (she also cuts hair)', (await call('PUT', '/api/users/' + miaUser.id, { staffId: bA.id }, owner)).s === 200);
+  ok('then she cannot give herself a bonus or pay herself', (await call('POST', '/api/adjustments', { staffId: bA.id, kind: 'Bonus', amount: 100, note: 'Me', date: today }, mia)).s === 403
+    && (await call('POST', '/api/payroll/pay', { staffIds: [bA.id], to: today }, mia)).s === 403);
+  ok('the link is undone for the next checks', (await call('PUT', '/api/users/' + miaUser.id, { staffId: '' }, owner)).s === 200);
+
   // ---------- the back office start-up data ----------
   r = await call('GET', '/api/state', null, mia);
   const ids = arr => [...new Set((arr || []).map(x => x.branchId || x.id))].sort().join();

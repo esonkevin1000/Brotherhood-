@@ -23,6 +23,9 @@ try {
   const api = await fetch(S.B + '/api/public/terms');
   ok('API answers get "nosniff" too', api.headers.get('x-content-type-options') === 'nosniff');
   const csp = (await fetch(S.B + '/member')).headers.get('content-security-policy') || '';
+  ok('only the exact Leaflet files from unpkg, not every package there', /script-src[^;]*https:\/\/unpkg\.com\/leaflet@1\.9\.4\/dist\/leaflet\.js/.test(csp) && !/https:\/\/unpkg\.com(\s|;|$)/.test(csp), csp);
+  { const bh = await (await fetch(S.B + '/bh.js')).text(); ok('and the app checks their fingerprints (SRI)', (bh.match(/\.integrity = 'sha256-/g) || []).length === 2); }
+  { const app = await (await fetch(S.B + '/app.js')).text(); ok('the payslip print window needs no inline script', !app.includes('window.print()<')); }
   ok('the map (Leaflet + OpenStreetMap) and Google Fonts are still allowed', csp.includes('https://unpkg.com') && /img-src[^;]*https:/.test(csp) && csp.includes('https://fonts.googleapis.com') && csp.includes('https://fonts.gstatic.com'));
 } catch (e) { fail(e); }
 await S.stop();

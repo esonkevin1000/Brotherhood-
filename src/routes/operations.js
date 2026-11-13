@@ -45,7 +45,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     }
     const rmv = p.match(/^\/api\/remittances\/(\w+)\/review$/);
     if (rmv && method === 'PUT') {
-      const r = get('remittances', rmv[1]); if (!r) bad(404, 'Not found'); manageIn(r.branchId);
+      const r = get('remittances', rmv[1]); if (!r) bad(404, 'Not found'); manageIn(r.branchId, r);
       const b = await readBody(req), act = { verify: 'VERIFIED', flag: 'FLAGGED', reject: 'REJECTED' }[b.action], note = String(b.note || '').trim().slice(0, 300);
       if (!act) bad(400, 'Choose verify, flag or reject'); if (act !== 'VERIFIED' && !note) bad(400, 'A note is required to flag or reject a remittance');
       const hist = jp(r.history); hist.push({ at: nowISO(), by: me.name, action: act, note });
@@ -106,7 +106,12 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     }
     if (p === '/api/payroll/pay' && method === 'POST') {
       if (!isManager(me)) adminOnly(); const b = await readBody(req), to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : todayStr(), from = /^\d{4}-\d{2}-\d{2}$/.test(b.from || '') ? b.from : '2000-01-01'; let n = 0;
-      for (const sid of Array.isArray(b.staffIds) ? b.staffIds : []) manageIn(get('staff', String(sid))?.branchId);   // a manager pays only barbers of their branches
+      // a manager pays only barbers of their branches, never themselves, and only when every unpaid day and extra is in their branches
+      if (isManager(me)) for (const sid of Array.isArray(b.staffIds) ? b.staffIds.map(String) : []) {
+        manageIn(get('staff', sid)?.branchId, { staffId: sid });
+        const other = dayRows('2000-01-01', to, null).some(x => x.staffId === sid && !x.paidAt && x.date >= from && !inScope(me, x.branchId)) || all('select branchId from staff_adjustments where staffId=? and payrollDate is null and date<=?', sid, to).some(a => !inScope(me, a.branchId));
+        if (other) bad(409, `${get('staff', sid)?.name || 'This barber'} also has unpaid days or extras at another branch. Ask the owner or an admin to pay out.`);
+      }
       for (const sid of Array.isArray(b.staffIds) ? b.staffIds : []) {
         const days = dayRows('2000-01-01', to, null).filter(x => x.staffId === sid && !x.paidAt && x.date >= from).sort((x, y) => x.date.localeCompare(y.date)); if (!days.length) continue;
         const bonus = adjTotal(sid, to), plan = planDeductions(sid, to, r2(sum(days, x => x.commission + x.topup + x.lunch - x.advance) + bonus)), last = days[days.length - 1].date;
@@ -334,7 +339,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     }
     const acm = p.match(/^\/api\/attendance\/(\w+)\/correct$/);
     if (acm && method === 'PUT') {
-      const a = get('attendance', acm[1]); if (!a) bad(404, 'Not found'); manageIn(a.branchId); const b = await readBody(req), reason = String(b.reason || '').trim().slice(0, 300);
+      const a = get('attendance', acm[1]); if (!a) bad(404, 'Not found'); manageIn(a.branchId, a); const b = await readBody(req), reason = String(b.reason || '').trim().slice(0, 300);
       if (reason.length < 5) bad(400, 'A reason is required for every attendance correction');
       const parse = v => { if (!v) return null; const s = /^\d{2}:\d{2}$/.test(v) ? `${a.date}T${v}:00` : String(v); const d = new Date(s); if (isNaN(d)) bad(400, 'Invalid time'); return d; };
       const tin = b.timeIn ? parse(b.timeIn) : new Date(a.timeIn), tout = b.timeOut === '' || b.timeOut === undefined ? (a.timeOut ? new Date(a.timeOut) : null) : parse(b.timeOut);

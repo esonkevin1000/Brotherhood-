@@ -825,7 +825,7 @@ const PUBLIC_PATHS = new Set(['/', '/book', '/book.js', '/brotherhood', '/member
 // from unpkg, and the few inline scripts we wrote (allowed by their SHA-256 fingerprint, read from the HTML files at start-up).
 // A script slipped into a name, a review or a message cannot run. Styles stay open to inline style attributes (used everywhere).
 const INLINE_SCRIPT_HASHES = (() => { const out = new Set(); for (const f of ['.', 'site'].flatMap(d => { try { return fs.readdirSync(path.join(DIR, d)).filter(x => x.endsWith('.html')).map(x => path.join(d, x)); } catch { return []; } })) { try { for (const m of fs.readFileSync(path.join(DIR, f), 'utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)) out.add("'sha256-" + crypto.createHash('sha256').update(m[1].replace(/\r\n?/g, '\n')).digest('base64') + "'"); } catch { } } return [...out]; })();   // browsers turn CRLF into LF before checking the fingerprint
-const CSP = ["default-src 'self'", "script-src 'self' https://unpkg.com " + INLINE_SCRIPT_HASHES.join(' '), "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
+const CSP = ["default-src 'self'", "script-src 'self' https://unpkg.com/leaflet@1.9.4/dist/leaflet.js " + INLINE_SCRIPT_HASHES.join(' '), "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
   "font-src 'self' https://fonts.gstatic.com data:", "img-src 'self' data: blob: https:", "connect-src 'self'", "media-src 'self' blob:", "worker-src 'self'", "manifest-src 'self'",
   "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'self'"].join('; ');
 const SECURITY_HEADERS = { 'Content-Security-Policy': CSP, 'Strict-Transport-Security': 'max-age=15552000', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin' };
@@ -1006,7 +1006,12 @@ async function handleIn(req, res) {
   const admin = isAdmin(me);
   const adminOnly = () => { if (!admin) bad(403, 'Not allowed for your role'); };
   // approvals and pay for one branch: owner and admins, or a manager of that branch (T7b)
-  const manageIn = branchId => { if (!(admin || (isManager(me) && inScope(me, branchId)))) bad(403, 'Not allowed for your role'); };
+  // A manager never approves or pays their own items: not what they filed, and not the barber profile their login is linked to.
+  const myStaffId = isManager(me) ? (get('users', me.id)?.staffId || '') : '';
+  const manageIn = (branchId, rec) => {
+    if (!(admin || (isManager(me) && inScope(me, branchId)))) bad(403, 'Not allowed for your role');
+    if (isManager(me) && rec && (rec.submittedById === me.id || rec.requestedById === me.id || (myStaffId && rec.staffId === myStaffId))) bad(403, 'You cannot approve or change your own request or pay. Ask the owner or an admin.');
+  };
   if (!admin) {   // role permissions: which POS sections this role may open (set by the owner in Settings → Access)
     const mod = (() => {
       if (/^\/api\/pos\/dashboard$/.test(p)) return 'dashboard';
@@ -1072,4 +1077,4 @@ http.createServer(async (req, res) => {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   try { await handle(req, res); }
   catch (e) { if (!res.headersSent) send(res, e instanceof HttpError ? e.code : 400, { error: e.message }); }
-}).listen(PORT, () => console.log(`${SHOP} running → http://localhost:${PORT}`));
+}).listen(PORT, process.env.HOST || undefined, () => console.log(`${SHOP} running → http://localhost:${PORT}`));

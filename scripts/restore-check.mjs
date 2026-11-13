@@ -30,6 +30,8 @@ if (!src || !fs.existsSync(src) || !fs.statSync(src).isFile()) { failNow(`backup
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bh-restore-check-')), copy = path.join(dir, 'restored.db');
 let srv = null;
+// Ctrl+C: stop the app and remove the copy (it holds customer data)
+process.on('SIGINT', () => { try { srv?.kill(); } catch { } setTimeout(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } process.exit(130); }, 500); });
 try {
   const before = crypto.createHash('sha256').update(fs.readFileSync(src)).digest('hex');
   fs.copyFileSync(src, copy);
@@ -39,11 +41,14 @@ try {
   try { const d = new DatabaseSync(copy); const r = d.prepare('pragma integrity_check').get(); d.close(); if (Object.values(r)[0] !== 'ok') throw new Error(Object.values(r)[0]); }
   catch (e) { throw new Error('the file is not a healthy database (' + e.message + ')'); }
   say('database', 'healthy');
+  // push messages: the keys and the phones' subscriptions are inside the database, so remove them from the copy first
+  { const d = new DatabaseSync(copy); d.exec("delete from settings where k='vapidKeys'"); try { d.exec('delete from bh_push'); } catch { } d.close(); }
+  say('push', 'switched off on the copy (no customer can get a message)');
 
   // 2. start the app on the copy: clean settings, nothing that can reach customers
   const port = await freePort(), pass = crypto.randomBytes(18).toString('base64url'), B = `http://127.0.0.1:${port}`;
   const env = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, TEMP: os.tmpdir(), TMP: os.tmpdir(), TZ: process.env.TZ || 'Asia/Manila',
-    DB_FILE: copy, PORT: String(port), ADMIN_PASSWORD: pass, SESSION_SECRET: crypto.randomBytes(32).toString('base64url'), OWNER_USERNAME_FORCE: 'restorecheck' };
+    DB_FILE: copy, PORT: String(port), HOST: '127.0.0.1', ADMIN_PASSWORD: pass, SESSION_SECRET: crypto.randomBytes(32).toString('base64url'), OWNER_USERNAME_FORCE: 'restorecheck' };
   let log = '';
   srv = spawn(process.execPath, ['server.js'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
   srv.stdout.on('data', d => { log += d; }); srv.stderr.on('data', d => { log += d; });
