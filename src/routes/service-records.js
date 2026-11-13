@@ -1,7 +1,7 @@
 // Day board for the Brotherhood app (takes over from the POS): walk-ins, start, finish, cancel, ID photos.
 // Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
-export function createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
+export function createServiceRoutes({ walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
   return async function handleServiceRecords({ req, res, p, method, q, me }) {
       if (!['owner', 'admin', 'manager', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
       const myStaffId = me.role === 'barber' ? (get('users', me.id)?.staffId || '') : '';
@@ -70,6 +70,12 @@ export function createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowI
         log(me, act === 'left' ? 'queue-closed' : 'queue-carried', 'orders', bid, `${rows.length} waiting`);
         return send(res, 200, act === 'left' ? { ok: true, left: rows.length } : { ok: true, carried: rows.length, date: tmr });
       }
+      // T23: the barbers on duty for a walk-in: safe ones first, each with the earliest safe start and the next booking
+      if (p === '/api/svc/walkin-options' && method === 'GET') {
+        const bid = branchScope(me, q.branch), ids = String(q.items || '').split(',').filter(Boolean);
+        const mins = orderMins({ items: ids.map(i => ({ itemId: i, qty: 1, type: get('items', i)?.type || 'service' })) });
+        return send(res, 200, { mins, barbers: walkinOptions(bid, mins) });
+      }
       const hm = p.match(/^\/api\/svc\/(\w+)\/history$/);
       if (hm && method === 'GET') { const o = ticket(hm[1]); return send(res, 200, all('select at, actor, fromStatus "from", toStatus "to", reason from order_events where orderId=? order by rowid', o.id)); }   // T22
       const sa = p.match(/^\/api\/svc\/(\w+)\/(start|finish|cancel|left)$/);
@@ -84,6 +90,7 @@ export function createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowI
         if (act === 'start') {
           if (o.status === 'in_chair') { const ev = one("select actor, at from order_events where orderId=? and toStatus='in_service' order by rowid desc limit 1", o.id); bad(409, `Already in service with ${get('staff', o.barberId)?.name || 'a barber'}${ev ? `, started by ${ev.actor} at ${new Date(ev.at).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}` : ''}.`); }   // T22/T27
           const bar = me.role === 'barber' ? myStaffId : String(b.barberId || o.barberId || ''); if (!bar) bad(400, 'Choose the barber');
+          walkinGuard(o, bar);   // T23 (D-8)
           const a = checkAssign(o, { barberId: bar }, o.id);
           run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), o.id);
           orderEvent(o.id, before, 'in_service', me.name, 'with ' + a.barber.name);

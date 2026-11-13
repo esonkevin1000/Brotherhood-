@@ -16,7 +16,7 @@ import { createLimiter, allOf, intSetting } from './src/lib/throttle.js';
 import { createFlags } from './src/lib/flags.js';
 import { createPolicy } from './src/lib/policy.js';
 import { createBookingMessages } from './src/lib/notify.js';
-import { planOf, bookingPlan } from './src/lib/queue.js';
+import { planOf, bookingPlan, walkinFit } from './src/lib/queue.js';
 import { createServiceRoutes } from './src/routes/service-records.js';
 import { createDeviceRoutes } from './src/routes/devices.js';
 import { createScheduleRoutes } from './src/routes/schedules.js';
@@ -403,6 +403,39 @@ function staffState(staffId, date) {
 const isAppt = orderId => !!one('select 1 x from bookings where orderId=?', orderId);
 const orderPlan = (o, booked = isAppt(o.id)) => planOf(o.status, { booked, barberId: o.barberId });
 const orderEvent = (orderId, from, to, actor, reason = '') => run('insert into order_events(id,orderId,at,actor,fromStatus,toStatus,reason) values(?,?,?,?,?,?,?)', uid(), orderId, nowISO(), String(actor || '').slice(0, 100), from || '', to, String(reason || '').slice(0, 300));
+// ---------- walk-ins never break a booked appointment (T23, D-8; new booking system only) ----------
+const WALKIN_BUFFER = 5;   // D-8: the walk-in must finish at least 5 minutes before the barber's next appointment
+const minsNow = () => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); };
+const minsAt = iso => { const d = new Date(iso); return d.getHours() * 60 + d.getMinutes(); };
+const hhmm = m => `${(Math.floor(m / 60) % 12) || 12}:${String(m % 60).padStart(2, '0')} ${m < 720 ? 'AM' : 'PM'}`;
+const orderMins = o => { const its = typeof o.items === 'string' ? jp(o.items) : (o.items || []); return Math.max(30, its.filter(i => i.type === 'service').reduce((t, i) => t + (get('items', i.itemId)?.mins || 30) * (i.qty || 1), 0)); };
+// one barber today: when is he free, which appointments are ahead, and can he take a walk-in of `mins` now
+// ignoreBusy: only the bookings count (whether he is cutting right now is checked separately)
+function barberFit(staffId, mins, exceptOrderId = '', ignoreBusy = false) {
+  const now = minsNow(), s = get('staff', staffId), br = get('branches', s?.branchId || '');
+  const cur = one("select * from orders where barberId=? and status='in_chair' and id<>?", staffId, exceptOrderId);
+  const busyUntil = cur && !ignoreBusy ? Math.max(now, minsAt(cur.startedAt || nowISO()) + orderMins(cur)) : now;
+  const bookings = all("select time, mins from bookings where staffId=? and date=? and status='booked'", staffId, todayStr()).map(b => ({ start: toMin(b.time), mins: b.mins || 30 }));
+  const fit = walkinFit({ now, mins, busyUntil, bookings, buffer: WALKIN_BUFFER, close: toMin(br?.closeTime || '21:00') });
+  const next = bookings.filter(b => b.start + b.mins > now).sort((x, y) => x.start - y.start)[0];
+  return { ...fit, busyUntil, next: next ? next.start : null };
+}
+// the barbers on duty in a branch for a walk-in: safe ones first, then the least busy
+function walkinOptions(branchId, mins) {
+  const rule = mvpOn(branchId), t = todayStr();
+  return all('select * from staff where branchId=? and active=1 order by name', branchId).filter(s => { const d = onDuty(s.id, t); return d && !d.breakStartedAt; }).map(s => {
+    const f = barberFit(s.id, mins), busy = f.busyUntil > minsNow(), load = one("select count(*) n from orders where barberId=? and date=? and status in ('in_chair','paid')", s.id, t).n;
+    return { staffId: s.id, name: s.name, busy, safe: rule ? f.safeNow : !busy, earliest: f.earliest == null ? null : hm24(f.earliest), nextBooking: f.next == null ? '' : hm24(f.next), load };
+  }).sort((a, b) => (b.safe - a.safe) || (a.load - b.load) || a.name.localeCompare(b.name));
+}
+const hm24 = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+// refuse a walk-in with a barber whose next appointment it would run into (a booked customer's own visit is never blocked)
+function walkinGuard(order, staffId) {
+  if (!mvpOn(order.branchId) || isAppt(order.id)) return;
+  const mins = orderMins(order), f = barberFit(staffId, mins, order.id, true); if (f.safeNow) return;
+  const name = get('staff', staffId)?.name || 'This barber', free = walkinOptions(order.branchId, mins).filter(o => o.safe).map(o => o.name);
+  bad(409, `${name} has a booking at ${f.next == null ? 'a later time' : hhmm(f.next)}; this cut would run into it.${f.earliest == null ? '' : ` ${name} can safely take a walk-in from ${hhmm(f.earliest)}.`}${free.length ? ` Free now: ${free.join(', ')}.` : ''}`);
+}
 // When a chair becomes free, the next customer queued on that chair sits down (if its barber is on duty and not on break).
 function promoteNext(branchId, chairId) {
   if (!chairId) return;
@@ -411,6 +444,7 @@ function promoteNext(branchId, chairId) {
   if (!nxt) return;
   const d = onDuty(nxt.barberId, todayStr()); if (!d || d.breakStartedAt) return;
   if (one("select 1 x from orders where status='in_chair' and barberId=?", nxt.barberId)) return;
+  try { walkinGuard(nxt, nxt.barberId); } catch (e) { if (e instanceof HttpError) return; throw e; }   // T23: wait rather than run into a booking
   run("update orders set status='in_chair', startedAt=? where id=?", nowISO(), nxt.id);
   orderEvent(nxt.id, orderPlan(nxt), 'in_service', 'System', 'the chair became free');
 }
@@ -767,7 +801,7 @@ function createTicket(me, branchId, customerId, name, items, barberId, opts = {}
     values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, customerId || '', name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO());
   const first = opts.booked ? 'checked_in' : 'waiting'; orderEvent(id, '', first, me.name);
   if (barberId) {
-    try { const a = checkAssign({ id, branchId }, { barberId }); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); orderEvent(id, first, 'in_service', me.name, 'with ' + a.barber.name); }
+    try { if (!opts.booked) walkinGuard({ id, branchId, items: JSON.stringify(items) }, barberId); const a = checkAssign({ id, branchId }, { barberId }); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); orderEvent(id, first, 'in_service', me.name, 'with ' + a.barber.name); }
     catch (e) { if (!(e instanceof HttpError)) throw e; }   // preferred barber busy/off: customer simply waits
   }
   return parseOrder(get('orders', id));
@@ -1074,7 +1108,7 @@ async function handleIn(req, res) {
 
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
-const SERVICE_RECORDS = createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
+const SERVICE_RECORDS = createServiceRoutes({ walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
 const SCHEDULES = createScheduleRoutes({ all, run, get, log, tx, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
 const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, savedOf, setPolicy, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
@@ -1102,7 +1136,7 @@ const STAFF_TOOLS = createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, 
 const BACK_OFFICE_DATA = createBackOfficeDataRoutes({ nowISO, one, run, get, insert, update, strip, log, isBranchUser, isManager, inScope, branchOrAll, newPin, REFS, SOFT, CRUD, checkUser, setPw, bad, send, readBody });
 const BH = mountBH({ bookingMessage, rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => mailReady(), baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 // created after BH because the bookings routes notify app customers through it
-const OPERATIONS = createOperationsRoutes({ orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
+const OPERATIONS = createOperationsRoutes({ walkinGuard, orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
 
 { const ran = migrate(mainDb); if (ran.length) console.log('migrations applied:', ran.join(', ')); }   // numbered files in src/db/migrations, once per database
 schemaReady = true; ORG_DBS.clear();
