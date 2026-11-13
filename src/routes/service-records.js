@@ -1,9 +1,9 @@
 // Day board for the Brotherhood app (takes over from the POS): walk-ins, start, finish, cancel, ID photos.
 // Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
-export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
+export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
   return async function handleServiceRecords({ req, res, p, method, q, me }) {
-      if (!['owner', 'admin', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
+      if (!['owner', 'admin', 'manager', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
       const myStaffId = me.role === 'barber' ? (get('users', me.id)?.staffId || '') : '';
       const PAY_METHODS = ['Cash', 'GCash', 'Maya', 'Card', 'Bank transfer', 'Other'];
       const svcView = row => {
@@ -13,9 +13,9 @@ export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, o
           subtotal: x.subtotal, discountId: x.discountId || '', discountName: x.discountName || '', discountAmt: x.discountAmt || 0, total: x.total, method: x.tenders[0]?.method || '', invoiceNo: x.invoiceNo || '',
           hasId: !!x.idPhoto, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '' };
       };
-      const ticket = id => { const o = get('orders', String(id)); if (!o) bad(404, 'Visit not found'); if (isBranchUser(me) && o.branchId !== me.branchId) bad(403, 'Not your shop'); return parseOrder(o); };
+      const ticket = id => { const o = get('orders', String(id)); if (!o) bad(404, 'Visit not found'); if (!inScope(me, o.branchId)) bad(403, 'Not your shop'); return parseOrder(o); };
       if (p === '/api/svc/today' && method === 'GET') {
-        const bid = isBranchUser(me) ? me.branchId : String(q.branch || one('select id from branches order by rowid')?.id || ''); if (!get('branches', bid)) bad(400, 'Pick a branch');
+        const bid = isBranchUser(me) ? me.branchId : String(q.branch || (isManager(me) ? me.branchIds[0] : one('select id from branches order by rowid')?.id) || ''); if (!get('branches', bid)) bad(400, 'Pick a branch'); if (!inScope(me, bid)) bad(403, 'Not your branch');
         const t = todayStr(), mine = x => x.barberId === myStaffId;
         let tickets = all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair','paid') order by no", bid, t).map(svcView);
         if (me.role === 'barber') tickets = tickets.filter(x => mine(x) || (x.status === 'waiting' && !x.barberId));   // a barber sees his own customers and the unassigned line
@@ -25,7 +25,7 @@ export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, o
           .filter(b => me.role !== 'barber' || !b.staffId || b.staffId === myStaffId)
           .map(b => ({ id: b.id, customerName: b.customerName, phone: b.phone, time: b.time, staffId: b.staffId || '', staffName: b.staffId ? get('staff', b.staffId)?.name || '' : 'Any barber', items: jp(b.itemIds).map(i => get('items', i)?.name).filter(Boolean) }));
         return send(res, 200, {
-          branch: { id: bid, name: get('branches', bid)?.name || '' }, branches: isBranchUser(me) ? [] : all('select id,name from branches order by rowid'), date: t, role: me.role, myStaffId, locked: !!dayLocked(bid, t), attPhoto: getSetting('attPhoto') !== '0', modules: isAdmin(me) ? MODULES : modulesFor(me.role),
+          branch: { id: bid, name: get('branches', bid)?.name || '' }, branches: isBranchUser(me) ? [] : all('select id,name from branches order by rowid').filter(x => inScope(me, x.id)), date: t, role: me.role, myStaffId, locked: !!dayLocked(bid, t), attPhoto: getSetting('attPhoto') !== '0', modules: isAdmin(me) ? MODULES : modulesFor(me.role),
           menu: all('select id,name,type,price,mins,needId from items where active=1 order by type desc, price').map(i => ({ ...i, needId: !!i.needId })),
           discounts: all('select id,name,kind,value from discounts where active=1 order by name'), methods: PAY_METHODS, staff, tickets, bookings,
           totals: { waiting: tickets.filter(x => x.status === 'waiting').length, inChair: tickets.filter(x => x.status === 'in_chair').length, done: done.length, earned: r2(sum(done, x => x.total)) }

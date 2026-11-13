@@ -208,7 +208,7 @@ function update(kind, id, o) {
   if (keys.length) run(`update ${kind} set ${keys.map(k => k + '=?').join(',')} where id=?`, ...keys.map(k => d[k]), id);
   return get(kind, id);
 }
-const strip = u => { const { passHash, pinKey, ...r } = u; return { ...r, hasPassword: !!passHash, hasPin: !!pinKey }; };
+const strip = u => { const { passHash, pinKey, ...r } = u; return { ...r, hasPassword: !!passHash, hasPin: !!pinKey, ...(u.role === 'manager' ? { branchIds: branchesOf(u.id) } : {}) }; };
 // PINs are stored as a keyed hash (stable salt kept in the DB, independent of the owner password) so a PIN can identify its user
 let pinSalt = one("select v from settings where k='pinSalt'")?.v;
 if (!pinSalt) { pinSalt = crypto.randomBytes(24).toString('hex'); run("insert into settings(k,v) values('pinSalt',?)", pinSalt); }
@@ -284,16 +284,31 @@ function whoami(req) {
   if (o.u === 'owner') { if (o.v !== (g ? String(g.ownerHash).slice(-8) : RAILWAY_OWNER_V)) return null; return { id: 'owner', role: 'owner', name: 'Owner' }; }
   const u = get('users', o.u);
   if (!u || !u.active || ![u.passHash, u.pinKey].some(h => h && h.slice(-8) === o.v)) return null;
+  if (u.role === 'manager') return { id: u.id, role: u.role, name: u.name, branchId: null, branchIds: branchesOf(u.id) };   // read on every request: taking a branch away works at once
   return { id: u.id, role: u.role, name: u.name, branchId: u.role === 'cashier' || u.role === 'barber' ? u.branchId : null };
 }
 const isAdmin = me => me.role === 'owner' || me.role === 'admin';
 const isBranchUser = me => me.role === 'cashier' || me.role === 'barber';
+// Branch managers (T7, decision D-12): like an admin, but only for the branches in user_branches.
+const isManager = me => me.role === 'manager';
+function branchesOf(userId) { return all('select branchId from user_branches where userId=? order by branchId', userId).map(r => r.branchId).filter(b => get('branches', b)); }
+// may this person work in this branch? owner and admins everywhere, a manager in their branches, front desk and barbers in their own
+const inScope = (me, branchId) => isAdmin(me) || (isManager(me) ? me.branchIds.includes(String(branchId || '')) : !!branchId && me.branchId === branchId);
+// a branch filter for lists: one branch id, or null for "all branches" (owner and admins only; a manager with several branches picks one)
+const branchOrAll = (me, requested) => {
+  if (isBranchUser(me)) return me.branchId;
+  const r = requested && requested !== 'all' ? String(requested) : null;
+  if (!isManager(me)) return r;
+  if (!r) { if (me.branchIds.length === 1) return me.branchIds[0]; bad(400, 'Pick one of your branches'); }
+  if (!inScope(me, r)) bad(403, 'Not your branch');
+  return r;
+};
 // Which parts of the POS each role may open (editable by the owner in Settings → Access)
 const MODULES = ['dashboard', 'pos', 'bookings', 'queue', 'expenses', 'attendance', 'reading', 'customers', 'remittance', 'release', 'problems', 'inbox', 'checklist', 'leave', 'myperf'];
 // barbers never get the walk-in queue (stripped in permsAll below)
 const DEFAULT_PERMS = { cashier: [...MODULES], barber: ['dashboard', 'bookings', 'problems', 'inbox', 'myperf'] };
 const permsAll = () => { try { const p = JSON.parse(getSetting('perms') || '{}'); return { cashier: Array.isArray(p.cashier) ? p.cashier.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.cashier, barber: (Array.isArray(p.barber) ? p.barber.filter(m => MODULES.includes(m)) : DEFAULT_PERMS.barber).filter(m => m !== 'queue') }; } catch { return { ...DEFAULT_PERMS }; } };
-const modulesFor = role => role === 'owner' || role === 'admin' ? MODULES : (permsAll()[role] || []);
+const modulesFor = role => role === 'owner' || role === 'admin' || role === 'manager' ? MODULES : (permsAll()[role] || []);
 const needAny = (me, mods) => { if (isAdmin(me)) return; const have = modulesFor(me.role); if (![].concat(mods).some(m => have.includes(m))) bad(403, 'Your role is not allowed to open this section'); };
 // Guessing protection for staff logins. The keys cannot be faked by the caller: a shop (for PINs, because a PIN alone says who you are)
 // and a shop + username (for passwords). The address-based delay below stays as a small extra brake only.
@@ -326,8 +341,10 @@ const noteFail = ip => { const f = fails.get(ip); fails.set(ip, { n: (f && Date.
 
 // ---------- POS logic ----------
 const branchScope = (me, requested) => {
-  const id = isBranchUser(me) ? me.branchId : String(requested || '');
+  let id = isBranchUser(me) ? me.branchId : String(requested || '');
+  if (isManager(me) && (!id || id === 'all') && me.branchIds.length === 1) id = me.branchIds[0];
   if (!get('branches', id)) bad(400, 'Pick a branch');
+  if (!inScope(me, id)) bad(403, 'Not your branch');
   return id;
 };
 // One Z-reading (sales reading) per branch per day. Once it is done the day is locked: no new shift, no new tickets, no payments until tomorrow.
@@ -815,9 +832,15 @@ function checkUser(b, cur) {
   if (pw && pw.length < 6) bad(409, 'Password must be at least 6 characters');
   if ('name' in b || !cur) { b.name = String(b.name || '').trim(); if (!b.name) bad(400, 'Name required'); }
   const role = 'role' in b ? b.role : cur?.role;
-  if (!['owner', 'admin', 'cashier', 'barber'].includes(role)) bad(400, 'Role must be owner, admin, cashier or barber');
-  const branchId = 'branchId' in b ? b.branchId : cur?.branchId;
-  if (role !== 'admin' && role !== 'owner' && !get('branches', branchId)) bad(409, 'Cashiers and barbers need a branch');
+  if (!['owner', 'admin', 'manager', 'cashier', 'barber'].includes(role)) bad(400, 'Role must be owner, admin, manager, cashier or barber');
+  const branchId = 'branchId' in b ? b.branchId : cur?.branchId, noPin = role === 'admin' || role === 'owner' || role === 'manager';
+  if (!noPin && !get('branches', branchId)) bad(409, 'Cashiers and barbers need a branch');
+  if (role === 'manager') {   // a manager runs one or more branches and logs in with a username and password
+    if (b.pin || cur?.pinKey) bad(409, 'A manager logs in with a username and password, not a PIN');
+    const ids = 'branchIds' in b ? b.branchIds : cur ? branchesOf(cur.id) : [];
+    if (!Array.isArray(ids) || !ids.length || ids.some(x => typeof x !== 'string' || !get('branches', x))) bad(409, 'Pick the branches this manager runs');
+    b.branchIds = [...new Set(ids)]; b.branchId = null;
+  } else delete b.branchIds;
   if (role === 'owner') {   // an owner account opens everything, so it is protected by a real password only (decision D-23)
     if (pw && pw.length < 10) bad(409, 'An owner password must be at least 10 characters');
     if (b.pin || cur?.pinKey) bad(409, 'An owner account cannot have a PIN. Use a username and password.');
@@ -832,13 +855,18 @@ function checkUser(b, cur) {
     if (!/^\d{6}$/.test(pin)) bad(409, 'PIN must be exactly 6 digits');
     if (one('select id from users where pinKey=? and id<>?', pinKeyOf(pin), cur?.id || '')) bad(409, 'That PIN is already used by someone else');
   }
-  if (role !== 'admin' && role !== 'owner' && !pin && !cur?.pinKey) bad(409, 'Set a 6-digit PIN for this user');
-  if ((role === 'admin' || role === 'owner') && !pw && !cur?.passHash) bad(409, 'Set a password for this ' + role);
+  if (!noPin && !pin && !cur?.pinKey) bad(409, 'Set a 6-digit PIN for this user');
+  if (noPin && !pw && !cur?.passHash) bad(409, 'Set a password for this ' + role);
   b.username = username;
 }
+// a new random PIN nobody else uses (shown once to whoever made it)
+const newPin = () => { let pin; do { pin = String(100000 + crypto.randomInt(900000)); } while (one('select 1 x from users where pinKey=?', pinKeyOf(pin))); return pin; };
+// after a user is saved: password, PIN, and a manager's branches (a user who is no longer a manager loses them)
 const setPw = (id, b) => {
   if (b.password) run('update users set passHash=? where id=?', hashPw(String(b.password)), id);
   if (b.pin) run('update users set pinKey=? where id=?', pinKeyOf(String(b.pin).trim()), id);
+  if (b.branchIds || get('users', id)?.role !== 'manager') run('delete from user_branches where userId=?', id);
+  for (const br of b.branchIds || []) run('insert or ignore into user_branches(userId, branchId) values(?,?)', id, br);
 };
 
 // pick the database for this request: a partner shop's token (or, for logging in, its shop code) runs it in that shop's database
@@ -1011,17 +1039,17 @@ async function handleIn(req, res) {
 
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
-const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
+const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
-const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isBranchUser, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
+const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
 const MARKETING = createMarketingRoutes({ curOrg, uid, nowISO, all, one, run, insert, log, normEmail, validEmail, TIERS, setSetting, NO_MAIL, mailCount, baseUrl, welcomeEmail, processEmails, AUD_WHO, audienceOf, promoEmail, queueMarketing, winbackCfg, runWinback, mailProvider, mailReady, MAIL_LIMIT, mailFrom, sendEmail, bad, send, readBody });
 const PARTNER_SHOPS = createPartnerShopRoutes({ ownerUser, mainDb, curOrg, BAD_ORGS, orgRow, orgList, inOrg, uid, dOf, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, log, normEmail, validEmail, mainSet, TRIAL_DAYS, PLAN_IDS, plansNow, payInfo, addMonthsStr, orgStatus, SIGNUPS_OPEN, esc2, sendEmail, makeToken, hashPw, bad, send, readBody });
 const PUBLIC_ROUTES = createPublicRoutes({ ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody });
-const STAFF_TOOLS = createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, sum, all, one, run, get, clean, insert, update, log, isAdmin, isBranchUser, branchScope, openShift, ID_TYPES, getSetting, setSetting, payRules, dayRows, planDeductions, adjTotal, scoreData, encBuf, decBuf, REPORTS, csv, bad, send, readBody });
-const BACK_OFFICE_DATA = createBackOfficeDataRoutes({ nowISO, one, run, get, insert, update, strip, log, isBranchUser, REFS, SOFT, CRUD, checkUser, setPw, bad, send, readBody });
+const STAFF_TOOLS = createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, sum, all, one, run, get, clean, insert, update, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, branchScope, openShift, ID_TYPES, getSetting, setSetting, payRules, dayRows, planDeductions, adjTotal, scoreData, encBuf, decBuf, REPORTS, csv, bad, send, readBody });
+const BACK_OFFICE_DATA = createBackOfficeDataRoutes({ nowISO, one, run, get, insert, update, strip, log, isBranchUser, isManager, inScope, branchOrAll, newPin, REFS, SOFT, CRUD, checkUser, setPw, bad, send, readBody });
 const BH = mountBH({ inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 // created after BH because the bookings routes notify app customers through it
-const OPERATIONS = createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
+const OPERATIONS = createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
 
 { const ran = migrate(mainDb); if (ran.length) console.log('migrations applied:', ran.join(', ')); }   // numbered files in src/db/migrations, once per database
 schemaReady = true; ORG_DBS.clear();

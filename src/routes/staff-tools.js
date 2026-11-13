@@ -3,7 +3,7 @@
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
 import { NEXT } from '../lib/http.js';
 
-export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, sum, all, one, run, get, clean, insert, update, log, isAdmin, isBranchUser, branchScope, openShift, ID_TYPES, getSetting, setSetting, payRules, dayRows, planDeductions, adjTotal, scoreData, encBuf, decBuf, REPORTS, csv, bad, send, readBody }) {
+export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, sum, all, one, run, get, clean, insert, update, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, branchScope, openShift, ID_TYPES, getSetting, setSetting, payRules, dayRows, planDeductions, adjTotal, scoreData, encBuf, decBuf, REPORTS, csv, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, p, method, q, me, admin, adminOnly }) {
     // ----- customer ID photos (Senior / PWD / Student discount). Private: only logged-in staff can view them, never via the public /img route. -----
@@ -17,7 +17,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     }
     const idm = p.match(/^\/api\/idphoto\/(\w+)$/);
     if (idm && method === 'GET') {
-      const ph = get('id_photos', idm[1]); if (!ph || (isBranchUser(me) && ph.branchId !== me.branchId)) bad(404, 'Not found');
+      const ph = get('id_photos', idm[1]); if (!ph || !inScope(me, ph.branchId)) bad(404, 'Not found');
       res.writeHead(200, { 'Content-Type': ph.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(ph.data);
     }
     // ----- private evidence photos (remittance proof, receipts, ...). Never served on a public route. -----
@@ -30,7 +30,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     }
     const flm = p.match(/^\/api\/files\/(\w+)$/);
     if (flm && method === 'GET') {
-      const f = get('files', flm[1]); if (!f || (isBranchUser(me) && f.kind !== 'chat' && f.branchId !== me.branchId)) bad(404, 'Not found');
+      const f = get('files', flm[1]); if (!f || (f.kind !== 'chat' && !inScope(me, f.branchId))) bad(404, 'Not found');
       res.writeHead(200, { 'Content-Type': f.mime, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); return res.end(f.enc ? decBuf(f.data) : f.data);
     }
     // ----- expenses with receipts -----
@@ -40,7 +40,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     if (p === '/api/expense-claims/options' && method === 'GET') return send(res, 200, { categories: EXP_CATS, methods: PAY_METHODS });
     if (p === '/api/expense-claims' && method === 'GET') {
       const t0 = todayStr(), rg = q.range === 'month' ? [t0.slice(0, 8) + '01', t0] : q.range === 'all' ? ['2000-01-01', '2099-12-31'] : q.range === 'today' ? [t0, t0] : [DATE_RE.test(q.from || '') ? q.from : '2000-01-01', DATE_RE.test(q.to || '') ? q.to : '2099-12-31'];
-      const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = ['PENDING', 'APPROVED', 'REJECTED'].includes(q.status) ? q.status : null, cat = EXP_CATS.includes(q.category) ? q.category : null, term = String(q.q || '').toLowerCase();
+      const br = branchOrAll(me, q.branch), st = ['PENDING', 'APPROVED', 'REJECTED'].includes(q.status) ? q.status : null, cat = EXP_CATS.includes(q.category) ? q.category : null, term = String(q.q || '').toLowerCase();
       let rows = all(`select * from expense_claims where date>=? and date<=?${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''}${cat ? ' and category=?' : ''} order by date desc, createdAt desc limit 1000`, rg[0], rg[1], ...(br ? [br] : []), ...(st ? [st] : []), ...(cat ? [cat] : [])).map(expView);
       if (term) rows = rows.filter(x => (x.description + ' ' + x.category + ' ' + x.submittedBy).toLowerCase().includes(term));
       const live = rows.filter(x => x.status !== 'REJECTED'), byCategory = {}; for (const x of live) byCategory[x.category] = r2((byCategory[x.category] || 0) + x.amount);
@@ -82,11 +82,11 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     const staffBalance = sid => { const ds = all("select * from advance_deductions where staffId=? and status in ('SCHEDULED','APPLIED') order by dueDate", sid); return { balance: r2(sum(ds.filter(d => d.status === 'SCHEDULED'), d => d.amount)), deducted: r2(sum(ds.filter(d => d.status === 'APPLIED'), d => d.amount)), deductions: ds }; };
     if (p === '/api/advances/options' && method === 'GET') return send(res, 200, { types: ADV_TYPES, methods: REL_METHODS });
     if (p === '/api/advances/balance' && method === 'GET') {
-      const s = get('staff', String(q.staffId || '')); if (!s || (isBranchUser(me) && s.branchId !== me.branchId)) bad(404, 'Employee not found');
+      const s = get('staff', String(q.staffId || '')); if (!s || !inScope(me, s.branchId)) bad(404, 'Employee not found');
       return send(res, 200, { staffId: s.id, name: s.name, ...staffBalance(s.id) });
     }
     if (p === '/api/advances' && method === 'GET') {
-      const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = ['REQUESTED', 'APPROVED', 'RELEASED', 'REJECTED', 'CANCELLED'].includes(q.status) ? q.status : null;
+      const br = branchOrAll(me, q.branch), st = ['REQUESTED', 'APPROVED', 'RELEASED', 'REJECTED', 'CANCELLED'].includes(q.status) ? q.status : null;
       const rows = all(`select * from advances where 1=1${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''}${q.staffId ? ' and staffId=?' : ''} order by createdAt desc limit 500`, ...(br ? [br] : []), ...(st ? [st] : []), ...(q.staffId ? [String(q.staffId)] : [])).map(advView);
       return send(res, 200, { rows, outstanding: r2(sum(rows, r => r.balance)) });
     }
@@ -136,7 +136,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     const probView = x => ({ ...x, photos: jp(x.photos), history: jp(x.history), comments: jp(x.comments), branchName: get('branches', x.branchId)?.name || '' });
     if (p === '/api/problems/options' && method === 'GET') return send(res, 200, { categories: PROB_CATS, flow: PROB_FLOW, priorities: PRIOS });
     if (p === '/api/problems' && method === 'GET') {
-      const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = PROB_FLOW.includes(q.status) ? q.status : null;
+      const br = branchOrAll(me, q.branch), st = PROB_FLOW.includes(q.status) ? q.status : null;
       const rows = all(`select * from problems where 1=1${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''}${q.open === '1' ? " and status<>'CLOSED'" : ''} order by case status when 'CLOSED' then 1 else 0 end, case priority when 'Urgent' then 0 when 'High' then 1 when 'Normal' then 2 else 3 end, createdAt desc limit 500`, ...(br ? [br] : []), ...(st ? [st] : [])).map(probView);
       return send(res, 200, { rows, open: rows.filter(r => r.status !== 'CLOSED' && r.status !== 'RESOLVED').length });
     }
@@ -150,7 +150,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     }
     const pbm = p.match(/^\/api\/problems\/(\w+)\/(status|comment|assign)$/);
     if (pbm && (method === 'PUT' || method === 'POST')) {
-      const x = get('problems', pbm[1]); if (!x || (isBranchUser(me) && x.branchId !== me.branchId)) bad(404, 'Not found'); const b = await readBody(req), n = nowISO();
+      const x = get('problems', pbm[1]); if (!x || !inScope(me, x.branchId)) bad(404, 'Not found'); const b = await readBody(req), n = nowISO();
       if (pbm[2] === 'comment') {
         const text = String(b.text || '').trim().slice(0, 600); if (!text) bad(400, 'Write a comment'); const cs = jp(x.comments); cs.push({ at: n, by: me.name, text });
         run('update problems set comments=?, updatedAt=? where id=?', JSON.stringify(cs), n, x.id);
@@ -167,7 +167,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     // ----- internal inbox -----
     const INBOX_FILES = /^data:((?:image\/(?:jpeg|png|webp|gif))|(?:audio\/(?:webm|ogg|mp4|mpeg|wav|x-m4a))|(?:video\/(?:mp4|webm|quicktime))|application\/pdf);(?:codecs=[^;]*;)?base64,([A-Za-z0-9+/=]+)$/;
     const meId = me.id, isOwnerOrAdmin = isAdmin(me);
-    const chanOk = c => c.kind === 'all' || (c.kind === 'branch' && (isOwnerOrAdmin || c.branchId === me.branchId)) || (['dm', 'group'].includes(c.kind) && jp(c.members).includes(meId));
+    const chanOk = c => c.kind === 'all' || (c.kind === 'branch' && inScope(me, c.branchId)) || (['dm', 'group'].includes(c.kind) && jp(c.members).includes(meId));
     const ensureChannels = () => {
       if (!one("select 1 x from channels where kind='all' and name='Announcements'")) run("insert into channels(id,kind,name,branchId,announceOnly,members,createdBy,createdAt) values(?,?,?,?,?,?,?,?)", uid(), 'all', 'Announcements', '', 1, '[]', 'system', nowISO());
       if (!one("select 1 x from channels where kind='all' and name='All Barbers'")) run("insert into channels(id,kind,name,branchId,announceOnly,members,createdBy,createdAt) values(?,?,?,?,?,?,?,?)", uid(), 'all', 'All Barbers', '', 0, '[]', 'system', nowISO());
@@ -182,7 +182,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     };
     const msgView = m => ({ ...m, attachments: jp(m.attachments), reactions: jp(m.reactions) });
     if (p === '/api/inbox/people' && method === 'GET') {
-      const us = all('select id,name,role,branchId from users where active=1').filter(u => u.id !== meId && (isOwnerOrAdmin || u.role === 'admin' || u.branchId === me.branchId)).map(u => ({ id: u.id, name: u.name, role: u.role, branch: get('branches', u.branchId || '')?.name || '' }));
+      const us = all('select id,name,role,branchId from users where active=1').filter(u => u.id !== meId && (isOwnerOrAdmin || u.role === 'admin' || inScope(me, u.branchId))).map(u => ({ id: u.id, name: u.name, role: u.role, branch: get('branches', u.branchId || '')?.name || '' }));
       if (me.id !== 'owner') us.unshift({ id: 'owner', name: 'Owner', role: 'owner', branch: '' });
       return send(res, 200, us);
     }
@@ -264,7 +264,7 @@ export function createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, 
     const LEAVE_TYPES = ['Vacation', 'Sick', 'Emergency', 'Other'];
     const leaveView = l => ({ ...l, branchName: get('branches', l.branchId)?.name || '', staffName: get('staff', l.staffId)?.name || '' });
     if (p === '/api/leaves' && method === 'GET') {
-      const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = ['PENDING', 'APPROVED', 'REJECTED'].includes(q.status) ? q.status : null;
+      const br = branchOrAll(me, q.branch), st = ['PENDING', 'APPROVED', 'REJECTED'].includes(q.status) ? q.status : null;
       return send(res, 200, { rows: all(`select * from leaves where 1=1${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''} order by createdAt desc limit 500`, ...(br ? [br] : []), ...(st ? [st] : [])).map(leaveView), types: LEAVE_TYPES });
     }
     if (p === '/api/leaves' && method === 'POST') {

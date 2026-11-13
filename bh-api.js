@@ -658,9 +658,9 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const admin = me.role === 'owner' || me.role === 'admin', mine = me.role === 'barber' ? get('users', me.id)?.staffId || '' : '';
       const target = sid => { sid = String(sid || mine); const s = get('staff', sid); if (!s) bad(404, 'Choose a barber'); if (!admin && sid !== mine) bad(403, 'You can only edit your own profile'); return s; };
       if (sub === '/pro/me' && method === 'GET') {
-        const desk = me.role === 'cashier';   // front desk: runs the day board for its shop, no profile editing
+        const desk = me.role === 'cashier' || me.role === 'manager';   // front desk (and a branch manager): runs the day board, no profile editing
         if (!admin && !mine && !desk) bad(404, 'Your login is not linked to a barber profile yet. Ask the owner to link it in Back office → Users.');
-        const staff = (admin ? all('select * from staff where active=1 order by name') : desk ? all('select * from staff where active=1 and branchId=? order by name', me.branchId) : [get('staff', mine)]).filter(Boolean).map(s => {
+        const staff = (admin ? all('select * from staff where active=1 order by name') : desk ? all('select * from staff where active=1 order by name').filter(s => me.role === 'manager' ? me.branchIds.includes(s.branchId) : s.branchId === me.branchId) : [get('staff', mine)]).filter(Boolean).map(s => {
           const pr = one('select * from bh_barber where staffId=?', s.id) || {};
           return { id: s.id, name: s.name, photo: s.photo || '', branchName: get('branches', s.branchId)?.name || '', headline: pr.headline || '', bio: pr.bio || '', years: pr.years || 0, specialties: jp(pr.specialties),
             instagram: pr.instagram || '', facebook: pr.facebook || '', tiktok: pr.tiktok || '', verified: !!pr.verified, cover: pr.cover || '', offers: all('select pkg,price from bh_offers where staffId=?', s.id), portfolio: all('select id,url,caption,style from bh_portfolio where staffId=? order by createdAt desc', s.id), certs: all('select id,title,org,date,imageUrl image,coalesce(verified,0) verified from bh_certs where staffId=? order by date desc, createdAt desc', s.id) };

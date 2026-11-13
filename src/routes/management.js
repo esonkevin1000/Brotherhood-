@@ -7,7 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { NEXT } from '../lib/http.js';
 
-export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isBranchUser, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody }) {
+export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, p, method, q, me, admin, adminOnly }) {
     // ----- admin data -----
@@ -46,7 +46,7 @@ export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainD
       return send(res, 200, { total: one(`select count(*) n from (${base}) ${where}`, ...args).n, rows });
     }  if (p === '/api/customers/lookup' && method === 'GET') { const c = findCustomer(q.phone, q.email); return send(res, 200, { customer: c ? custCard(c) : null }); }
     if (p === '/api/customers' && method === 'POST') {
-      const b = await readBody(req), c = upsertCustomer(b, isBranchUser(me) ? 'pos' : 'admin', isBranchUser(me) ? me.branchId : (get('branches', String(b.branchId || '')) ? b.branchId : null));
+      const b = await readBody(req), c = upsertCustomer(b, isAdmin(me) ? 'admin' : 'pos', isBranchUser(me) ? me.branchId : (get('branches', String(b.branchId || '')) && inScope(me, String(b.branchId)) ? b.branchId : null));
       if (!c) bad(400, 'A phone number or an email is required to join the Customer Directory.');
       log(me, 'customer', 'customers', c.id, c.name); return send(res, 201, custCard(c));
     }
@@ -91,7 +91,9 @@ export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainD
     // ----- reset a user's PIN / password (shown once) -----
     const urm = p.match(/^\/api\/users\/(\w+)\/reset$/);
     if (urm && method === 'POST') {
-      adminOnly(); const u = get('users', urm[1]); if (!u) bad(404, 'Not found');
+      const u = get('users', urm[1]);
+      if (isManager(me)) { if (!u || !['cashier', 'barber'].includes(u.role) || !inScope(me, u.branchId)) bad(403, 'A manager can reset PINs of their own branches only'); } else adminOnly();
+      if (!u) bad(404, 'Not found');
       if ((u.role === 'admin' || u.role === 'owner') && me.role !== 'owner') bad(403, 'Only the owner can reset an admin');
       if (u.role === 'admin' || u.role === 'owner') { const pw = crypto.randomBytes(u.role === 'owner' ? 12 : 6).toString('base64url'); run('update users set passHash=? where id=?', hashPw(pw), u.id); log(me, 'reset-password', 'users', u.id, u.name); return send(res, 200, { password: pw }); }
       let pin; do { pin = String(100000 + crypto.randomInt(900000)); } while (one('select 1 x from users where pinKey=?', pinKeyOf(pin)));

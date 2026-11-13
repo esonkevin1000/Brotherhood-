@@ -4,7 +4,7 @@
 import os from 'node:os';
 import { NEXT } from '../lib/http.js';
 
-export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
+export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, url, p, method, q, me, admin, adminOnly }) {
     // ----- daily sales remittance (separate from expenses) -----
@@ -24,7 +24,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     }
     if (p === '/api/remittances' && method === 'GET') {
       const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : '2000-01-01', to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : '2099-12-31';
-      const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), st = ['PENDING', 'VERIFIED', 'FLAGGED', 'REJECTED'].includes(q.status) ? q.status : null;
+      const br = branchOrAll(me, q.branch), st = ['PENDING', 'VERIFIED', 'FLAGGED', 'REJECTED'].includes(q.status) ? q.status : null;
       const rows = all(`select * from remittances where date>=? and date<=?${br ? ' and branchId=?' : ''}${st ? ' and status=?' : ''} order by date desc, createdAt desc limit 500`, from, to, ...(br ? [br] : []), ...(st ? [st] : [])).map(remitView);
       return send(res, 200, { rows, totals: { count: rows.length, actual: r2(sum(rows, r => r.actual)), expected: r2(sum(rows, r => r.expected)), variance: r2(sum(rows, r => r.variance)) } });
     }
@@ -63,19 +63,19 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
 
     // ----- bookings (cashier + admin) -----
     if (p === '/api/bookings' && method === 'GET') {
-      const bid = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null);
+      const bid = branchOrAll(me, q.branch);
       const ok = s => /^\d{4}-\d{2}-\d{2}$/.test(s || ''), from = ok(q.from) ? q.from : (ok(q.date) ? q.date : todayStr()), to = ok(q.to) ? q.to : (ok(q.date) ? q.date : from);
       return send(res, 200, all(`select * from bookings where date>=? and date<=?${bid ? ' and branchId=?' : ''} order by date, time`, ...(bid ? [from, to, bid] : [from, to])).map(bookingView));
     }
     if (p === '/api/bookings' && method === 'POST') {
-      const b = await readBody(req); b.branchId = isBranchUser(me) ? me.branchId : b.branchId;
+      const b = await readBody(req); b.branchId = isBranchUser(me) ? me.branchId : b.branchId; if (!inScope(me, b.branchId)) bad(403, 'Not your branch');
       const bk = createBooking({ ...b, idemKey: req.headers['idempotency-key'] }, 'pos', me.name); if (bk.duplicate) return send(res, 200, bk);
       log(me, 'booking', 'bookings', bk.id, `${bk.customerName} ${bk.date} ${bk.time}`); return send(res, 201, bk);
     }
     const bkm = p.match(/^\/api\/bookings\/(\w+)(?:\/(arrive|history))?$/);
     if (bkm) {
       const cur = one('select * from bookings where id=?', bkm[1]); if (!cur) bad(404, 'Not found');
-      if (isBranchUser(me) && cur.branchId !== me.branchId) bad(403, 'Not your branch');
+      if (!inScope(me, cur.branchId)) bad(403, 'Not your branch');
       if (method === 'GET' && bkm[2] === 'history') return send(res, 200, all('select at, actor, fromStatus, toStatus, reason from booking_events where bookingId=? order by at, rowid', cur.id));
       if (method === 'PUT' && !bkm[2]) {
         const b = await readBody(req); if (!['cancelled', 'noshow'].includes(b.status)) bad(400, 'Bad status');
@@ -123,7 +123,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
       return send(res, 200, { ok: true, days: n });
     }
     if (p === '/api/live' && method === 'GET') {
-      const br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null), t = todayStr();
+      const br = branchOrAll(me, q.branch), t = todayStr();
       const duty = all(`select a.*, s.name from attendance a join staff s on s.id=a.staffId where a.date=? and a.timeOut is null and ifnull(a.status,'present')='present'${br ? ' and a.branchId=?' : ''}`, ...(br ? [t, br] : [t]));
       const onBreak = duty.filter(d => d.breakStartedAt).length;
       const queue = all(`select o.*, b.name branchName, s.name barberName from orders o left join branches b on b.id=o.branchId left join staff s on s.id=o.barberId
@@ -203,7 +203,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     const om = p.match(/^\/api\/orders\/(\w+)(?:\/(pay|void))?$/);
     if (om) {
       const cur = get('orders', om[1]); if (!cur) bad(404, 'Not found');
-      if (isBranchUser(me) && cur.branchId !== me.branchId) bad(403, 'Not your branch');
+      if (!inScope(me, cur.branchId)) bad(403, 'Not your branch');
       const o = parseOrder(cur), act = om[2];
       if (method === 'GET' && !act) return send(res, 200, withCust(o));
       if (method === 'PUT' && !act) {
@@ -271,7 +271,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     }
     if (p === '/api/attendance' && method === 'POST') {
       const b = await readBody(req), s = get('staff', b.staffId); if (!s || !s.active) bad(404, 'Unknown barber');
-      if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
+      if (!inScope(me, s.branchId)) bad(403, 'Not your branch');
       if (me.role === 'barber' && !modulesFor('barber').includes('attendance') && s.id !== (get('users', me.id)?.staffId || '')) bad(403, 'You can only clock yourself in and out');
       const br = get('branches', s.branchId), needPhoto = getSetting('attPhoto') !== '0', recv = new Date();
       // idempotent: a record sent twice (offline retry) is applied once
@@ -321,7 +321,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     }
     // attendance log with photos, lateness / undertime / overtime, flags and absences (daily, weekly or monthly through the date range)
     if (p === '/api/attendance/log' && method === 'GET') {
-      const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : todayStr(), to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : todayStr(), br = isBranchUser(me) ? me.branchId : (q.branch && q.branch !== 'all' ? q.branch : null);
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : todayStr(), to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : todayStr(), br = branchOrAll(me, q.branch);
       const rows = all(`select a.*, s.name staffName, b.name branchName from attendance a join staff s on s.id=a.staffId left join branches b on b.id=a.branchId where a.date>=? and a.date<=? and ifnull(a.status,'present')='present'${br ? ' and a.branchId=?' : ''}${q.flagged === '1' ? ' and a.flagged=1' : ''} order by a.date desc, a.timeIn desc limit 1000`, from, to, ...(br ? [br] : []))
         .map(a => ({ ...a, corrections: jp(a.corrections), geoIn: a.geoIn ? JSON.parse(a.geoIn) : null, geoOut: a.geoOut ? JSON.parse(a.geoOut) : null, workedMins: a.timeOut ? Math.round((new Date(a.timeOut) - new Date(a.timeIn)) / 60000) - (a.breakMins || 0) : null }));
       const absences = []; const end = to < todayStr() ? to : todayStr();
@@ -354,7 +354,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     const sm = p.match(/^\/api\/shifts\/(\w+)\/close$/);
     if (sm && method === 'POST') {
       const s = get('shifts', sm[1]); if (!s || s.status !== 'open') bad(404, 'No such open shift');
-      if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
+      if (!inScope(me, s.branchId)) bad(403, 'Not your branch');
       const zl = dayLocked(s.branchId, s.businessDate); if (zl) bad(409, `The sales reading for ${s.businessDate} (Z-${zl.no}) is already done. Only one per day.`);
       const ot = openTickets(s.branchId, s.businessDate); if (ot) bad(409, `Cannot do the sales reading yet: ${ot} ticket${ot === 1 ? ' is' : 's are'} still open (pay later or in the chair). Pay or cancel ${ot === 1 ? 'it' : 'them'} first.`);
       const b = await readBody(req), z = zData(s); let counted;
@@ -374,10 +374,11 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     if (p === '/api/cash' && method === 'POST') {
       const b = await readBody(req), s = get('shifts', b.shiftId); if (!s || s.status !== 'open') bad(409, 'Shift is not open');
       if (!admin) needAny(me, b.kind === 'expense' ? 'expenses' : 'reading');
-      if (isBranchUser(me) && s.branchId !== me.branchId) bad(403, 'Not your branch');
+      if (!inScope(me, s.branchId)) bad(403, 'Not your branch');
       if (!['in', 'out', 'expense', 'advance'].includes(b.kind)) bad(400, 'Bad type');
       const amount = r2(b.amount); if (!(amount > 0)) bad(400, 'Amount must be more than 0');
       if (b.kind === 'advance' && !get('staff', b.staffId)) bad(400, 'Pick the barber');
+      if (b.staffId && get('staff', b.staffId) && get('staff', b.staffId).branchId !== s.branchId) bad(400, 'Pick a barber of this branch');   // a cash move is charged inside its own branch
       const who = ['advance', 'expense'].includes(b.kind) && get('staff', b.staffId) ? b.staffId : '';
       run('insert into cash_moves(id,shiftId,branchId,date,kind,amount,note,staffId,ts,by) values(?,?,?,?,?,?,?,?,?,?)', uid(), s.id, s.branchId, todayStr(), b.kind, amount, String(b.note || '').slice(0, 200), who, nowISO(), me.name);
       log(me, 'cash-' + b.kind, 'cash', s.id, '₱' + amount); return send(res, 201, { ok: true });
