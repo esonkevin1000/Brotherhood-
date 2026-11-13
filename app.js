@@ -179,7 +179,7 @@ const filterBar = extra => extra ? `<div class="row" style="margin-bottom:14px;a
 const repLabel = r => r && r.label ? `<div class="mute" style="font-size:12.5px;margin:2px 0 12px;padding:8px 12px;border:1px dashed var(--line, #ccc);border-radius:10px"><b>${esc(r.label)}</b><br>${esc(r.filters.branch)} · ${esc(r.filters.from)}${r.filters.to !== r.filters.from ? " → " + esc(r.filters.to) : ""}</div>` : "";
 function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
-  const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
+  const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>${name === 'records' ? '<button class="btn ghost sm" data-act="recexport" title="One row per record, with corrections and voids. The export is written in the activity log.">⬇ Reconciliation export</button>' : ''}`;
   return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? repLabel(r) + renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
 }
 const NAVG = [
@@ -755,6 +755,7 @@ document.addEventListener('click', async e => {
   if (act === 'logout') { token = ''; try { localStorage.removeItem('bp.token'); localStorage.removeItem('bp.master'); } catch (x) { } loggedIn = false; return render(); }
   if (act === 'edit') return form(d.kind, d.id);
   if (act === 'del') { if (confirm('Are you sure?')) mut(async () => { const r = await api('DELETE', `/api/${d.kind}/${d.id}`); if (r.deactivated) alert('This record has history, so it was deactivated instead of deleted.'); }); return; }
+  if (act === 'recexport') return download(`/api/records/export?${qs()}`, `records-${ui.from}_${ui.to}.csv`);   // T31
   if (act === 'export') return download(`/api/reports/${d.name}?${qs()}&format=csv`, `${d.name}-${ui.from}_${ui.to}.csv`);
   if (act === 'delreview') { if (confirm('Delete this review? It will disappear from the booking site.')) mut(async () => { await api('DELETE', `/api/reviews/${d.id}`); await loadView(); }); return; }
   if (act === 'resetuser') {

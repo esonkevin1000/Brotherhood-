@@ -12,6 +12,11 @@ export function createRecordRoutes({ uid, all, one, run, get, nowISO, log, order
   const staffName = id => get('staff', id)?.name || '';
   // what the record looks like now, for the field being corrected
   const current = (o, kind) => kind === 'amount' ? { total: r2(o.total) } : kind === 'method' ? { method: methodOf(o) } : kind === 'barber' ? { barberId: o.barberId || '', name: staffName(o.barberId) } : { status: o.status };
+  // what a correction changes, in words
+  const describe = a => { const before = jp(a.before), after = jp(a.after); return a.kind === 'amount' ? `amount ${peso(before.total)} → ${peso(after.total)}` : a.kind === 'method' ? `payment method ${before.method} → ${after.method}` : a.kind === 'barber' ? `barber ${before.name || 'none'} → ${after.name}` : 'voided'; };
+  const LABEL = 'Internal operational record. Not an official receipt or accounting record.';
+  // a text cell that starts like a formula is kept as text when the CSV is opened in a spreadsheet
+  const cell = v => { let s = String(v ?? ''); if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   // the correction takes effect: the change, one history row, one activity row
   function apply(a, me) {
     const o = get('orders', a.orderId); if (!o || o.status !== 'paid') bad(409, 'This record is no longer open for corrections');
@@ -21,7 +26,7 @@ export function createRecordRoutes({ uid, all, one, run, get, nowISO, log, order
     if (a.kind === 'method') run('update orders set tenders=? where id=?', JSON.stringify([{ method: after.method, amount: r2(o.total) }]), o.id);
     if (a.kind === 'barber') run('update orders set barberId=? where id=?', after.barberId, o.id);
     if (a.kind === 'void') run("update orders set status='void', voidReason=? where id=? and status='paid'", a.reason, o.id);
-    const what = a.kind === 'amount' ? `amount ${peso(before.total)} → ${peso(after.total)}` : a.kind === 'method' ? `payment method ${before.method} → ${after.method}` : a.kind === 'barber' ? `barber ${before.name || 'none'} → ${after.name}` : 'voided';
+    const what = describe(a);
     orderEvent(o.id, 'completed', a.kind === 'void' ? 'cancelled' : 'completed', me.name, `${what}: ${a.reason}`);
     log(me, 'record-corrected', 'orders', o.id, `#${o.no} ${what} (${a.reason}); asked by ${a.requestedBy}`);
   }
@@ -39,6 +44,25 @@ export function createRecordRoutes({ uid, all, one, run, get, nowISO, log, order
       orderEvent(o.id, 'completed', 'completed', me.name, 'payment verified');
       log(me, 'record-verified', 'orders', o.id, `#${o.no} ₱${o.total}`);
       return send(res, 200, { ok: true });
+    }
+
+    // ----- reconciliation export (T31): every finished record in the range, voids included, with its corrections; audited -----
+    if (p === '/api/records/export' && method === 'GET') {
+      if (!isAdmin(me) && me.role !== 'manager') bad(403, 'Only the owner, admins and managers can export records');
+      const br = branchOrAll(me, q.branch), day = /^\d{4}-\d{2}-\d{2}$/;
+      const to = day.test(q.to || '') ? q.to : nowISO().slice(0, 10), from = day.test(q.from || '') ? q.from : to;
+      const os = all(`select o.*, b.name branchName, s.name barberName from orders o left join branches b on b.id=o.branchId left join staff s on s.id=o.barberId
+        where o.status in ('paid','void') and o.date>=? and o.date<=?${br ? ' and o.branchId=?' : ''} order by o.date, o.no`, ...(br ? [from, to, br] : [from, to]));
+      const adj = new Map(); for (const a of all(`select * from record_adjustments where orderId in (select id from orders where date>=? and date<=?) order by createdAt`, from, to)) (adj.get(a.orderId) || adj.set(a.orderId, []).get(a.orderId)).push(a);
+      const branchName = br ? get('branches', br)?.name || '' : 'All branches';
+      const lines = [cell(LABEL), [`Branch: ${branchName}`, `From: ${from}`, `To: ${to}`].map(cell).join(','), '',
+        ['Visit', 'Date', 'Branch', 'Barber', 'Source', 'Services', 'Amount', 'Payment method', 'Payment status', 'Record status', 'BIR invoice no.', 'Adjustments'].join(','),
+        ...os.map(o => [o.no, o.date, o.branchName || '', o.barberName || '', o.source === 'appointment' ? 'Appointment' : 'Walk-in',
+          jp(o.items).map(i => i.name + (i.qty > 1 ? ' x' + i.qty : '')).join(', '), r2(o.total), methodOf(o), o.payStatus || 'reported', o.status === 'void' ? 'void' : 'completed', o.invoiceNo || '',
+          (adj.get(o.id) || []).map(a => `${describe(a)} (${a.status}${a.decidedBy ? ' by ' + a.decidedBy : ''}; asked by ${a.requestedBy}): ${a.reason}`).join('; ')].map(cell).join(','))];
+      log(me, 'records-exported', 'orders', '', `${branchName} ${from} to ${to}: ${os.length} records`);
+      res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="records-${from}_${to}.csv"`, 'Cache-Control': 'no-store' });
+      return res.end('﻿' + lines.join('\r\n') + '\r\n');
     }
 
     // ----- corrections (T29) -----
