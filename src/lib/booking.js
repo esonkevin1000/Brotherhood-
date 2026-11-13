@@ -1,7 +1,7 @@
 // Booking rules: which times are free, making a booking, the price snapshot, and a booking's history.
 // Created once by server.js with the database helpers it needs, so the rules can also be tested on their own.
-const pad = n => String(n).padStart(2, '0');
-export const hmOf = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+import { createAvailability, hmOf } from './availability.js';
+export { hmOf };
 // the key a phone or browser sends with a booking so that a repeated tap or a retry never makes a second booking
 export const idemKeyOf = v => { const k = String(v || '').trim(); return k.length >= 16 && k.length <= 200 ? k : ''; };
 export const snapOf = b => { try { const s = b.snapshot ? JSON.parse(b.snapshot) : null; return s && Array.isArray(s.items) && s.items.length ? s : null; } catch { return null; } };
@@ -13,38 +13,8 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     for (const id of ids) { const it = get('items', id); if (!it || !it.active || it.type !== 'service') bad(400, 'Unknown service'); m += it.mins || 30; }
     return Math.max(30, m);
   }
-  // a barber's blocked time (breaks, training, day off) and the owner's buffer between cuts both close slots
-  const timeBlocked = (sid, date, start, mins) => { try { return all('select fromMin, toMin from bh_blocked where staffId=? and date=?', sid, date).some(r => start < r.toMin && r.fromMin < start + mins); } catch { return false; } };
-  const bookedOverlap = (sid, date, start, mins) => { const buf = +getSetting('bufferMins') || 0; return all("select * from bookings where staffId=? and date=? and status in ('booked','arrived')", sid, date).some(b => start < toMin(b.time) + b.mins + buf && toMin(b.time) < start + mins + buf) || timeBlocked(sid, date, start, mins); };
-  // T13, only in branches using the new booking system: approved leave closes the day, and the barber's weekly hours
-  // (a custom start and end, or a day off) narrow the branch hours. null = no limit beyond the branch hours (today's behaviour).
-  const weekdayOf = date => new Date(date + 'T00:00:00Z').getUTCDay();
-  function workWindow(s, date) {
-    if (!mvpOn(s.branchId)) return null;
-    try { if (one("select 1 x from leaves where staffId=? and status='APPROVED' and from_date<=? and to_date>=?", s.id, date, date)) return [0, 0]; } catch { }
-    const r = one('select startMin, endMin from staff_schedules where staffId=? and weekday=?', s.id, weekdayOf(date));
-    return r ? [r.startMin, r.endMin] : null;
-  }
-  const inHours = (s, date, start, mins) => { const w = workWindow(s, date); return !w || (start >= w[0] && start + mins <= w[1]); };
-  // T14, only in branches using the new booking system: a barber with a list of services does only those (no list = every service)
-  const canDo = (s, itemIds) => {
-    if (!itemIds?.length || !mvpOn(s.branchId)) return true;
-    const mine = all('select itemId from staff_services where staffId=?', s.id).map(r => r.itemId);
-    return !mine.length || itemIds.every(i => mine.includes(String(i)));
-  };
-  const staffFree = (s, date, start, mins) => s.active && inHours(s, date, start, mins) && !(date === todayStr() && staffState(s.id, date).state === 'off') && !bookedOverlap(s.id, date, start, mins);
-  function slotsFor(branchId, date, staffId, mins, itemIds = []) {
-    const br = get('branches', branchId); if (!br) bad(400, 'Pick a branch');
-    const open = toMin(br.openTime || '09:00'), close = toMin(br.closeTime || '21:00'), nowM = minsOfDay(now());
-    let pool = staffId === 'any' ? all('select * from staff where branchId=? and active=1', branchId) : [get('staff', staffId)].filter(s => s && s.branchId === branchId);
-    pool = pool.filter(s => canDo(s, itemIds));
-    const out = [];
-    for (let m = open; m + mins <= close; m += 30) {
-      if (date === todayStr() && m < nowM + 15) continue;
-      if (pool.some(s => staffFree(s, date, m, mins))) out.push(hmOf(m));
-    }
-    return out;
-  }
+  // which times are free: src/lib/availability.js (T15)
+  const { timeBlocked, bookedOverlap, canDo, staffFree, slotsFor, pickAny } = createAvailability({ all, one, get, toMin, minsOfDay, todayStr, staffState, getSetting, bad, mvpOn, now });
   // owner's rule: after N missed appointments in 90 days a number can no longer book online (the owner can allow a customer again)
   function noShowGate(phone, email) {
     const max = +getSetting('noshowMax') || 0; if (!max) return;
@@ -92,11 +62,7 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     const mins = bookingMins(itemIds), start = toMin(time);
     let sid = String(b.staffId || 'any');
     if (!slotsFor(branchId, date, sid, mins, itemIds).includes(time)) bad(409, 'That time is no longer available. Please pick another.');
-    if (sid === 'any') {
-      const load = s => one("select count(*) n from bookings where staffId=? and date=? and status in ('booked','arrived')", s.id, date).n;
-      const free = all('select * from staff where branchId=? and active=1', branchId).filter(s => canDo(s, itemIds) && staffFree(s, date, start, mins)).sort((x, y) => load(x) - load(y));
-      sid = free[0].id;
-    }
+    if (sid === 'any') sid = pickAny(branchId, date, start, mins, itemIds).id;   // fewest bookings that day, then the lowest id
     const cust = upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos', branchId);
     const id = uid();
     run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId,snapshot,idemKey) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -112,5 +78,5 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     return { ...row, itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: snap ? r2(snap.total) : r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
   }
 
-  return { bookingMins, canDo, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };
+  return { bookingMins, canDo, pickAny, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };
 }
