@@ -1,5 +1,9 @@
 // Back-office reports (dashboard, finished services, commissions, payroll, attendance, payment methods, discounts, cash,
 // scorecard, accountability, old POS readings) and their CSV export. Created once by server.js with the helpers they read from.
+// T30: every report says what it is
+export const INTERNAL_LABEL = 'Internal operational record. Not an official receipt or accounting record.';
+// one CSV cell: quoted when needed; text that starts like a spreadsheet formula is kept as text
+export const csvCell = v => { let s = String(v ?? ''); if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 export function createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData }) {
   const REPORTS = {
     dashboard(f) {
@@ -170,7 +174,7 @@ export function createReports({ dOf, todayStr, r2, sum, all, one, get, commissio
     }
   };
   function csv(rep) {
-    const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const q = csvCell;
     const head = rep.label ? [q(rep.label), q(`Branch: ${rep.filters.branch}`) + ',' + q(`From: ${rep.filters.from}`) + ',' + q(`To: ${rep.filters.to}`)].join('\n') + '\n\n' : '';
     return '﻿' + head + rep.tables.map(t => [t.title, t.cols.map(c => c[0]).join(','), ...t.rows.map(r => r.map((v, j) => q(t.cols[j] && (t.cols[j][1] === 'idlink' || t.cols[j][1] === 'days') ? String(v).split('~')[0] : v)).join(','))].join('\n')).join('\n\n');
   }

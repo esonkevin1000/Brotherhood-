@@ -3,6 +3,7 @@
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
 import os from 'node:os';
 import { NEXT } from '../lib/http.js';
+import { INTERNAL_LABEL } from '../lib/reports.js';
 
 export function createOperationsRoutes({ syncCommission, isAppt, walkinGuard, orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
@@ -115,9 +116,9 @@ export function createOperationsRoutes({ syncCommission, isAppt, walkinGuard, or
       const br = isManager(me) ? branchOrAll(me, q.branch) : q.branch && q.branch !== 'all' && get('branches', q.branch) ? q.branch : null;   // a manager: one of their branches
       const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : todayStr(), from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : to;
       const rep = fn({ from, to, br });   // T30: every report says what it is, and the filters it was run with
-      rep.label = 'Internal operational record. Not an official receipt or accounting record.';
+      rep.label = INTERNAL_LABEL;
       rep.filters = { branch: br ? get('branches', br)?.name || '' : 'All branches', from, to };
-      if (q.format === 'csv') { res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${rm[1]}-${from}_${to}.csv"` }); return res.end(csv(rep)); }
+      if (q.format === 'csv') { log(me, 'report-exported', 'reports', rm[1], `${rep.filters.branch} ${from} to ${to}`); res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${rm[1]}-${from}_${to}.csv"` }); return res.end(csv(rep)); }
       return send(res, 200, rep);
     }
     if (p === '/api/payroll/pay' && method === 'POST') {
@@ -284,7 +285,9 @@ export function createOperationsRoutes({ syncCommission, isAppt, walkinGuard, or
       }
       if (method === 'POST' && act === 'void') {
         const b = body;
-        if (o.status === 'paid' && !admin && !isManager(me)) bad(403, 'Only an admin or the branch manager can void a paid sale');
+        // D-9: a paid sale is a service record. A manager asks for a void correction (approved by someone else); the owner's or an
+        // admin's own void takes effect at once and is kept as an approved correction.
+        if (o.status === 'paid' && !admin) bad(403, 'A finished visit is voided through a correction: open it on the Today screen and choose Correct.');
         if (o.status === 'paid') {   // a paid sale is final for staff; the owner/admin may only void it with a reason, and never once it is inside a sales reading
           const zl = dayLocked(o.branchId, o.date); if (zl) bad(409, `This sale is already included in the sales reading (Z-${zl.no}), so it can no longer be voided.`);
           if (String(b.reason || '').trim().length < 3) bad(400, 'Enter the reason for voiding a paid sale');
@@ -292,7 +295,11 @@ export function createOperationsRoutes({ syncCommission, isAppt, walkinGuard, or
         if (o.status === 'void') bad(409, 'Already void');
         run("update orders set status='void', voidReason=? where id=?", String(b.reason || '').slice(0, 200), o.id);
         orderEvent(o.id, orderPlan(cur), 'cancelled', me.name, String(b.reason || '').slice(0, 200));
-        if (o.status === 'paid') syncCommission(o.id, 'voided at the POS: ' + String(b.reason || '').slice(0, 150));   // T33
+        if (o.status === 'paid') {
+          syncCommission(o.id, 'voided at the POS: ' + String(b.reason || '').slice(0, 150));   // T33
+          run("insert into record_adjustments(id,orderId,branchId,kind,before,after,reason,status,requestedById,requestedBy,createdAt,decidedBy,decidedAt) values(?,?,?,'void',?,?,?,'approved',?,?,?,?,?)", uid() + uid(), o.id, o.branchId, JSON.stringify({ status: 'paid' }), JSON.stringify({ status: 'void' }), String(b.reason || '').slice(0, 300), me.id, me.name, nowISO(), me.name, nowISO());
+          run("update record_adjustments set status='rejected', decidedBy=?, decidedAt=?, note='The record was voided.' where orderId=? and status='requested'", me.name, nowISO(), o.id);
+        }
         if (o.status === 'in_chair') promoteNext(o.branchId, o.chairId);
         log(me, 'void', 'orders', o.id, `#${o.no} ${b.reason || ''}`); return send(res, 200, { ok: true });
       }

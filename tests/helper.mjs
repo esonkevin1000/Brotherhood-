@@ -10,7 +10,7 @@ export async function startServer(port, env = {}, dbDir = fs.mkdtempSync(path.jo
   const dbFile = path.join(dbDir, 't.db'), B = 'http://localhost:' + port;
   const srv = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, ADMIN_PASSWORD: 'ownerpw', DB_FILE: dbFile, PORT: String(port), ...env }, stdio: 'ignore' });
   let up = false, died = false; srv.once('exit', () => { died = true; });
-  for (let i = 0; i < 80 && !up; i++) { try { await fetch(B + '/api/public/terms'); up = true; } catch { await new Promise(r => setTimeout(r, 250)); } }
+  for (let i = 0; i < 200 && !up; i++) { try { await fetch(B + '/api/public/terms'); up = true; } catch { await new Promise(r => setTimeout(r, 250)); } }
   if (!up || died) { srv.kill(); throw new Error('server did not start on port ' + port + (died ? ' (it exited: is the port already in use?)' : '')); }
   async function call(method, url, body, tok, headers = {}) {
     const r = await fetch(B + url, { method, headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
