@@ -44,6 +44,8 @@ try {
   const byM = Object.fromEntries((table('By payment method')?.rows || []).map(x => [x[0], x]));
   ok('by method with the verified share', byM.Cash?.[2] === 400 && byM.GCash?.[2] === 200 && /100/.test(byM.GCash?.[3]) && /^0/.test(byM.Cash?.[3]), table('By payment method'));
 
+  ok('every number says how it is counted (T32)', rep.cards.every(c => c.how), rep.cards.filter(c => !c.how));
+  ok('the dashboard numbers too', (await call('GET', '/api/reports/dashboard', null, owner)).j.cards.every(c => c.how));
   ok('the report carries the internal-record label', rep.label === LABEL, rep.label);
   ok('and the filters it used', rep.filters?.branch === A.name && rep.filters?.from === date && rep.filters?.to === date, rep.filters);
   for (const n of ['sales', 'tender', 'commissions']) {

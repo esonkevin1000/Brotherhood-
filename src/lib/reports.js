@@ -7,8 +7,8 @@ export function createReports({ dOf, todayStr, r2, sum, all, one, get, commissio
       const all7 = paidOrders(w, t, f.br), today = all7.filter(o => o.date === t);
       const brs = all('select * from branches order by rowid').filter(b => !f.br || b.id === f.br);
       return {
-        cards: [{ label: 'Net sales today', value: sum(today, o => o.total), t: 'peso' }, { label: 'Net sales (7 days)', value: sum(all7, o => o.total), t: 'peso' },
-          { label: 'Transactions today', value: today.length, t: 'num' }, { label: 'Customers (total)', value: one('select count(*) n from customers').n, t: 'num' }],
+        cards: [{ label: 'Net sales today', value: sum(today, o => o.total), t: 'peso', how: 'Sum of finished visits today, after discounts and approved corrections. Voided records are left out.' }, { label: 'Net sales (7 days)', value: sum(all7, o => o.total), t: 'peso', how: 'The same, for today and the 6 days before.' },
+          { label: 'Transactions today', value: today.length, t: 'num', how: 'Finished visits today. Voided and unfinished visits are not counted.' }, { label: 'Customers (total)', value: one('select count(*) n from customers').n, t: 'num', how: 'Every saved customer in all branches, all time. Not filtered by branch.' }],
         tables: [{
           title: 'Branches', cols: [['Branch'], ['Today', 'peso'], ['7 days', 'peso'], ['Transactions today', 'num']],
           rows: brs.map(b => [b.name, sum(today.filter(o => o.branchId === b.id), o => o.total), sum(all7.filter(o => o.branchId === b.id), o => o.total), today.filter(o => o.branchId === b.id).length])
@@ -147,9 +147,9 @@ export function createReports({ dOf, todayStr, r2, sum, all, one, get, commissio
       const pct = (v, n) => n ? Math.round(v / n * 100) + '%' : '—';
       const appt = os.filter(o => o.source === 'appointment');
       return {
-        cards: [{ label: 'Recorded value', value: net, t: 'peso' }, { label: 'Visits', value: os.length, t: 'num' },
-          { label: 'From appointments', value: appt.length, t: 'num', sub: '₱' + sum(appt, o => o.total).toFixed(2) }, { label: 'Walk-ins', value: os.length - appt.length, t: 'num', sub: '₱' + (net - sum(appt, o => o.total)).toFixed(2) },
-          { label: 'Verified payments', value: pct(os.filter(ver).length, os.length), t: 'text', sub: os.filter(ver).length + ' of ' + os.length + ' visits' }],
+        cards: [{ label: 'Recorded value', value: net, t: 'peso', how: 'Sum of finished visits in the dates chosen, after discounts and approved corrections. Voided records are left out.' }, { label: 'Visits', value: os.length, t: 'num', how: 'Finished visits in the dates chosen. Voided and unfinished visits are not counted.' },
+          { label: 'From appointments', value: appt.length, t: 'num', sub: '₱' + sum(appt, o => o.total).toFixed(2), how: 'Finished visits that started as a booking.' }, { label: 'Walk-ins', value: os.length - appt.length, t: 'num', sub: '₱' + (net - sum(appt, o => o.total)).toFixed(2), how: 'All other finished visits.' },
+          { label: 'Verified payments', value: pct(os.filter(ver).length, os.length), t: 'text', sub: os.filter(ver).length + ' of ' + os.length + ' visits', how: 'Visits whose payment a manager or the owner marked verified, out of all finished visits.' }],
         tables: [
           { title: 'By day', cols: [['Date'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.date, (a, b) => a[0].localeCompare(b[0])).map(([k, r]) => [k, r.n, r.a]) },
           { title: 'By branch', cols: [['Branch'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.branchName || '—').map(([k, r]) => [k, r.n, r.a]) },
