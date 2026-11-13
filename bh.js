@@ -1313,6 +1313,7 @@ async function sapi(path, opt = {}) {
 async function loadToday(quiet) {
   try { S.td = await sapi('/svc/today' + (S.tdBranch ? '?branch=' + encodeURIComponent(S.tdBranch) : '')); S.tdErr = '';
     S.tdAdj = ['owner', 'admin', 'manager'].includes(S.td.role) ? await sapi(`/adjustments?status=requested&branch=${encodeURIComponent(S.td.branch.id)}`).catch(() => []) : [];   // T29
+    S.tdEarn = S.td.role === 'barber' ? await sapi('/earnings').catch(() => null) : ['owner', 'admin', 'manager'].includes(S.td.role) ? await sapi(`/earnings/branch?branch=${encodeURIComponent(S.td.branch.id)}`).catch(() => null) : null;   // T34
   }
   catch (e) { S.tdErr = e.message; if (!quiet) toast(e.message); }
   if ((S.proTab === 'today' || (S.proTab === 'tools' && !S.tool)) && !document.querySelector('.lb')) render();   // the Tools tab also waits for this data
@@ -1339,8 +1340,25 @@ function vToday() {
   <div class="sec-h"><h2>In the chair</h2><span class="mute sm">${chair.length}</span></div><div class="list">${chair.map(x => tdCard(x, `${esc(x.barberName)} · started ${minsAgo(x.startedAt || x.createdAt)} ago`, `<button class="btn sm sp" data-tfin="${x.id}">${ic('check')} Done</button><button class="btn sec sm" data-tcan="${x.id}">Cancel</button>`)).join('') || empty('Nobody in the chair right now.')}</div>
   <div class="sec-h"><h2>Waiting</h2><span class="mute sm">${waiting.length}</span></div><div class="list">${waiting.map(x => tdCard(x, `${x.plan === 'checked_in' ? 'Booked · checked in · ' : ''}${x.barberName ? 'For ' + esc(x.barberName) : 'Any barber'} · waiting ${minsAgo(x.createdAt)}${x.estimate ? ` · starts about ${t12(x.estimate.start)}${x.barberName ? '' : ' with ' + esc(x.estimate.barber)} <span class="tag">estimate</span>` : ''}`, `<button class="btn sm sp" data-tstart="${x.id}">${me ? 'Start with me' : 'Start'}</button><button class="btn sec sm" data-tfin="${x.id}">Done</button>${me ? '' : `<button class="btn sec sm" data-tleft="${x.id}">Left</button>`}<button class="btn sec sm" data-tcan="${x.id}">Cancel</button>`)).join('') || empty('No one is waiting.')}</div>
   <div class="sec-h"><h2>Done today</h2><span class="mute sm">${done.length} · ${peso(d.totals.earned)}</span></div><div class="list">${done.slice().reverse().map(x => tdCard(x, `${esc(x.barberName)} · ${esc(x.method)}${x.discountName ? ' · ' + esc(x.discountName) : ''}${x.invoiceNo ? ' · BIR invoice ' + esc(x.invoiceNo) : ''}${x.payStatus === 'verified' ? ' <span class="tag ok">verified</span>' : ''}`, me ? '' : `<button class="btn sec sm" data-tadj="${x.id}">Correct</button>${x.payStatus !== 'verified' && d.role !== 'cashier' ? `<button class="btn sec sm" data-tverify="${x.id}">Verify payment</button>` : ''}`)).join('') || empty('No finished services yet today.')}</div>
+  ${earnSection(d)}
   <p class="sm mute" style="margin:16px 2px 0">${NOT_RECEIPT}</p></div>`;
 }
+// T34: a barber's own commission entries (today, this week, history); managers and the owner see each barber's totals
+function earnSection(d) {
+  const e = S.tdEarn; if (!e) return '';
+  const how = 'Your commission from finished visits: service value after discounts × your %, plus product commission. A correction or void adds a correcting line; nothing is erased. Allowance and lunch are not included.';
+  if (e.entries) {
+    const list = S.earnAll ? e.entries : e.entries.slice(0, 8);
+    const line = x => `<div class="card" style="padding:10px 12px"><div class="row"><b class="sm">${x.visitNo ? '#' + x.visitNo + ' · ' : ''}${esc(x.date)}</b><span class="sp"></span><b class="num" style="color:${x.amount < 0 ? 'var(--bad, #e5484d)' : 'inherit'}">${x.amount < 0 ? '−' : ''}${peso(Math.abs(x.amount))}</b></div><div class="sm mute">${x.kind === 'earn' ? esc(x.pct + '% of ' + peso(x.base) + (x.productComm ? ' + ' + peso(x.productComm) + ' products' : '')) : 'Correction: ' + esc(x.reason)}</div></div>`;
+    return `<div class="sec-h"><h2>My earnings</h2><span class="mute sm">commission</span></div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${kpi('Today', peso(e.today.total), '', how)}${kpi('This week', peso(e.period.total), 'from ' + esc(e.period.from.slice(5)), how)}${kpi('All', peso(e.all.total), '', how)}</div>
+  <div class="list" style="margin-top:10px">${list.map(line).join('') || '<div class="card sm mute">No earnings recorded yet.</div>'}</div>
+  ${e.entries.length > 8 ? `<button class="btn sec sm" data-earnall style="margin-top:8px">${S.earnAll ? 'Show fewer' : 'Show all ' + e.entries.length}</button>` : ''}`;
+  }
+  if (!e.barbers?.length) return '';
+  return `<div class="sec-h"><h2>Barbers' commission</h2><span class="mute sm">today · this week</span></div><div class="list">${e.barbers.map(b => `<div class="card" style="padding:10px 12px"><div class="row"><b>${esc(b.name)}</b><span class="sp"></span><b class="num">${peso(b.today)}</b></div><div class="sm mute">This week ${peso(b.period)}</div></div>`).join('')}</div>`;
+}
+document.addEventListener('click', e => { if (e.target.closest('[data-earnall]')) { S.earnAll = !S.earnAll; render(); } });
 // a photo from the phone, made small before it is sent
 async function shrinkPhoto(file, max = 1100) {
   let bmp = null; if (file.size > 500000) { try { bmp = await createImageBitmap(file, { resizeWidth: max, resizeQuality: 'medium', imageOrientation: 'from-image' }); } catch (e) { bmp = null; } }

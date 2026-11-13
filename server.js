@@ -21,6 +21,7 @@ import { createServiceRoutes } from './src/routes/service-records.js';
 import { createDeviceRoutes } from './src/routes/devices.js';
 import { createScheduleRoutes } from './src/routes/schedules.js';
 import { createRecordRoutes } from './src/routes/records.js';
+import { createEarningsRoutes } from './src/routes/earnings.js';
 import { createReports } from './src/lib/reports.js';
 import { createBookings, idemKeyOf, snapOf } from './src/lib/booking.js';
 import { HttpError, bad, MIME, send, readBody, noteGzip, staticServer, NEXT } from './src/lib/http.js';
@@ -1141,6 +1142,7 @@ async function handleIn(req, res) {
   { const r = await DEVICES({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/devices.js
   { const r = await SCHEDULES({ req, res, p, q, method, me, manageIn }); if (r !== NEXT) return r; }   // src/routes/schedules.js
   { const r = await RECORDS({ req, res, p, q, method, me, manageIn }); if (r !== NEXT) return r; }   // src/routes/records.js
+  { const r = await EARNINGS({ res, p, q, method, me }); if (r !== NEXT) return r; }   // src/routes/earnings.js
   { const r = await MANAGEMENT({ req, res, p, method, q, me, admin, adminOnly, manageIn }); if (r !== NEXT) return r; }   // src/routes/management.js
   { const r = await PARTNER_SHOPS({ req, res, p, method, me }); if (r !== NEXT) return r; }   // src/routes/partner-shops.js
   { const r = await MARKETING({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/marketing.js
@@ -1153,6 +1155,7 @@ async function handleIn(req, res) {
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
 const SERVICE_RECORDS = createServiceRoutes({ syncCommission, isAppt, dayRows, queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
+const EARNINGS = createEarningsRoutes({ all, one, get, todayStr, dOf, r2, isAdmin, inScope, bad, send });
 const RECORDS = createRecordRoutes({ syncCommission, uid, all, one, run, get, nowISO, log, orderEvent, isAdmin, inScope, branchOrAll, dayLocked, jp, r2, bad, send, readBody });
 const SCHEDULES = createScheduleRoutes({ all, run, get, log, tx, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });

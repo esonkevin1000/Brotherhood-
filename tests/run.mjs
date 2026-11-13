@@ -20,7 +20,7 @@ try { const pid = +fs.readFileSync(LOCK, 'utf8'); if (pid && pid !== process.pid
 fs.writeFileSync(LOCK, String(process.pid)); process.on('exit', () => { try { if (+fs.readFileSync(LOCK, 'utf8') === process.pid) fs.rmSync(LOCK); } catch { } });
 for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => process.exit(1));
 const inUse = port => new Promise(r => { const s = net.connect({ port, host: '127.0.0.1' }); s.once('connect', () => { s.destroy(); r(true); }); s.once('error', () => r(false)); s.setTimeout(400, () => { s.destroy(); r(false); }); });
-{ const ports = [2525, 3198, 3199]; for (let p = 3120; p <= 3195; p++) ports.push(p);
+{ const ports = [2525, 3198, 3199]; for (let p = 3120; p <= 3215; p++) ports.push(p);
   const busy = (await Promise.all(ports.map(async p => (await inUse(p)) ? p : 0))).filter(Boolean);
   if (busy.length) { console.log('These test ports are already in use: ' + busy.join(', ') + '. Close the leftover server(s) and run again.'); process.exit(1); } }
 
