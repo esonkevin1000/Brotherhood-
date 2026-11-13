@@ -545,7 +545,7 @@ if (!getSetting('migOnlineVip')) { run("update items set bookable=0 where name i
 const DEFAULT_TERMS = `TERMS & CONDITIONS AND CONSENT: BROTHERHOOD BARBER
 
 1. What information we collect
-Your full name, mobile number, email address, preferred haircut, and the history of your visits and purchases at our branches.
+Your full name, mobile number, email address, preferred haircut, the history of your visits and purchases at our branches, and your loyalty points and rewards.
 
 2. Why we collect it
 So our barbers can recognise you and prepare your preferred haircut, so we can record your visits and loyalty points, and so we can take care of your appointments.
@@ -554,13 +554,16 @@ So our barbers can recognise you and prepare your preferred haircut, so we can r
 By ticking the box, you agree that Brotherhood Barber may send you emails, promos and news. This is not required to get a haircut. If you do not give an email address, you will not receive emails.
 
 4. Loyalty program
-1 completed and paid visit = 1 point. Member (0-4 visits), Bronze (5-15), Silver (16-25), Gold (26-50), VIP (51 and up). Brotherhood may change the benefits of each tier at any time.
+1 finished and paid visit = 1 point. Rewards: 10 points = free haircut, 15 = Viro product, 25 = Brotherhood cap, 40 = Brotherhood shirt. Each reward uses its points and can be claimed again when you have the points. At 50 points earned you become VIP; VIP status stays and does not use points. Points do not expire and can be used in any Brotherhood branch; claim a reward at the front desk. If a visit is cancelled or voided after it was recorded, its point is taken back. Your past paid visits count as your starting points. Branches move to this program one at a time; until then a branch uses the earlier tiers.
 
 5. Stopping emails
 You can unsubscribe at any time using the link at the bottom of every email, or by telling our cashier.
 
 6. Protecting your data
-We do not sell or share your information with other companies. We follow the Data Privacy Act of 2012 (RA 10173). You have the right to ask to see, correct or delete your data by asking our cashier.`;
+We do not sell or share your information with other companies. We follow the Data Privacy Act of 2012 (RA 10173). You have the right to ask to see, correct or delete your data by asking our cashier or by email to hello@getbrotherhoodapp.com.
+
+7. Booking rules
+Online bookings need an email address; we send a short code to confirm it. Please arrive on time: after 5 minutes your booking may be marked as a no-show and the slot given to the next customer. You can cancel or change a booking up to the time shown when you book (currently 1 hour before). Repeated no-shows can pause online booking for your number; you can still walk in.`;
 const getTerms = () => getSetting('terms') || DEFAULT_TERMS;
 // email sending lives in src/lib/mail.js; the count of emails sent today stays here because it is kept in the database
 const MAIL = createMailer({ defaultName: SHOP, sentToday: () => mailCount(), countSent: () => mailBump() });
