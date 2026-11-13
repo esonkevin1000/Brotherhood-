@@ -436,6 +436,23 @@ function walkinGuard(order, staffId) {
   const name = get('staff', staffId)?.name || 'This barber', free = walkinOptions(order.branchId, mins).filter(o => o.safe).map(o => o.name);
   bad(409, `${name} has a booking at ${f.next == null ? 'a later time' : hhmm(f.next)}; this cut would run into it.${f.earliest == null ? '' : ` ${name} can safely take a walk-in from ${hhmm(f.earliest)}.`}${free.length ? ` Free now: ${free.join(', ')}.` : ''}`);
 }
+// T24 (D-18 recommendation): estimated start for each waiting customer = the barber's remaining time on the current cut plus the cuts
+// ahead in his line (in pilot branches also around his bookings, T23). Unassigned customers go, in order, to whoever is free first.
+// Worked out on every read, so it follows each start, finish, cancel and check-in. Always labelled "estimate".
+function queueEstimates(branchId) {
+  const now = minsNow(), t = todayStr(), rule = mvpOn(branchId), out = {};
+  const duty = all('select * from staff where branchId=? and active=1 order by name', branchId).filter(s => { const d = onDuty(s.id, t); return d && !d.breakStartedAt; });
+  const free = new Map(duty.map(s => [s.id, barberFit(s.id, 30).busyUntil]));
+  const books = id => rule ? all("select time, mins from bookings where staffId=? and date=? and status='booked'", id, t).map(b => ({ start: toMin(b.time), mins: b.mins || 30 })) : [];
+  const place = (sid, o) => { const mins = orderMins(o), f = walkinFit({ now, mins, busyUntil: free.get(sid), bookings: isAppt(o.id) ? [] : books(sid), buffer: WALKIN_BUFFER }), start = f.earliest ?? free.get(sid); free.set(sid, start + mins); return start; };
+  const waiting = all("select * from orders where branchId=? and date=? and status='waiting' order by no", branchId, t);
+  for (const o of waiting.filter(o => o.barberId && free.has(o.barberId))) out[o.id] = { at: place(o.barberId, o), sid: o.barberId };
+  for (const o of waiting.filter(o => !o.barberId)) {
+    const sid = [...free.keys()].sort((a, b) => free.get(a) - free.get(b))[0]; if (!sid) continue;
+    out[o.id] = { at: place(sid, o), sid };
+  }
+  return Object.fromEntries(Object.entries(out).map(([id, x]) => [id, { start: hm24(x.at), waitMins: Math.max(0, x.at - now), barber: get('staff', x.sid)?.name || '', label: 'estimate' }]));
+}
 // When a chair becomes free, the next customer queued on that chair sits down (if its barber is on duty and not on break).
 function promoteNext(branchId, chairId) {
   if (!chairId) return;
@@ -1108,7 +1125,7 @@ async function handleIn(req, res) {
 
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
-const SERVICE_RECORDS = createServiceRoutes({ walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
+const SERVICE_RECORDS = createServiceRoutes({ queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
 const SCHEDULES = createScheduleRoutes({ all, run, get, log, tx, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
 const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, savedOf, setPolicy, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });

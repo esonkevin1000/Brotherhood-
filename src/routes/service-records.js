@@ -1,7 +1,7 @@
 // Day board for the Brotherhood app (takes over from the POS): walk-ins, start, finish, cancel, ID photos.
 // Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
-export function createServiceRoutes({ walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
+export function createServiceRoutes({ queueEstimates, walkinGuard, walkinOptions, orderMins, orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
   return async function handleServiceRecords({ req, res, p, method, q, me }) {
       if (!['owner', 'admin', 'manager', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
       const myStaffId = me.role === 'barber' ? (get('users', me.id)?.staffId || '') : '';
@@ -17,7 +17,8 @@ export function createServiceRoutes({ walkinGuard, walkinOptions, orderMins, ord
       if (p === '/api/svc/today' && method === 'GET') {
         const bid = isBranchUser(me) ? me.branchId : String(q.branch || (isManager(me) ? me.branchIds[0] : one('select id from branches order by rowid')?.id) || ''); if (!get('branches', bid)) bad(400, 'Pick a branch'); if (!inScope(me, bid)) bad(403, 'Not your branch');
         const t = todayStr(), mine = x => x.barberId === myStaffId;
-        let tickets = all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair','paid') order by no", bid, t).map(svcView);
+        const est = queueEstimates(bid);   // T24
+        let tickets = all("select * from orders where branchId=? and date=? and status in ('waiting','in_chair','paid') order by no", bid, t).map(svcView).map(x => ({ ...x, estimate: est[x.id] || null }));
         if (me.role === 'barber') tickets = tickets.filter(x => mine(x) || (x.status === 'waiting' && !x.barberId));   // a barber sees his own customers and the unassigned line
         const done = tickets.filter(x => x.status === 'done' && (me.role !== 'barber' || mine(x)));
         const staff = all('select id,name,photo,chairId from staff where branchId=? and active=1 order by name', bid).map(s => ({ ...s, ...staffState(s.id, t), busy: !!one("select 1 x from orders where barberId=? and status='in_chair'", s.id) }));
