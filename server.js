@@ -16,6 +16,7 @@ import { createLimiter, allOf, intSetting } from './src/lib/throttle.js';
 import { createFlags } from './src/lib/flags.js';
 import { createPolicy } from './src/lib/policy.js';
 import { createBookingMessages } from './src/lib/notify.js';
+import { planOf, bookingPlan } from './src/lib/queue.js';
 import { createServiceRoutes } from './src/routes/service-records.js';
 import { createDeviceRoutes } from './src/routes/devices.js';
 import { createScheduleRoutes } from './src/routes/schedules.js';
@@ -397,6 +398,11 @@ function staffState(staffId, date) {
   const first = one('select lateMins from attendance where staffId=? and date=? order by timeIn limit 1', staffId, date);
   return { state: a.breakStartedAt ? 'break' : (first.lateMins > 0 ? 'late' : 'present'), timeIn: a.timeIn, lateMins: first.lateMins || 0 };
 }
+// ---------- visit history (T22) ----------
+// A visit's plan status as staff see it, and one history row per change (who, from, to, why).
+const isAppt = orderId => !!one('select 1 x from bookings where orderId=?', orderId);
+const orderPlan = (o, booked = isAppt(o.id)) => planOf(o.status, { booked, barberId: o.barberId });
+const orderEvent = (orderId, from, to, actor, reason = '') => run('insert into order_events(id,orderId,at,actor,fromStatus,toStatus,reason) values(?,?,?,?,?,?,?)', uid(), orderId, nowISO(), String(actor || '').slice(0, 100), from || '', to, String(reason || '').slice(0, 300));
 // When a chair becomes free, the next customer queued on that chair sits down (if its barber is on duty and not on break).
 function promoteNext(branchId, chairId) {
   if (!chairId) return;
@@ -406,6 +412,7 @@ function promoteNext(branchId, chairId) {
   const d = onDuty(nxt.barberId, todayStr()); if (!d || d.breakStartedAt) return;
   if (one("select 1 x from orders where status='in_chair' and barberId=?", nxt.barberId)) return;
   run("update orders set status='in_chair', startedAt=? where id=?", nowISO(), nxt.id);
+  orderEvent(nxt.id, orderPlan(nxt), 'in_service', 'System', 'the chair became free');
 }
 function checkAssign(order, b, orderId) {
   const barber = get('staff', b.barberId);
@@ -752,13 +759,15 @@ function tx(fn) { db.exec('begin immediate'); try { const r = fn(); db.exec('com
 const bookingMessage = createBookingMessages({ one, get, queueEmail, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), shopName: () => SHOP });
 const { bookingMins, slotsFor, bookingEvent, priceBooked, bookedSnap, createBooking, rescheduleBooking, bookingView } = createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn, policyOf, onBooked: (kind, id) => bookingMessage(kind, id) });
 // a walk-in style ticket (used when a booked customer arrives)
-function createTicket(me, branchId, customerId, name, items, barberId) {
+// opts.booked: the visit of a booking that just checked in (T22: its history starts with "checked in")
+function createTicket(me, branchId, customerId, name, items, barberId, opts = {}) {
   const t = todayStr(), tt = totals(items, null), id = uid();
   const no = (one('select max(no) m from orders where branchId=? and date=?', branchId, t).m || 0) + 1, ord = (one('select max(ord) m from orders').m || 0) + 1;
   run(`insert into orders(id,ord,no,branchId,date,customerId,customerName,barberId,chairId,status,items,subtotal,discountName,discountAmt,total,tenders,cashierId,createdAt)
     values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, customerId || '', name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO());
+  const first = opts.booked ? 'checked_in' : 'waiting'; orderEvent(id, '', first, me.name);
   if (barberId) {
-    try { const a = checkAssign({ id, branchId }, { barberId }); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); }
+    try { const a = checkAssign({ id, branchId }, { barberId }); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); orderEvent(id, first, 'in_service', me.name, 'with ' + a.barber.name); }
     catch (e) { if (!(e instanceof HttpError)) throw e; }   // preferred barber busy/off: customer simply waits
   }
   return parseOrder(get('orders', id));
@@ -1065,7 +1074,7 @@ async function handleIn(req, res) {
 
 // the reports and their CSV export are in src/lib/reports.js
 const { REPORTS, csv } = createReports({ dOf, todayStr, r2, sum, all, one, get, commissionOf, zData, dayRows, cashierName, paidOrders, movesIn, stamp, planDeductions, adjTotal, scoreData });
-const SERVICE_RECORDS = createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
+const SERVICE_RECORDS = createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody });
 const SCHEDULES = createScheduleRoutes({ all, run, get, log, tx, bad, send, readBody });
 const DEVICES = createDeviceRoutes({ uid, nowISO, all, one, run, get, log, curOrg, makeToken, bad, send, readBody });
 const MANAGEMENT = createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, mvpBranches, setMvpBranches, savedOf, setPolicy, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody });
@@ -1093,7 +1102,7 @@ const STAFF_TOOLS = createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, 
 const BACK_OFFICE_DATA = createBackOfficeDataRoutes({ nowISO, one, run, get, insert, update, strip, log, isBranchUser, isManager, inScope, branchOrAll, newPin, REFS, SOFT, CRUD, checkUser, setPw, bad, send, readBody });
 const BH = mountBH({ bookingMessage, rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => mailReady(), baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 // created after BH because the bookings routes notify app customers through it
-const OPERATIONS = createOperationsRoutes({ bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
+const OPERATIONS = createOperationsRoutes({ orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
 
 { const ran = migrate(mainDb); if (ran.length) console.log('migrations applied:', ran.join(', ')); }   // numbered files in src/db/migrations, once per database
 schemaReady = true; ORG_DBS.clear();

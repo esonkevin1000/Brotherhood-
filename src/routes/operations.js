@@ -4,7 +4,7 @@
 import os from 'node:os';
 import { NEXT } from '../lib/http.js';
 
-export function createOperationsRoutes({ bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
+export function createOperationsRoutes({ orderPlan, orderEvent, bookingPlan, bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, url, p, method, q, me, admin, adminOnly, manageIn }) {
     // ----- daily sales remittance (separate from expenses) -----
@@ -65,7 +65,7 @@ export function createOperationsRoutes({ bookingMessage, rescheduleBooking, db, 
     if (p === '/api/bookings' && method === 'GET') {
       const bid = branchOrAll(me, q.branch);
       const ok = s => /^\d{4}-\d{2}-\d{2}$/.test(s || ''), from = ok(q.from) ? q.from : (ok(q.date) ? q.date : todayStr()), to = ok(q.to) ? q.to : (ok(q.date) ? q.date : from);
-      return send(res, 200, all(`select * from bookings where date>=? and date<=?${bid ? ' and branchId=?' : ''} order by date, time`, ...(bid ? [from, to, bid] : [from, to])).map(bookingView));
+      return send(res, 200, all(`select * from bookings where date>=? and date<=?${bid ? ' and branchId=?' : ''} order by date, time`, ...(bid ? [from, to, bid] : [from, to])).map(b => ({ ...bookingView(b), plan: bookingPlan(b.status) })));
     }
     if (p === '/api/bookings' && method === 'POST') {
       const b = await readBody(req); b.branchId = isBranchUser(me) ? me.branchId : b.branchId; if (!inScope(me, b.branchId)) bad(403, 'Not your branch');
@@ -100,7 +100,7 @@ export function createOperationsRoutes({ bookingMessage, rescheduleBooking, db, 
         if (cur.status !== 'booked') bad(409, 'Booking is already ' + cur.status);
         const items = priceBooked(snapOf(cur), jp(cur.itemIds).map(i => ({ itemId: i, qty: 1 })));   // the customer is charged the price that was shown when booking
         const cust = (cur.customerId && get('customers', cur.customerId)) || findCustomer(cur.phone, '') || upsertCustomer({ name: cur.customerName, phone: cur.phone }, 'online', cur.branchId);
-        const o = createTicket(me, cur.branchId, cust.id, cust.name, items, cur.staffId);
+        const o = createTicket(me, cur.branchId, cust.id, cust.name, items, cur.staffId, { booked: true });
         if (cur.promoCode) { const pr = one('select discountId from bh_promos where code=?', cur.promoCode); if (pr?.discountId) { run('update orders set discountId=? where id=?', pr.discountId, o.id); o.discountId = pr.discountId; } }   // promo from the app: the ticket opens with that discount already applied
         run("update bookings set status='arrived', orderId=? where id=?", o.id, cur.id); bookingEvent(cur.id, 'booked', 'arrived', me.name); log(me, 'booking-arrived', 'bookings', cur.id, `#${o.no} ${cur.customerName}`);
         return send(res, 200, { order: o, seated: o.status === 'in_chair' });
@@ -253,6 +253,7 @@ export function createOperationsRoutes({ bookingMessage, rescheduleBooking, db, 
           else { const a = checkAssign(o, b, o.id); upd.barberId = a.barber.id; upd.chairId = a.chairId; if (o.status !== 'in_chair') { upd.status = 'in_chair'; upd.startedAt = nowISO(); } }
         }
         const keys = Object.keys(upd); if (keys.length) run(`update orders set ${keys.map(k => k + '=?').join(',')} where id=?`, ...keys.map(k => upd[k]), o.id);
+        { const was = orderPlan(cur), now = orderPlan(get('orders', o.id)), bn = get('staff', get('orders', o.id).barberId)?.name; if (was !== now) orderEvent(o.id, was, now, me.name, now === 'assigned' ? 'assigned to ' + bn : now === 'in_service' ? 'with ' + bn : ''); }   // T22
         if (o.status === 'in_chair' && upd.status === 'waiting') promoteNext(o.branchId, o.chairId);   // the chair this customer left is free again
         return send(res, 200, { ...parseOrder(get('orders', o.id)), queued });
       }
@@ -271,6 +272,7 @@ export function createOperationsRoutes({ bookingMessage, rescheduleBooking, db, 
         const si = (one('select max(si) m from orders').m || 0) + 1;
         run("update orders set status='paid', si=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId=?, paidAt=?, date=? where id=?",
           si, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify(tenders), me.id, shift.id, nowISO(), todayStr(), o.id);
+        orderEvent(o.id, orderPlan(cur), 'completed', me.name, 'paid at the POS');
         promoteNext(o.branchId, o.chairId);
         log(me, 'sale', 'orders', o.id, `SI-${si} ₱${tt.total}`);
         return send(res, 200, { ...parseOrder(get('orders', o.id)), change });
@@ -284,6 +286,7 @@ export function createOperationsRoutes({ bookingMessage, rescheduleBooking, db, 
         }
         if (o.status === 'void') bad(409, 'Already void');
         run("update orders set status='void', voidReason=? where id=?", String(b.reason || '').slice(0, 200), o.id);
+        orderEvent(o.id, orderPlan(cur), 'cancelled', me.name, String(b.reason || '').slice(0, 200));
         if (o.status === 'in_chair') promoteNext(o.branchId, o.chairId);
         log(me, 'void', 'orders', o.id, `#${o.no} ${b.reason || ''}`); return send(res, 200, { ok: true });
       }

@@ -1,7 +1,7 @@
 // Day board for the Brotherhood app (takes over from the POS): walk-ins, start, finish, cancel, ID photos.
 // Tracking only. The app never issues a receipt, an invoice number or a shift reading; the shop issues its own BIR invoice and may note its number here.
 // Created once by server.js; the handler gets the request and the logged-in person on each call.
-export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
+export function createServiceRoutes({ orderPlan, orderEvent, uid, todayStr, nowISO, r2, jp, sum, all, one, run, get, parseOrder, staffState, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, modulesFor, branchScope, dayLocked, priceItems, idNeeded, ID_TYPES, attachIdPhoto, totals, promoteNext, checkAssign, getSetting, resolveCustomer, createTicket, priceBooked, bookedSnap, bad, send, readBody }) {
   return async function handleServiceRecords({ req, res, p, method, q, me }) {
       if (!['owner', 'admin', 'manager', 'cashier', 'barber'].includes(me.role)) bad(403, 'Not allowed for your role');
       const myStaffId = me.role === 'barber' ? (get('users', me.id)?.staffId || '') : '';
@@ -11,7 +11,7 @@ export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, o
         return { id: x.id, no: x.no, status: x.status === 'paid' ? 'done' : x.status === 'void' ? 'cancelled' : x.status, customerName: x.customerName, phone: c?.phone || '',
           barberId: x.barberId || '', barberName: x.barberId ? get('staff', x.barberId)?.name || '' : '', items: x.items.map(i => ({ itemId: i.itemId, name: i.name, type: i.type, price: i.price, qty: i.qty, needId: !!i.needId })),
           subtotal: x.subtotal, discountId: x.discountId || '', discountName: x.discountName || '', discountAmt: x.discountAmt || 0, total: x.total, method: x.tenders[0]?.method || '', invoiceNo: x.invoiceNo || '',
-          hasId: !!x.idPhoto, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '' };
+          hasId: !!x.idPhoto, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '', plan: orderPlan(row) };
       };
       const ticket = id => { const o = get('orders', String(id)); if (!o) bad(404, 'Visit not found'); if (!inScope(me, o.branchId)) bad(403, 'Not your shop'); return parseOrder(o); };
       if (p === '/api/svc/today' && method === 'GET') {
@@ -54,19 +54,25 @@ export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, o
         log(me, 'walk-in', 'orders', o.id, `#${o.no} ${name}`);
         return send(res, 201, svcView(get('orders', o.id)));
       }
+      const hm = p.match(/^\/api\/svc\/(\w+)\/history$/);
+      if (hm && method === 'GET') { const o = ticket(hm[1]); return send(res, 200, all('select at, actor, fromStatus "from", toStatus "to", reason from order_events where orderId=? order by rowid', o.id)); }   // T22
       const sa = p.match(/^\/api\/svc\/(\w+)\/(start|finish|cancel)$/);
       if (sa && method === 'POST') {
         const o = ticket(sa[1]), act = sa[2], b = await readBody(req);
         if (!['waiting', 'in_chair'].includes(o.status)) bad(409, o.status === 'paid' ? 'This visit is already done.' : 'This visit was cancelled.');
         if (me.role === 'barber' && o.barberId && o.barberId !== myStaffId) bad(403, 'This customer is with another barber.');
+        const before = orderPlan(o);
         if (act === 'start') {
+          if (o.status === 'in_chair') { const ev = one("select actor, at from order_events where orderId=? and toStatus='in_service' order by rowid desc limit 1", o.id); bad(409, `Already in service with ${get('staff', o.barberId)?.name || 'a barber'}${ev ? `, started by ${ev.actor} at ${new Date(ev.at).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}` : ''}.`); }   // T22/T27
           const bar = me.role === 'barber' ? myStaffId : String(b.barberId || o.barberId || ''); if (!bar) bad(400, 'Choose the barber');
           const a = checkAssign(o, { barberId: bar }, o.id);
           run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), o.id);
+          orderEvent(o.id, before, 'in_service', me.name, 'with ' + a.barber.name);
           log(me, 'visit-start', 'orders', o.id, `#${o.no} ${a.barber.name}`); return send(res, 200, svcView(get('orders', o.id)));
         }
         if (act === 'cancel') {
           run("update orders set status='void', voidReason=? where id=?", String(b.reason || 'Cancelled').trim().slice(0, 200) || 'Cancelled', o.id);
+          orderEvent(o.id, before, 'cancelled', me.name, String(b.reason || 'Cancelled').trim().slice(0, 200) || 'Cancelled');
           if (o.status === 'in_chair') promoteNext(o.branchId, o.chairId);
           log(me, 'visit-cancelled', 'orders', o.id, `#${o.no} ${b.reason || ''}`); return send(res, 200, { ok: true });
         }
@@ -82,6 +88,8 @@ export function createServiceRoutes({ uid, todayStr, nowISO, r2, jp, sum, all, o
         const tt = totals(items, disc), mth = PAY_METHODS.includes(b.method) ? b.method : bad(400, 'Choose how the customer paid'), inv = String(b.invoiceNo || '').trim().slice(0, 40);
         run("update orders set status='paid', items=?, barberId=?, discountId=?, discountName=?, discountAmt=?, subtotal=?, total=?, tenders=?, cashierId=?, shiftId='', paidAt=?, date=?, invoiceNo=?, via='app' where id=?",
           JSON.stringify(items), barberId, did, disc?.name || '', tt.discountAmt, tt.subtotal, tt.total, JSON.stringify([{ method: mth, amount: tt.total }]), me.id, nowISO(), todayStr(), inv, o.id);
+        if (o.status === 'waiting') orderEvent(o.id, before, 'in_service', me.name, 'started and finished together');
+        orderEvent(o.id, 'in_service', 'completed', me.name, `${mth}`);
         promoteNext(o.branchId, o.chairId);
         log(me, 'visit-done', 'orders', o.id, `#${o.no} ₱${tt.total} ${mth}`);
         return send(res, 200, svcView(get('orders', o.id)));
