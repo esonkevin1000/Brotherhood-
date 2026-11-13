@@ -93,7 +93,7 @@ const ICONS = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'
 };
 const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
-const REPORTS = [['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Payment Methods', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc'], ['scorecard', 'Barber Scorecard', 'star'], ['accountability', 'Cash Accountability', 'coin']];
+const REPORTS = [['records', 'Service Records', 'doc'], ['sales', 'Sales Reports', 'coin'], ['items', 'Item Ranking', 'chart'], ['commissions', 'Commissions', 'tag'], ['payroll', 'Payroll', 'wallet'], ['attendance', 'Barber Attendance', 'clock'], ['tender', 'Payment Methods', 'card'], ['discounts', 'Discount Reports', 'tag'], ['cash', 'Cash Management', 'wallet'], ['readings', 'Sales Readings', 'doc'], ['scorecard', 'Barber Scorecard', 'star'], ['accountability', 'Cash Accountability', 'coin']];
 const MGMT = [['staff', 'Barbers / Staff', 'scissors'], ['chairs', 'Chairs', 'armchair'], ['categories', 'Categories', 'folder'], ['items', 'Services & Products', 'bottle'], ['discounts', 'Discounts', 'tag'], ['customers', 'Customers', 'users'], ['users', 'Users', 'key'], ['branches', 'Branches', 'building'], ['equipment', 'Equipment & Maintenance', 'gear']];const title = () => ui.view === 'dashboard' ? 'Dashboard' : ui.view === 'mkt' ? 'Email Marketing' : ui.view === 'reviews' ? 'Reviews' : ui.view === 'settings' ? 'Settings' : ui.view === 'bookings' ? 'Bookings' : ui.view === 'activity' ? 'Activity' : ui.view === 'remit' ? 'Daily Sales Remittance' : ui.view === 'exp' ? 'Expenses & Receipts' : ui.view === 'adv' ? 'Release Pay' : ui.view === 'att' ? 'Attendance & Timekeeping' : ui.view === 'prob' ? 'Problem Reports' : ui.view === 'leave' ? 'Leave Requests' : ui.view === 'chk' ? 'Daily Checklists' : ui.view === 'slip' ? 'Payslips' : ui.view === 'inbox' ? 'Inbox' : ui.view.startsWith('rep:') ? REPORTS.find(r => r[0] === ui.view.slice(4))[1] : MGMT.find(m => m[0] === ui.view.slice(5))[1];
 
 const inboxOpts = () => ({ token: () => token, isAdmin: true, meId: S.me ? S.me.id : 'owner' });
@@ -175,16 +175,18 @@ function presetRange(p) {
 
 // The date range now lives in the bar at the top of the page (see pageBar); pages only keep their own extra buttons/filters here
 const filterBar = extra => extra ? `<div class="row" style="margin-bottom:14px;align-items:flex-end">${extra}</div>` : '';
+// T30: every report says it is an internal record, and which filters it shows
+const repLabel = r => r && r.label ? `<div class="mute" style="font-size:12.5px;margin:2px 0 12px;padding:8px 12px;border:1px dashed var(--line, #ccc);border-radius:10px"><b>${esc(r.label)}</b><br>${esc(r.filters.branch)} · ${esc(r.filters.from)}${r.filters.to !== r.filters.from ? " → " + esc(r.filters.to) : ""}</div>` : "";
 function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>`;
-  return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
+  return `<h2>${title()} <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${filterBar(exp)}${r ? repLabel(r) + renderCards(r.cards) + r.tables.map(renderTable).join('') : '<p class="mute">Loading…</p>'}`;
 }
 const NAVG = [
   ['Overview', [['dashboard', 'Dashboard', 'grid']]],
   ['Booking & Calendar', [['bookings', 'Bookings', 'calendar'], ['reviews', 'Reviews', 'star']]],
   ['Marketing', [['mkt', 'Email Marketing', 'mail']]],
-  ['Sales & Services', [['rep:sales'], ['rep:tender'], ['rep:discounts'], ['mgmt:items'], ['mgmt:categories'], ['mgmt:discounts'], ['mgmt:customers']]],
+  ['Sales & Services', [['rep:records'], ['rep:sales'], ['rep:tender'], ['rep:discounts'], ['mgmt:items'], ['mgmt:categories'], ['mgmt:discounts'], ['mgmt:customers']]],
   ['Attendance & Timekeeping', [['att', 'Attendance', 'clock'], ['rep:attendance']]],
   ['Release Pay & Payroll', [['adv', 'Release Pay', 'tag'], ['rep:payroll'], ['rep:commissions'], ['slip', 'Payslips', 'doc']]],
   ['Expenses & Receipts', [['exp', 'Expenses & Receipts', 'wallet']]],
@@ -367,7 +369,7 @@ function vDashboard() {
     <div class="card stat"><span>In the chair</span><b>${l.cutting}</b><small class="mute">Walk-ins being served now</small></div></div>
     <div class="card overflow" style="margin-bottom:14px"><h3>Live walk-in floor queue</h3><table><tr><th>Ticket</th><th>Customer</th><th>Branch</th><th>Services</th><th>Status</th><th>Barber</th><th>Time</th></tr>
     ${l.queue.map(q => `<tr><td>#${String(q.no).padStart(3, '0')}</td><td>${esc(q.customer)}</td><td>${esc(q.branch)}</td><td>${esc(q.services)}</td><td><span class="tag ${q.status === 'in_chair' ? 'done' : 'booked'}">${q.status === 'in_chair' ? 'In Chair' : 'Waiting'}</span></td><td>${esc(q.barber)}</td><td>${ago(q.since)}</td></tr>`).join('') || '<tr><td colspan="7" class="mute">No customers on the floor right now.</td></tr>'}</table></div>` : '';
-  return `<h2>Dashboard <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${vChkToday()}${live}${r ? renderCards(r.cards) + r.tables.map(renderTable).join('') : ''}`;
+  return `<h2>Dashboard <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${vChkToday()}${live}${r ? repLabel(r) + renderCards(r.cards) + r.tables.map(renderTable).join('') : ''}`;
 }
 const vActivity = () => `<div class="row" style="justify-content:space-between;margin-bottom:14px"><h2 style="margin:0">Activity</h2>${S.me.role === 'owner' ? '<button class="btn" data-act="backup">⬇ Download backup</button>' : ''}</div>
   <p class="mute">The server saves an automatic daily backup. Also download one now and then and keep it somewhere else (Google Drive, a flash drive).</p>

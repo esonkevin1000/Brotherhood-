@@ -114,7 +114,9 @@ export function createOperationsRoutes({ isAppt, walkinGuard, orderPlan, orderEv
       if (!isManager(me)) adminOnly(); const fn = REPORTS[rm[1]]; if (!fn) bad(404, 'Unknown report');
       const br = isManager(me) ? branchOrAll(me, q.branch) : q.branch && q.branch !== 'all' && get('branches', q.branch) ? q.branch : null;   // a manager: one of their branches
       const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : todayStr(), from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : to;
-      const rep = fn({ from, to, br });
+      const rep = fn({ from, to, br });   // T30: every report says what it is, and the filters it was run with
+      rep.label = 'Internal operational record. Not an official receipt or accounting record.';
+      rep.filters = { branch: br ? get('branches', br)?.name || '' : 'All branches', from, to };
       if (q.format === 'csv') { res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${rm[1]}-${from}_${to}.csv"` }); return res.end(csv(rep)); }
       return send(res, 200, rep);
     }

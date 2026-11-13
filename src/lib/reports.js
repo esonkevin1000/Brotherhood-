@@ -136,6 +136,28 @@ export function createReports({ dOf, todayStr, r2, sum, all, one, get, commissio
           { title: 'Every closed shift', cols: [['Date'], ['Reading'], ['Branch'], ['Cashier'], ['Expected cash', 'peso'], ['Counted', 'peso'], ['Variance', 'peso']], rows: zs.map(z => [z.businessDate, 'Z-' + z.no, z.branchName, z.d.cashier || '', z.d.expected, z.d.counted, z.d.variance]) }]
       };
     },
+    // T30: the service records (completed visits). Voided records are not paid, so they are left out.
+    records(f) {
+      const os = paidOrders(f.from, f.to, f.br), net = sum(os, o => o.total), ver = o => o.payStatus === 'verified';
+      const methodOf = o => o.tenders.map(t => t.method).join('+') || '—';
+      const group = (key, order) => {
+        const m = new Map(); for (const o of os) { const k = key(o); const r = m.get(k) || { n: 0, a: 0, v: 0 }; r.n++; r.a += o.total; if (ver(o)) r.v++; m.set(k, r); }
+        return [...m.entries()].sort(order || ((a, b) => b[1].a - a[1].a));
+      };
+      const pct = (v, n) => n ? Math.round(v / n * 100) + '%' : '—';
+      const appt = os.filter(o => o.source === 'appointment');
+      return {
+        cards: [{ label: 'Recorded value', value: net, t: 'peso' }, { label: 'Visits', value: os.length, t: 'num' },
+          { label: 'From appointments', value: appt.length, t: 'num', sub: '₱' + sum(appt, o => o.total).toFixed(2) }, { label: 'Walk-ins', value: os.length - appt.length, t: 'num', sub: '₱' + (net - sum(appt, o => o.total)).toFixed(2) },
+          { label: 'Verified payments', value: pct(os.filter(ver).length, os.length), t: 'text', sub: os.filter(ver).length + ' of ' + os.length + ' visits' }],
+        tables: [
+          { title: 'By day', cols: [['Date'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.date, (a, b) => a[0].localeCompare(b[0])).map(([k, r]) => [k, r.n, r.a]) },
+          { title: 'By branch', cols: [['Branch'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.branchName || '—').map(([k, r]) => [k, r.n, r.a]) },
+          { title: 'By barber', cols: [['Barber'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.barberName || 'Not assigned').map(([k, r]) => [k, r.n, r.a]) },
+          { title: 'Appointment vs walk-in', cols: [['Source'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.source === 'appointment' ? 'Appointment' : 'Walk-in').map(([k, r]) => [k, r.n, r.a]) },
+          { title: 'By payment method', cols: [['Method'], ['Visits', 'num'], ['Value', 'peso'], ['Verified']], rows: group(methodOf).map(([k, r]) => [k, r.n, r.a, pct(r.v, r.n) + ' (' + r.v + ' of ' + r.n + ')']) }]
+      };
+    },
     readings(f) {
       const zs = all(`select z.*, b.name branchName from zreadings z left join branches b on b.id=z.branchId where z.businessDate>=? and z.businessDate<=?${f.br ? ' and z.branchId=?' : ''} order by z.generatedAt desc`, ...(f.br ? [f.from, f.to, f.br] : [f.from, f.to])).map(z => ({ ...z, d: JSON.parse(z.data) }));
       const sal = sum(dayRows(f.from, f.to, f.br), r => r.pay), net = sum(zs, z => z.d.net), exp = sum(movesIn(f.from, f.to, f.br).filter(m => m.kind === 'expense'), m => m.amount);
@@ -149,7 +171,8 @@ export function createReports({ dOf, todayStr, r2, sum, all, one, get, commissio
   };
   function csv(rep) {
     const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    return '﻿' + rep.tables.map(t => [t.title, t.cols.map(c => c[0]).join(','), ...t.rows.map(r => r.map((v, j) => q(t.cols[j] && (t.cols[j][1] === 'idlink' || t.cols[j][1] === 'days') ? String(v).split('~')[0] : v)).join(','))].join('\n')).join('\n\n');
+    const head = rep.label ? [q(rep.label), q(`Branch: ${rep.filters.branch}`) + ',' + q(`From: ${rep.filters.from}`) + ',' + q(`To: ${rep.filters.to}`)].join('\n') + '\n\n' : '';
+    return '﻿' + head + rep.tables.map(t => [t.title, t.cols.map(c => c[0]).join(','), ...t.rows.map(r => r.map((v, j) => q(t.cols[j] && (t.cols[j][1] === 'idlink' || t.cols[j][1] === 'days') ? String(v).split('~')[0] : v)).join(','))].join('\n')).join('\n\n');
   }
   return { REPORTS, csv };
 }
