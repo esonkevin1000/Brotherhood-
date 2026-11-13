@@ -22,7 +22,7 @@ try {
   const book = async (tok, time, staff = kev) => (await call('POST', '/api/bh/book', { branchId: A.id, staffId: staff.id, itemIds: [trim.id], date: D, time }, tok, { 'Idempotency-Key': 'resched-test-key-' + String(++n).padStart(6, '0') })).j.booking;
   const move = (tok, id, body) => call('POST', `/api/bh/bookings/${id}/reschedule`, body, tok);
   const slots = async (date = D, staff = kev) => (await call('GET', `/api/public/slots?branch=${A.id}&date=${date}&staff=${staff.id}&items=${trim.id}`)).j.slots;
-  const db = new DatabaseSync(S.dbFile), row = id => db.prepare('select * from bookings where id=?').get(id);
+  const db = new DatabaseSync(S.dbFile, { timeout: 5000 }), row = id => db.prepare('select * from bookings where id=?').get(id);
 
   const b1 = await book(ana, '10:00'), b2 = await book(ben, '13:00');
   ok('two bookings made', !!b1?.id && !!b2?.id);

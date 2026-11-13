@@ -57,7 +57,7 @@ try {
   ok('and its page shows the 1-hour rule it really has', (await info(B)).policy.cancelCutoffMins === 60 && (await info(B)).policy.slotStep === 30);
 
   // ---------- the policy is stored with the booking ----------
-  const db = new DatabaseSync(S.dbFile);
+  const db = new DatabaseSync(S.dbFile, { timeout: 5000 });
   const stored = id => JSON.parse(db.prepare('select policy from bookings where id=?').get(id).policy);
   ok('the booking stores the policy in force when it was made', stored(b1).cancelCutoffMins === 120 && stored(b1).noshowGraceMins === 10, stored(b1));
   const soon = new Date(Date.now() + 90 * 60e3);

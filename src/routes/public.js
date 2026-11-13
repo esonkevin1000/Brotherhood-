@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { NEXT } from '../lib/http.js';
 import { createLimiter } from '../lib/throttle.js';
 
-export function createPublicRoutes({ mvpOn, policyOf, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody }) {
+export function createPublicRoutes({ bookingMessage, mvpOn, policyOf, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody }) {
   // ----- guest booking confirmed by an email code (T16, D-5, D-14), only in branches on the new booking system -----
   const TRIES = 5, SENDS = 3, PER_EMAIL = 5, RESEND_WAIT = 60e3;
   // per branch, whatever the address or device: open holds at one time, and code emails a day (keeps the shop's email quota and the day's times safe from fake emails)
@@ -153,7 +153,7 @@ export function createPublicRoutes({ mvpOn, policyOf, mailReady, findCustomer, u
       const cust = upsertCustomer({ name: g.name, phone: g.phone, email: keepEmail ? known.email : g.email, preferredCut: g.preferredCut, consent: !!g.consent }, 'online', bk.branchId);
       run("update bookings set status='booked', holdUntil=null, customerId=? where id=? and status='pending'", cust?.id || '', bk.id);
       run('update email_codes set codeHash=null, guest=null where bookingId=?', bk.id);   // the code cannot be used again; the guest details now live in the customer record
-      bookingEvent(bk.id, 'pending', 'booked', 'Customer (online, email confirmed)');
+      bookingEvent(bk.id, 'pending', 'booked', 'Customer (online, email confirmed)'); bookingMessage('confirmed', bk.id);   // T20
       log({ name: 'Online: ' + bk.customerName }, 'booking', 'bookings', bk.id, `${bk.date} ${bk.time} ${get('branches', bk.branchId)?.name || ''} (email confirmed)`);
       return send(res, 200, { ok: true, booking: doneView(get('bookings', bk.id)) });
     }

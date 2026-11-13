@@ -74,7 +74,7 @@ try {
   ok('cancelling adds a history row with the reason', r.s === 200 && h.length === 2 && h[1].toStatus === 'cancelled' && h[1].reason === 'Customer called', h);
   const b12 = (await list()).find(b => b.time === '12:00');
   // T19: a no-show can be marked only after the start time plus the grace, so this booking is moved into the past first
-  { const db0 = new DatabaseSync(S.dbFile), t = new Date(Date.now() - 20 * 60e3), p = n => String(n).padStart(2, '0'); db0.prepare('update bookings set date=?, time=? where id=?').run(`${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, `${p(t.getHours())}:${p(t.getMinutes())}`, b12.id); db0.close(); }
+  { const db0 = new DatabaseSync(S.dbFile, { timeout: 5000 }), t = new Date(Date.now() - 20 * 60e3), p = n => String(n).padStart(2, '0'); db0.prepare('update bookings set date=?, time=? where id=?').run(`${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, `${p(t.getHours())}:${p(t.getMinutes())}`, b12.id); db0.close(); }
   await call('PUT', '/api/bookings/' + b12.id, { status: 'noshow' }, owner);
   h = (await call('GET', `/api/bookings/${b12.id}/history`, null, owner)).j; ok('no-show is in the history', h[1]?.toStatus === 'noshow', h);
   r = await call('GET', `/api/bookings/${mine.id}/history`); ok('history needs a staff login', r.s === 401, r.s);
@@ -91,7 +91,7 @@ try {
 
   // ---------- what is stored ----------
   await S.stop();
-  const db = new DatabaseSync(S.dbFile), row = db.prepare('select snapshot, idemKey from bookings where id=?').get(mine.id), snap = JSON.parse(row.snapshot);
+  const db = new DatabaseSync(S.dbFile, { timeout: 5000 }), row = db.prepare('select snapshot, idemKey from bookings where id=?').get(mine.id), snap = JSON.parse(row.snapshot);
   ok('the stored snapshot has services, prices, minutes, total, branch and barber', snap.items[0].name === 'Vip Compadre' && snap.items[0].price === vip.price && snap.total === vip.price && snap.mins >= 30 && snap.branchName === br.name && snap.staffName === 'Kev' && !!snap.takenAt, snap);
   ok('the migration is recorded once', db.prepare('select count(*) n from migrations').get().n >= 1 && db.prepare("select count(*) n from migrations where id='001_booking_integrity'").get().n === 1);
   ok('history rows match the status changes', db.prepare('select count(*) n from booking_events where bookingId=?').get(mine.id).n === 2);

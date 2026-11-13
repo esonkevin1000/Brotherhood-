@@ -10,6 +10,7 @@ const { ok, done, fail } = checker();
 const mails = [];
 const smtp = net.createServer(s => {
   let buf = '', data = null, to = '';
+  s.on('error', () => { });   // the app may hang up mid-email when the test stops it
   s.write('220 fake ready\r\n');
   s.on('data', d => {
     buf += d.toString();
@@ -44,7 +45,7 @@ try {
   const guest = (time, email, o = {}) => call('POST', '/api/public/book', { branchId: A.id, staffId: kev.id, itemIds: [trim.id], date: D, time, name: 'Gina Guest', phone: '0917 555 0000', ...(email === undefined ? {} : { email }), ...o }, null, { 'Idempotency-Key': 'guest-code-test-' + String(++n).padStart(6, '0') });
   const confirm = (hold, code) => call('POST', '/api/public/book/confirm', { hold, code });
   const slots = async () => (await call('GET', `/api/public/slots?branch=${A.id}&date=${D}&staff=${kev.id}&items=${trim.id}`)).j.slots;
-  const db = new DatabaseSync(S.dbFile);
+  const db = new DatabaseSync(S.dbFile, { timeout: 5000 });
 
   ok('the booking page knows which branches need the email code', (await call('GET', '/api/public/info')).j.branches.find(b => b.id === A.id)?.verify === true && (await call('GET', '/api/public/info')).j.branches.find(b => b.id === B.id)?.verify === false);
   let r = await guest('10:00');

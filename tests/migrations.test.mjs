@@ -28,7 +28,7 @@ try {
   const kev = (await call('POST', '/api/staff', { name: 'Kev', branchId: br.id, chairId: st.chairs.find(c => c.branchId === br.id).id, pct: 40, allowance: 0 }, owner)).j;
   await S.stop();
   // turn the database back into its old shape and put old-style bookings in it
-  const db = new DatabaseSync(S.dbFile);
+  const db = new DatabaseSync(S.dbFile, { timeout: 5000 });
   db.exec("drop index bookings_idem; drop table booking_events; alter table bookings drop column snapshot; alter table bookings drop column idemKey; delete from migrations;");
   const ins = db.prepare("insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId) values(?,?,?,?,?,?,?,?,?,?,'','online','',?,'')");
   const fut = ymd(new Date(Date.now() + 5 * 864e5)), past = ymd(new Date(Date.now() - 30 * 864e5)), now = new Date().toISOString();
@@ -57,12 +57,12 @@ try {
   r = await call('POST', '/api/public/book', { branchId: br.id, staffId: kev.id, date: fut, time: '10:00', itemIds: [vip.id], name: 'New One', phone: '0917 888 7777' }, null, { 'Idempotency-Key': 'upgrade-test-key-0001' });
   ok('new bookings work on the upgraded database', r.s === 201 && r.j.booking.total === vip.price + 100, r);
   await S.stop();
-  const db2 = new DatabaseSync(S.dbFile);
+  const db2 = new DatabaseSync(S.dbFile, { timeout: 5000 });
   ok('the migration ran once and is recorded', db2.prepare('select count(*) n from migrations').get().n === listMigrations().length);
   ok('only the upcoming booked one was backfilled', db2.prepare("select count(*) n from bookings where snapshot is not null and id like 'old%'").get().n === 1);
   db2.close();
   // starting again changes nothing
   S = await startServer(3163, {}, S.dbDir); await S.stop();
-  const db3 = new DatabaseSync(S.dbFile); ok('a restart does not run it again', db3.prepare('select count(*) n from migrations').get().n === listMigrations().length); db3.close();
+  const db3 = new DatabaseSync(S.dbFile, { timeout: 5000 }); ok('a restart does not run it again', db3.prepare('select count(*) n from migrations').get().n === listMigrations().length); db3.close();
 } catch (e) { fail(e); }
 done();

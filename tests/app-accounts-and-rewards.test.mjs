@@ -49,7 +49,7 @@ try {
   ok('a booking days away can be cancelled', mine.find(x => x.id === b1.id)?.canCancel === true);
   ok('the customer cancels it', (await call('POST', `/api/bh/bookings/${b1.id}/cancel`, null, ana)).s === 200 && (await call('POST', `/api/bh/bookings/${b1.id}/cancel`, null, ana)).s === 409);
   // move b2 to 30 minutes from now (straight in the database: the app itself never books that close)
-  const db = new DatabaseSync(S.dbFile), soon = new Date(Date.now() + 30 * 60e3);
+  const db = new DatabaseSync(S.dbFile, { timeout: 5000 }), soon = new Date(Date.now() + 30 * 60e3);
   db.prepare('update bookings set date=?, time=? where id=?').run(ymd(soon), hm(soon), b2.id);
   mine = (await call('GET', '/api/bh/bookings', null, ana)).j.bookings;
   ok('less than 1 hour before, the app shows no cancel button', mine.find(x => x.id === b2.id)?.canCancel === false);

@@ -57,7 +57,7 @@ try {
   ok('the app books at a partner shop once, even when sent twice', r.s === 201 && r2.s === 200 && r2.j.booking.id === r.j.booking.id, [r, r2]);
 
   await S.stop();
-  const orgId = new DatabaseSync(S.dbFile).prepare("select id from orgs where code='solo-cuts'").get().id, odb = new DatabaseSync(path.join(S.dbDir, `org-${orgId}.db`));
+  const orgId = new DatabaseSync(S.dbFile, { timeout: 5000 }).prepare("select id from orgs where code='solo-cuts'").get().id, odb = new DatabaseSync(path.join(S.dbDir, `org-${orgId}.db`));
   ok('the partner database has its own migration record', odb.prepare("select count(*) n from migrations where id='001_booking_integrity'").get().n === 1);
   ok('and its own snapshots', odb.prepare('select count(*) n from bookings where snapshot is not null').get().n === 2, odb.prepare('select count(*) n from bookings where snapshot is not null').get().n);
   odb.close();

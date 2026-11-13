@@ -18,7 +18,7 @@ try {
   const D = ymd(new Date(Date.now() + 3 * 864e5));
   let n = 0;
   const book = async time => (await call('POST', '/api/bh/book', { branchId: A.id, staffId: kev.id, itemIds: [trim.id], date: D, time }, app, { 'Idempotency-Key': 'noshow-test-key-' + String(++n).padStart(6, '0') })).j.booking.id;
-  const db = new DatabaseSync(S.dbFile);
+  const db = new DatabaseSync(S.dbFile, { timeout: 5000 });
   const startAt = (id, minsFromNow) => { const t = new Date(Date.now() + minsFromNow * 60e3); db.prepare('update bookings set date=?, time=? where id=?').run(ymd(t), hm(t), id); };
   const noshow = id => call('PUT', `/api/bookings/${id}`, { status: 'noshow' }, desk);
 

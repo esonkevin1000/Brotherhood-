@@ -3,7 +3,7 @@
 import { cutoffOf, durText } from './src/lib/policy.js';
 import { loadVapid, sendPush, knownPushHost } from './bh-push.js';
 export function mountBH(c) {
-  const { rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor,
+  const { bookingMessage, rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor,
     whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName, getSetting, setSetting, queueEmail, emailReady, baseUrl, esc: escHtml, addCol, toMin, scoreData, serviceNet, parseOrder, dOf } = c;
 
   // ---------- schema ----------
@@ -512,7 +512,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       const u = needUser(req), b = one('select * from bookings where id=? and userId=?', cm[1], u.id); if (!b) bad(404, 'Booking not found');
       if (b.status !== 'booked') bad(409, 'This booking is already ' + b.status);
       if (new Date(`${b.date}T${b.time}:00`).getTime() - Date.now() < cutoffOf(b) * 60e3) bad(409, `Bookings can be cancelled up to ${durText(cutoffOf(b))} before. Please call the shop.`);   // the rule the booking was made under (T17)
-      run("update bookings set status='cancelled' where id=?", b.id); bookingEvent(b.id, 'booked', 'cancelled', 'Customer (app)'); log({ name: 'App: ' + u.name }, 'booking-cancelled', 'bookings', b.id, b.customerName); freed(b.branchId, b.staffId, b.date);
+      run("update bookings set status='cancelled' where id=?", b.id); bookingEvent(b.id, 'booked', 'cancelled', 'Customer (app)'); bookingMessage('cancelled', b.id); log({ name: 'App: ' + u.name }, 'booking-cancelled', 'bookings', b.id, b.customerName); freed(b.branchId, b.staffId, b.date);
       return send(res, 200, { ok: true });
       });
     }

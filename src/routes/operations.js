@@ -4,7 +4,7 @@
 import os from 'node:os';
 import { NEXT } from '../lib/http.js';
 
-export function createOperationsRoutes({ rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
+export function createOperationsRoutes({ bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
   return async function handle({ req, res, url, p, method, q, me, admin, adminOnly, manageIn }) {
     // ----- daily sales remittance (separate from expenses) -----
@@ -86,7 +86,9 @@ export function createOperationsRoutes({ rescheduleBooking, db, uid, dOf, todayS
           if (Date.now() < from.getTime()) bad(409, `This customer can be marked as a no-show from ${String(from.getHours()).padStart(2, '0')}:${String(from.getMinutes()).padStart(2, '0')}${from.toDateString() === new Date().toDateString() ? '' : ' on ' + cur.date} (start time${grace ? ` + ${grace}-minute grace` : ''}).`);
         }
         if (cur.status === 'pending') run('update email_codes set guest=null, codeHash=null where bookingId=?', cur.id);
-        run('update bookings set status=? where id=?', b.status, cur.id); bookingEvent(cur.id, cur.status, b.status, me.name, b.reason); BH.freed(cur.branchId, cur.staffId, cur.date); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
+        run('update bookings set status=? where id=?', b.status, cur.id);
+        if (b.status === 'cancelled' && cur.status === 'booked') bookingMessage('cancelled', cur.id);   // T20 (a released guest hold was never confirmed: no email)
+       bookingEvent(cur.id, cur.status, b.status, me.name, b.reason); BH.freed(cur.branchId, cur.staffId, cur.date); if (cur.userId) BH.notify(cur.userId, 'booking', b.status === 'cancelled' ? `Your booking on ${cur.date} ${cur.time} was cancelled by the shop. Please book another time.` : `You were marked as a no-show for ${cur.date} ${cur.time}.`, '#/bookings', 'st-' + cur.id); log(me, 'booking-' + b.status, 'bookings', cur.id, cur.customerName); return send(res, 200, { ok: true });
       }
       if (method === 'POST' && bkm[2] === 'reschedule') {   // T18: staff can move a booking at any time
         const r = rescheduleBooking(cur.id, await readBody(req), me.name);

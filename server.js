@@ -15,6 +15,7 @@ import { hashPw, checkPw, sha, createAuth } from './src/lib/auth.js';
 import { createLimiter, allOf, intSetting } from './src/lib/throttle.js';
 import { createFlags } from './src/lib/flags.js';
 import { createPolicy } from './src/lib/policy.js';
+import { createBookingMessages } from './src/lib/notify.js';
 import { createServiceRoutes } from './src/routes/service-records.js';
 import { createDeviceRoutes } from './src/routes/devices.js';
 import { createScheduleRoutes } from './src/routes/schedules.js';
@@ -630,9 +631,9 @@ function maybeWelcome(c) {
   run('update customers set welcomedAt=? where id=?', nowISO(), c.id);
   setTimeout(() => processEmails().catch(() => { }), 50);
 }
-function queueEmail({ customerId = '', to, kind, subject, html, text }) {   // transactional mail from the app (reminders, review requests); only queued when the email service is connected
+function queueEmail({ customerId = '', to, kind, subject, html, text, ref = null }) {   // ref: a key that makes the same email go out only once (T20)   // transactional mail from the app (reminders, review requests); only queued when the email service is connected
   if (curOrg() || !mailReady() || !validEmail(to)) return false;
-  run("insert into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt) values(?,?,?,?,?,?,?,'pending',0,'',?)", uid(), customerId, to, kind, subject, html, text, nowISO());
+  if (Number(run("insert or ignore into email_log(id,customerId,toAddr,kind,subject,html,text,status,attempts,error,createdAt,ref) values(?,?,?,?,?,?,?,'pending',0,'',?,?)", uid(), customerId, to, kind, subject, html, text, nowISO(), ref).changes) !== 1) return false;   // already queued or sent
   setTimeout(() => processEmails().catch(() => { }), 50); return true;
 }
 let sending = false;
@@ -747,7 +748,9 @@ const bookingBlocked = ip => recent(bookHits, ip).length >= (+process.env.BOOK_L
 // one atomic step: everything inside either happens completely or not at all
 function tx(fn) { db.exec('begin immediate'); try { const r = fn(); db.exec('commit'); return r; } catch (e) { try { db.exec('rollback'); } catch { } throw e; } }
 // the booking rules (free times, making a booking, price snapshot, history) are in src/lib/booking.js
-const { bookingMins, slotsFor, bookingEvent, priceBooked, bookedSnap, createBooking, rescheduleBooking, bookingView } = createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn, policyOf });
+// booking messages (T20): one email per confirmed, cancelled or moved booking
+const bookingMessage = createBookingMessages({ one, get, queueEmail, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), shopName: () => SHOP });
+const { bookingMins, slotsFor, bookingEvent, priceBooked, bookedSnap, createBooking, rescheduleBooking, bookingView } = createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn, policyOf, onBooked: (kind, id) => bookingMessage(kind, id) });
 // a walk-in style ticket (used when a booked customer arrives)
 function createTicket(me, branchId, customerId, name, items, barberId) {
   const t = todayStr(), tt = totals(items, null), id = uid();
@@ -1085,12 +1088,12 @@ function sweepHolds() {
   try { inMain(f); for (const o of activeOrgs()) inOrg(o, f); } catch (e) { console.error('hold sweep failed:', e.message); }
 }
 setInterval(sweepHolds, 60e3).unref();
-const PUBLIC_ROUTES = createPublicRoutes({ mvpOn, policyOf, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody });
+const PUBLIC_ROUTES = createPublicRoutes({ bookingMessage, mvpOn, policyOf, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody });
 const STAFF_TOOLS = createStaffToolRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, sum, all, one, run, get, clean, insert, update, log, isAdmin, isBranchUser, isManager, inScope, branchOrAll, branchScope, openShift, ID_TYPES, getSetting, setSetting, payRules, dayRows, planDeductions, adjTotal, scoreData, encBuf, decBuf, REPORTS, csv, bad, send, readBody });
 const BACK_OFFICE_DATA = createBackOfficeDataRoutes({ nowISO, one, run, get, insert, update, strip, log, isBranchUser, isManager, inScope, branchOrAll, newPin, REFS, SOFT, CRUD, checkUser, setPw, bad, send, readBody });
-const BH = mountBH({ rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
+const BH = mountBH({ bookingMessage, rescheduleBooking, inOrg, inMain, activeOrgs, ownerOf, db, all, one, run, get, uid, nowISO, todayStr, send, readBody, bad, hashPw, checkPw, makeToken, readToken, createBooking, bookingView, bookingEvent, idemKeyOf, slotsFor, whoami, log, normEmail, validEmail, normPhone, jp, upsertCustomer, siteCover, siteSvc, siteGallery, staffState, tierOf, nextTier, shopName: SHOP, getSetting, setSetting, queueEmail, emailReady: () => !!EMAIL.key, baseUrl, esc: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), addCol, toMin, scoreData, serviceNet, parseOrder, dOf });
 // created after BH because the bookings routes notify app customers through it
-const OPERATIONS = createOperationsRoutes({ rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
+const OPERATIONS = createOperationsRoutes({ bookingMessage, rescheduleBooking, db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody });
 
 { const ran = migrate(mainDb); if (ran.length) console.log('migrations applied:', ran.join(', ')); }   // numbered files in src/db/migrations, once per database
 schemaReady = true; ORG_DBS.clear();

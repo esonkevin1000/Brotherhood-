@@ -9,7 +9,7 @@ export const idemKeyOf = v => { const k = String(v || '').trim(); return k.lengt
 export const snapOf = b => { try { const s = b.snapshot ? JSON.parse(b.snapshot) : null; return s && Array.isArray(s.items) && s.items.length ? s : null; } catch { return null; } };
 
 // now(): the current time; a test passes its own clock.
-export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn = () => false, policyOf, now = () => new Date() }) {
+export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, priceItems, staffState, normPhone, getSetting, findCustomer, upsertCustomer, tx, bad, mvpOn = () => false, policyOf, onBooked = () => { }, now = () => new Date() }) {
   function bookingMins(ids) {
     let m = 0;
     for (const id of ids) { const it = get('items', id); if (!it || !it.active || it.type !== 'service') bad(400, 'Unknown service'); m += it.mins || 30; }
@@ -73,6 +73,7 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     const id = uid();
     run('insert into bookings(id,branchId,staffId,customerName,phone,date,time,mins,itemIds,status,notes,source,orderId,createdAt,customerId,snapshot,idemKey,holdUntil,policy) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       id, branchId, sid, name, phone, date, time, mins, JSON.stringify(itemIds), opts.hold ? 'pending' : 'booked', String(b.preferredCut ?? b.notes ?? '').slice(0, 300), source, '', nowISO(), cust?.id || '', JSON.stringify(bookingSnapshot(itemIds, branchId, sid, mins)), idem || null, holdUntil, policyOf ? JSON.stringify(policyOf(branchId)) : null);   // T17: the policy shown before confirming
+    if (!opts.hold) onBooked('confirmed', id);   // T20: the confirmation email (a held guest booking gets it when the code is confirmed)
     bookingEvent(id, '', opts.hold ? 'pending' : 'booked', actor || (source === 'online' ? 'Customer (online)' : 'Staff'));
     return bookingView(one('select * from bookings where id=?', id));
     });
@@ -94,6 +95,7 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
       if (sid === 'any') sid = pickAny(cur.branchId, date, start, mins, itemIds, cur.id).id;
       run('update bookings set date=?, time=?, staffId=? where id=?', date, time, sid, cur.id);
       const nm = x => get('staff', x)?.name || 'any barber';
+      if (cur.date !== date || cur.time !== time || cur.staffId !== sid) onBooked('rescheduled', cur.id);   // T20
       bookingEvent(cur.id, 'booked', 'booked', actor, `rescheduled from ${cur.date} ${cur.time} (${nm(cur.staffId)}) to ${date} ${time} (${nm(sid)})`);
       return { before: cur, booking: bookingView(one('select * from bookings where id=?', cur.id)) };
     });
