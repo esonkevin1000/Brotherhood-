@@ -6,7 +6,7 @@ import { NEXT } from '../lib/http.js';
 
 export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, toMin, sum, all, one, run, get, parseOrder, insert, update, log, isBranchUser, isManager, inScope, branchOrAll, modulesFor, needAny, branchScope, dayLocked, openTickets, openShift, priceItems, idNeeded, attachIdPhoto, totals, onDuty, staffState, promoteNext, checkAssign, zData, getSetting, withCust, findCustomer, upsertCustomer, resolveCustomer, createTicket, dayRows, cashierName, planDeductions, adjTotal, BH, bookingEvent, priceBooked, bookedSnap, createBooking, bookingView, REPORTS, csv, snapOf, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
-  return async function handle({ req, res, url, p, method, q, me, admin, adminOnly }) {
+  return async function handle({ req, res, url, p, method, q, me, admin, adminOnly, manageIn }) {
     // ----- daily sales remittance (separate from expenses) -----
     const remitCalc = (branchId, date) => {
       const os = all("select * from orders where branchId=? and date=? and status='paid'", branchId, date).map(parseOrder), tender = {};
@@ -45,7 +45,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     }
     const rmv = p.match(/^\/api\/remittances\/(\w+)\/review$/);
     if (rmv && method === 'PUT') {
-      adminOnly(); const r = get('remittances', rmv[1]); if (!r) bad(404, 'Not found');
+      const r = get('remittances', rmv[1]); if (!r) bad(404, 'Not found'); manageIn(r.branchId);
       const b = await readBody(req), act = { verify: 'VERIFIED', flag: 'FLAGGED', reject: 'REJECTED' }[b.action], note = String(b.note || '').trim().slice(0, 300);
       if (!act) bad(400, 'Choose verify, flag or reject'); if (act !== 'VERIFIED' && !note) bad(400, 'A note is required to flag or reject a remittance');
       const hist = jp(r.history); hist.push({ at: nowISO(), by: me.name, action: act, note });
@@ -97,15 +97,16 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     // ----- reports -----
     const rm = p.match(/^\/api\/reports\/(\w+)$/);
     if (rm && method === 'GET') {
-      adminOnly(); const fn = REPORTS[rm[1]]; if (!fn) bad(404, 'Unknown report');
-      const br = q.branch && q.branch !== 'all' && get('branches', q.branch) ? q.branch : null;
+      if (!isManager(me)) adminOnly(); const fn = REPORTS[rm[1]]; if (!fn) bad(404, 'Unknown report');
+      const br = isManager(me) ? branchOrAll(me, q.branch) : q.branch && q.branch !== 'all' && get('branches', q.branch) ? q.branch : null;   // a manager: one of their branches
       const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : todayStr(), from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : to;
       const rep = fn({ from, to, br });
       if (q.format === 'csv') { res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${rm[1]}-${from}_${to}.csv"` }); return res.end(csv(rep)); }
       return send(res, 200, rep);
     }
     if (p === '/api/payroll/pay' && method === 'POST') {
-      adminOnly(); const b = await readBody(req), to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : todayStr(), from = /^\d{4}-\d{2}-\d{2}$/.test(b.from || '') ? b.from : '2000-01-01'; let n = 0;
+      if (!isManager(me)) adminOnly(); const b = await readBody(req), to = /^\d{4}-\d{2}-\d{2}$/.test(b.to || '') ? b.to : todayStr(), from = /^\d{4}-\d{2}-\d{2}$/.test(b.from || '') ? b.from : '2000-01-01'; let n = 0;
+      for (const sid of Array.isArray(b.staffIds) ? b.staffIds : []) manageIn(get('staff', String(sid))?.branchId);   // a manager pays only barbers of their branches
       for (const sid of Array.isArray(b.staffIds) ? b.staffIds : []) {
         const days = dayRows('2000-01-01', to, null).filter(x => x.staffId === sid && !x.paidAt && x.date >= from).sort((x, y) => x.date.localeCompare(y.date)); if (!days.length) continue;
         const bonus = adjTotal(sid, to), plan = planDeductions(sid, to, r2(sum(days, x => x.commission + x.topup + x.lunch - x.advance) + bonus)), last = days[days.length - 1].date;
@@ -257,7 +258,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
       }
       if (method === 'POST' && act === 'void') {
         const b = await readBody(req);
-        if (o.status === 'paid' && !admin) bad(403, 'Only an admin can void a paid sale');
+        if (o.status === 'paid' && !admin && !isManager(me)) bad(403, 'Only an admin or the branch manager can void a paid sale');
         if (o.status === 'paid') {   // a paid sale is final for staff; the owner/admin may only void it with a reason, and never once it is inside a sales reading
           const zl = dayLocked(o.branchId, o.date); if (zl) bad(409, `This sale is already included in the sales reading (Z-${zl.no}), so it can no longer be voided.`);
           if (String(b.reason || '').trim().length < 3) bad(400, 'Enter the reason for voiding a paid sale');
@@ -333,7 +334,7 @@ export function createOperationsRoutes({ db, uid, dOf, todayStr, nowISO, r2, jp,
     }
     const acm = p.match(/^\/api\/attendance\/(\w+)\/correct$/);
     if (acm && method === 'PUT') {
-      adminOnly(); const a = get('attendance', acm[1]); if (!a) bad(404, 'Not found'); const b = await readBody(req), reason = String(b.reason || '').trim().slice(0, 300);
+      const a = get('attendance', acm[1]); if (!a) bad(404, 'Not found'); manageIn(a.branchId); const b = await readBody(req), reason = String(b.reason || '').trim().slice(0, 300);
       if (reason.length < 5) bad(400, 'A reason is required for every attendance correction');
       const parse = v => { if (!v) return null; const s = /^\d{2}:\d{2}$/.test(v) ? `${a.date}T${v}:00` : String(v); const d = new Date(s); if (isNaN(d)) bad(400, 'Invalid time'); return d; };
       const tin = b.timeIn ? parse(b.timeIn) : new Date(a.timeIn), tout = b.timeOut === '' || b.timeOut === undefined ? (a.timeOut ? new Date(a.timeOut) : null) : parse(b.timeOut);

@@ -994,6 +994,8 @@ async function handleIn(req, res) {
   if (!me) return send(res, 401, { error: 'Login required' });
   const admin = isAdmin(me);
   const adminOnly = () => { if (!admin) bad(403, 'Not allowed for your role'); };
+  // approvals and pay for one branch: owner and admins, or a manager of that branch (T7b)
+  const manageIn = branchId => { if (!(admin || (isManager(me) && inScope(me, branchId)))) bad(403, 'Not allowed for your role'); };
   if (!admin) {   // role permissions: which POS sections this role may open (set by the owner in Settings → Access)
     const mod = (() => {
       if (/^\/api\/pos\/dashboard$/.test(p)) return 'dashboard';
@@ -1028,11 +1030,11 @@ async function handleIn(req, res) {
   if (p.startsWith('/api/svc/')) return SERVICE_RECORDS({ req, res, p, method, q, me });   // src/routes/service-records.js
 
   { const r = await DEVICES({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/devices.js
-  { const r = await MANAGEMENT({ req, res, p, method, q, me, admin, adminOnly }); if (r !== NEXT) return r; }   // src/routes/management.js
+  { const r = await MANAGEMENT({ req, res, p, method, q, me, admin, adminOnly, manageIn }); if (r !== NEXT) return r; }   // src/routes/management.js
   { const r = await PARTNER_SHOPS({ req, res, p, method, me }); if (r !== NEXT) return r; }   // src/routes/partner-shops.js
   { const r = await MARKETING({ req, res, p, method, me, adminOnly }); if (r !== NEXT) return r; }   // src/routes/marketing.js
-  { const r = await STAFF_TOOLS({ req, res, p, method, q, me, admin, adminOnly }); if (r !== NEXT) return r; }   // src/routes/staff-tools.js
-  { const r = await OPERATIONS({ req, res, url, p, method, q, me, admin, adminOnly }); if (r !== NEXT) return r; }   // src/routes/operations.js
+  { const r = await STAFF_TOOLS({ req, res, p, method, q, me, admin, adminOnly, manageIn }); if (r !== NEXT) return r; }   // src/routes/staff-tools.js
+  { const r = await OPERATIONS({ req, res, url, p, method, q, me, admin, adminOnly, manageIn }); if (r !== NEXT) return r; }   // src/routes/operations.js
   { const r = await BACK_OFFICE_DATA({ req, res, p, method, me, admin, adminOnly }); if (r !== NEXT) return r; }   // src/routes/back-office-data.js
   // ----- end of routes -----
 }

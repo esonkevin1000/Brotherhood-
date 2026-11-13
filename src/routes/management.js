@@ -9,10 +9,17 @@ import { NEXT } from '../lib/http.js';
 
 export function createManagementRoutes({ SECRET_WARNINGS, PASS, ownerUser, mainDb, curOrg, db, shopName, uid, todayStr, nowISO, r2, sum, all, one, run, get, insert, update, strip, pinKeyOf, log, BK_DIR, backup, isAdmin, isBranchUser, isManager, inScope, branchOrAll, MODULES, permsAll, modulesFor, normPhone, normEmail, validEmail, tierOf, getSetting, setSetting, getTerms, EMAIL, orgInfo, baseUrl, rememberOrigin, custCard, findCustomer, upsertCustomer, editCustomer, G_KEY, payRules, mailProvider, mailReady, mailFrom, makeToken, hashPw, checkPw, sha, bad, send, readBody }) {
   // returns NEXT when none of these routes matched
-  return async function handle({ req, res, p, method, q, me, admin, adminOnly }) {
+  return async function handle({ req, res, p, method, q, me, admin, adminOnly, manageIn }) {
     // ----- admin data -----
     if (p === '/api/state' && method === 'GET') {
       if (admin) rememberOrigin(req);
+      if (isManager(me)) {   // a manager's back office: only their branches and the people in them; services and prices to read (T7b)
+        const mine = x => me.branchIds.includes(x.branchId);
+        return send(res, 200, { shop: shopName(), org: orgInfo(), me, modules: modulesFor(me.role), branches: all('select * from branches order by rowid').filter(x => me.branchIds.includes(x.id)),
+          chairs: all('select * from chairs order by branchId, sort').filter(mine), staff: all('select * from staff order by name').filter(mine),
+          categories: all('select * from categories order by name'), items: all('select * from items order by name'), discounts: all('select * from discounts order by name'),
+          users: all("select * from users where role in ('cashier','barber') order by name").filter(mine).map(strip), equipment: all('select * from equipment order by branchId, name').filter(mine) });
+      }
       if (!admin) { const su = get('users', me.id), sp = su && su.staffId ? get('staff', su.staffId) : null; return send(res, 200, { shop: shopName(), org: orgInfo(), me: sp ? { ...me, photo: sp.photo || '' } : me, modules: modulesFor(me.role) }); }   // a barber's own profile picture
       return send(res, 200, {
         ...(!curOrg() ? { secretWarnings: SECRET_WARNINGS } : {}),   // owner and admins of Brotherhood see weak live settings
