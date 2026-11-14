@@ -78,11 +78,8 @@ function vHome() {
   const first = S.user ? esc(S.user.name.split(' ')[0]) : '';
   const hero = `<div class="hero ph pop"><div class="hero-bg"></div><div class="hero-in"><h1>The art of<br>the proper cut.</h1><p>Choose your barber and your time. Settle at the shop.</p><button class="btn" data-go="/discover">Book a chair</button></div></div>`;
   const next = up ? `<div class="sec-h"><h2>Your next cut</h2><button class="link" data-go="/bookings">Manage</button></div>${ticket(up)}` : '';
-  return header() + `<button class="spill" data-go="/discover">${ic('search')}<span>Search barbers, cuts or shops</span></button>` + (S.user ? `<div class="greet pop"><div class="sm mute">${greet()}, ${first}</div><h1>${up ? 'Your chair<br>is waiting.' : 'Welcome back.'}</h1></div>${next}${hero}${ptsStrip()}` : hero + next)
-  + `${quickActions()}${installCard()}
-  <div class="sec-h"><h2>Top barbers</h2><button class="link" data-go="/discover">See all</button></div>
-  ${D ? (D.barbers.length ? `<div class="hscroll">${D.barbers.slice(0, 12).map(b => barberTile(b)).join('')}</div>` : emptyBox('team', 'No barbers yet', 'Check back soon.')) : skelList()}
-  <div class="sec-h"><h2>Our shops</h2><button class="link" data-go="/map">View map</button></div>${D ? `<div class="hscroll">${D.shops.filter(s => !s.brand).map(shopTile).join('')}</div>` : ''}`;
+  return header() + (S.user ? `<div class="greet pop"><div class="sm mute">${greet()}, ${first}</div><h1>${up ? 'Your chair<br>is waiting.' : 'Welcome back.'}</h1></div>${next}${hero}${ptsStrip()}` : hero + next)
+  + installCard();
 }
 // ----- Discover: a marketplace of barbers and haircuts -----
 Object.assign(ICON, { chev: '<path d="m9 6 6 6-6 6"/>', lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>', doc: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>', shield: '<path d="M12 3 4 6.5v5c0 4.8 3.4 8.3 8 9.5 4.6-1.2 8-4.7 8-9.5v-5z"/>', cam: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>' });
@@ -144,7 +141,6 @@ function vDiscover() {
     <div class="pulse"><div><span class="ldot"></span><b class="num">${openN}/${D.shops.length}</b> shops open</div><div><b class="num">${freeN}</b> barber${freeN === 1 ? '' : 's'} free today</div></div>
     ${recent.length ? secRow('Jump back in', '') + `<div class="hscroll">${recent.map(b => barberTile(b, b.nextSlot ? 'Next ' + t12(b.nextSlot) : '')).join('')}</div>` : ''}
     ${secRow('Browse by style', '')}<div class="srow1">${styleRow}</div>
-    ${secRow('Pick a service')}<div class="pkgs">${PKGS.map(([k, name, desc]) => { const t = (D.pkgTiles || []).find(x => x.pkg === k) || { n: 0, from: 0 }; return `<button class="pkg" data-dpkg="${k}"><div class="pa">${pkgArt(k)}</div><div class="pb"><b>${esc(name)}</b><span class="sm mute">${esc(desc)}</span><span class="sm">${t.n ? `${t.n} barber${t.n === 1 ? '' : 's'} · from <b>${peso(t.from)}</b>` : (k === 'cut' && shopFrom() ? `Shop menu from <b>${peso(shopFrom())}</b>` : 'Price set by your barber')}</span></div></button>`; }).join('')}</div>
     ${soon.length ? secRow('Free today', 'data-dsee="soonest"') + `<div class="hscroll">${soon.map(b => barberTile(b, 'Next ' + t12(b.nextSlot))).join('')}</div>` : ''}
     ${rated.length ? secRow('Top rated', 'data-dsee="rating"') + `<div class="hscroll">${rated.map(b => barberTile(b, '★ ' + b.rating.toFixed(1))).join('')}</div>` : ''}
     ${hot.length ? secRow('Trending this week', 'data-dsee="trending"') + `<div class="hscroll">${hot.map(b => barberTile(b, '' + b.weekCuts + ' cut' + (b.weekCuts === 1 ? '' : 's'))).join('')}</div>` : ''}
