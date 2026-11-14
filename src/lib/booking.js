@@ -42,6 +42,12 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     }
     return out;
   }
+  // One booking a day per person (online and app): a second booking the same day, with any barber, is refused, so nobody
+  // holds two chairs. Matched by mobile number. A web booking still waiting for its email code does not count (a mistyped email
+  // can be fixed at once); the check runs again when the code is entered. Staff are not limited.
+  const ONE_A_DAY = 'You already have a booking on this day. One booking per day: change or cancel that one first, or ask the shop.';
+  const hasBookingOn = (phone, date, exceptId = '') => all("select id, phone from bookings where date=? and id<>? and status='booked'", date, exceptId)
+    .some(x => normPhone(x.phone) === normPhone(phone));
   const bookedSnap = orderId => { const bk = orderId ? one('select snapshot from bookings where orderId=?', orderId) : null; return bk ? snapOf(bk) : null; };
   // opts.hold (T16): a guest booking that waits for the email code. It starts as 'pending' and keeps the time for HOLD_MINS;
   // the customer record is made only when the code is confirmed.
@@ -64,8 +70,10 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
       if (ex) { if ((ex.status !== 'booked' && !liveHold) || normPhone(ex.phone) !== normPhone(phone) || ex.branchId !== branchId || ex.date !== date || ex.time !== time) bad(409, 'This booking request was already used. Please start again.'); return { ...bookingView(ex), duplicate: true }; }
     }
     if (source === 'online') noShowGate(phone, b.email);
+    if (source === 'online' && hasBookingOn(phone, date)) bad(409, ONE_A_DAY);
     const mins = bookingMins(itemIds), start = toMin(time);
     let sid = String(b.staffId || 'any');
+    if (sid !== 'any') { const s = get('staff', sid); if (s && !canDo(s, itemIds)) bad(409, `${s.name} does not do ${itemIds.map(i => get('items', i)).filter(it => it && !canDo(s, [it.id])).map(it => it.name).join(', ')}. Please pick another barber or service.`); }
     if (!slotsFor(branchId, date, sid, mins, itemIds).includes(time)) bad(409, 'That time is no longer available. Please pick another.');
     if (sid === 'any') sid = pickAny(branchId, date, start, mins, itemIds).id;   // fewest bookings that day, then the lowest id
     const cust = opts.hold ? null : upsertCustomer({ name, phone, email: b.email, preferredCut: b.preferredCut ?? b.notes, consent: !!b.consent }, source === 'online' ? 'online' : 'pos', branchId);
@@ -89,6 +97,7 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) bad(400, 'Invalid date or time');
       if (date < todayStr()) bad(400, 'Date is in the past');
       if (date > dOf(new Date(now().getTime() + 60 * 864e5))) bad(400, 'Too far ahead (max 60 days)');
+      if (opts.customer && date !== cur.date && hasBookingOn(cur.phone, date, cur.id)) bad(409, ONE_A_DAY);
       const itemIds = jp(cur.itemIds), mins = cur.mins || bookingMins(itemIds), start = toMin(time);
       let sid = String(b.staffId || cur.staffId);
       if (!slotsFor(cur.branchId, date, sid, mins, itemIds, cur.id).includes(time)) bad(409, 'That time is not available. Please pick another.');
@@ -107,5 +116,5 @@ export function createBookings({ uid, dOf, todayStr, nowISO, r2, jp, minsOfDay, 
     return { ...row, policy: (() => { try { return pol ? JSON.parse(pol) : null; } catch { return null; } })(), itemIds: ids, items: its.map(i => ({ id: i.id, name: i.name, price: i.price })), total: snap ? r2(snap.total) : r2(sum(its, i => i.price)), staffName: s?.name || '', staffPhoto: s?.photo || '', branchName: get('branches', b.branchId)?.name || '' };
   }
 
-  return { bookingMins, rescheduleBooking, canDo, pickAny, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };
+  return { ONE_A_DAY, hasBookingOn, bookingMins, rescheduleBooking, canDo, pickAny, timeBlocked, bookedOverlap, staffFree, slotsFor, noShowGate, bookingEvent, bookingSnapshot, priceBooked, bookedSnap, createBooking, bookingView };
 }

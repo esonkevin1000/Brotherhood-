@@ -99,7 +99,7 @@ try {
   ok('after too many missed appointments online booking is paused for that number', refused(() => book({ phone: '0917 555 0001', time: '17:00' }), 403, /missed appointments/));
   ok('the shop can still book that customer at the desk', book({ phone: '0917 555 0001', time: '17:00' }, 'pos', 'Desk').status === 'booked');
   noShowOk.add('09175550001');
-  ok('and a customer the owner allowed again can book online', book({ phone: '0917 555 0001', time: '17:30', staffId: 'leo' }).status === 'booked');
+  ok('and a customer the owner allowed again can book online', book({ phone: '0917 555 0001', time: '17:30', staffId: 'leo', date: day(2) }).status === 'booked');
   setting('noshowMax', 0);
 
   // ---------- price changes later ----------

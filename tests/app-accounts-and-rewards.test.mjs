@@ -41,9 +41,10 @@ try {
   ok('the old password stops working, the new one works', (await call('POST', '/api/bh/login', { email: 'ana@example.com', password: 'password123' })).s === 401 && (await call('POST', '/api/bh/login', { email: 'ana@example.com', password: 'newpassword1' })).s === 200);
 
   // ---------- booking and the 1-hour cancel cutoff ----------
-  const D = ymd(new Date(Date.now() + 3 * 864e5));
-  const book = async (time, key) => (await call('POST', '/api/bh/book', { branchId: br.id, staffId: kev.id, itemIds: [cut.id], date: D, time }, ana, { 'Idempotency-Key': 'acct-test-key-' + key })).j.booking;
-  const b1 = await book('10:00', '000000001'), b2 = await book('11:00', '000000002'), b3 = await book('13:00', '000000003');
+  // one booking a day per account, so the three bookings are on three days
+  const day = n => ymd(new Date(Date.now() + (3 + n) * 864e5));
+  const book = async (time, key, n) => (await call('POST', '/api/bh/book', { branchId: br.id, staffId: kev.id, itemIds: [cut.id], date: day(n), time }, ana, { 'Idempotency-Key': 'acct-test-key-' + key })).j.booking;
+  const b1 = await book('10:00', '000000001', 0), b2 = await book('11:00', '000000002', 1), b3 = await book('13:00', '000000003', 2);
   ok('three bookings made', !!(b1 && b2 && b3), [b1, b2, b3]);
   let mine = (await call('GET', '/api/bh/bookings', null, ana)).j.bookings;
   ok('a booking days away can be cancelled', mine.find(x => x.id === b1.id)?.canCancel === true);

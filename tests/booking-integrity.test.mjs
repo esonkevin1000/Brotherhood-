@@ -26,9 +26,10 @@ try {
   r = await call('POST', '/api/public/book', body({ phone: '0918 000 0000', name: 'Someone Else' }), null, key(1)); ok('another person cannot reuse the key to see the booking', r.s === 409 && !r.j.booking, r);
   r = await call('POST', '/api/public/book', body({ time: '14:00' }), null, key(1)); ok('the same key with a different time is refused, not answered with the old booking', r.s === 409 && !r.j.booking && (await list()).length === 1, r);
   { const burst = await Promise.all(Array.from({ length: 20 }, () => call('POST', '/api/public/book', body(), null, key(1)))); ok('20 copies of the same request at once all get the one booking', burst.every(x => x.s === 200) && (await list()).length === 1, burst.map(x => x.s)); }
-  r = await call('POST', '/api/public/book', body(), null, key(2)); ok('a new request for the taken slot is refused', r.s === 409 && /no longer available/.test(r.j.error), r);
-  r = await call('POST', '/api/public/book', body({ time: '11:00' }), null, { 'Idempotency-Key': 'short' }); ok('a too-short key is ignored, the booking still works', r.s === 201, r);
-  r = await call('POST', '/api/public/book', body({ time: '12:00' })); ok('no key at all still works (older app versions)', r.s === 201, r);
+  // (one booking a day per person: the next requests come from other customers)
+  r = await call('POST', '/api/public/book', body({ phone: '0917 200 0029', name: 'Late Comer' }), null, key(2)); ok('a new request for the taken slot is refused', r.s === 409 && /no longer available/.test(r.j.error), r);
+  r = await call('POST', '/api/public/book', body({ time: '11:00', phone: '0917 200 0030', name: 'Eleven' }), null, { 'Idempotency-Key': 'short' }); ok('a too-short key is ignored, the booking still works', r.s === 201, r);
+  r = await call('POST', '/api/public/book', body({ time: '12:00', phone: '0917 200 0031', name: 'Noon' })); ok('no key at all still works (older app versions)', r.s === 201, r);
 
   // "any barber" with a double tap used to take two barbers
   r = await call('POST', '/api/public/book', body({ staffId: 'any', date: D2 }), null, key(3));
@@ -47,7 +48,7 @@ try {
   await call('PUT', '/api/items/' + vip.id, { price: vip.price + 100, name: 'Vip Compadre Plus' }, owner);
   const after = (await list()).find(b => b.id === mine.id);
   ok('a later price change does not change a booking already made', after.total === vip.price && after.items[0].name === 'Vip Compadre', after);
-  r = await call('POST', '/api/public/book', body({ time: '13:00' }), null, key(4)); ok('a new booking gets the new price', r.s === 201 && r.j.booking.total === vip.price + 100, r.j);
+  r = await call('POST', '/api/public/book', body({ time: '13:00', phone: '0917 200 0050', name: 'One Pm' }), null, key(4)); ok('a new booking gets the new price', r.s === 201 && r.j.booking.total === vip.price + 100, r.j);
   // when the customer arrives, the visit carries the booked price
   r = await call('POST', `/api/bookings/${mine.id}/arrive`, null, desk); ok('arriving creates the visit at the booked price', r.s === 200 && r.j.order.items[0].price === vip.price, r.j);
 
@@ -82,7 +83,7 @@ try {
   const desk2 = (await call('POST', '/api/login', { pin: '222222' })).j.token;
   r = await call('GET', `/api/bookings/${mine.id}/history`, null, desk2); ok('another branch cannot read the history', r.s === 403, r.s);
   // a key from a cancelled booking cannot bring it back
-  r = await call('POST', '/api/public/book', body({ time: '11:00' }), null, { 'Idempotency-Key': 'short' }); ok('the freed 11:00 slot can be booked again', r.s === 201, r);
+  r = await call('POST', '/api/public/book', body({ time: '11:00', phone: '0917 200 0030', name: 'Eleven' }), null, { 'Idempotency-Key': 'short' }); ok('the freed 11:00 slot can be booked again', r.s === 201, r);
 
   // staff bookings are protected the same way
   r = await call('POST', '/api/bookings', body({ time: '16:00' }), desk, key(5)); const again = await call('POST', '/api/bookings', body({ time: '16:00' }), desk, key(5));

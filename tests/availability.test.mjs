@@ -75,6 +75,8 @@ insert into staff values('kev','Kev','b1',1),('abe','Abe','b1',1),('max','Max','
 
   // ---------- a branch without the new booking system ----------
   run('insert into staff_schedules values(?,?,?,?)', 'max', 3, 600, 660); run("insert into staff_services values('max','color')");
-  ok('weekly hours and service lists are ignored there (today\'s behaviour)', s('max', WED, 30, ['trim'], 'b2').length === 6);
+  ok('weekly hours are ignored there (today\'s behaviour)', s('max', WED, 30, [], 'b2').length === 6);
+  // since 2026-11-14 (owner's request) the list of services a barber does applies in every branch
+  ok('but the service list applies in every branch', s('max', WED, 30, ['trim'], 'b2').length === 0 && s('max', WED, 30, ['color'], 'b2').length === 6, [s('max', WED, 30, ['trim'], 'b2').length, s('max', WED, 30, ['color'], 'b2').length]);
 } catch (e) { fail(e); }
 done();

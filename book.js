@@ -31,6 +31,8 @@ const newVisit = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.ra
 let VISIT = newVisit();   // renewed after every successful booking
 const idemKey = () => [VISIT, S.branch, S.staff, S.date, S.time, S.items.join('.')].join('|').slice(0, 200);
 const svcs = () => I.services.filter(s => S.items.includes(s.id));
+// from a barber's own link, only the services the owner set for him (s.services is null when he does everything)
+const offered = () => { const m = S.lock && I.staff.find(x => x.id === S.staff); return I.services.filter(s => !m || !m.services || m.services.includes(s.id)); };
 const total = () => svcs().reduce((t, s) => t + s.price, 0), mins = () => Math.max(30, svcs().reduce((t, s) => t + (s.mins || 30), 0));
 // only barbers who do every chosen service (s.services is null when a barber does everything)
 const team = () => I.staff.filter(s => s.branchId === S.branch && (!s.services || S.items.every(i => s.services.includes(i))));
@@ -123,7 +125,7 @@ function stepBody() {
   const n = S.step;
   if (n === 1) return stepHead('Choose your branch', 'Tap a branch to continue.') + branchCards();
   if (n === 2) { const w = (I.menu || []).filter(s => s.bookable === false);
-    return `${S.lock ? lockedBarber() : ''}${stepHead('Choose your services', 'Pick one or more. You pay at the shop after your haircut.')}<div class="services" role="group" aria-label="Services">${I.services.map(s => `<button class="opt ${S.items.includes(s.id) ? 'on' : ''}" data-svc="${s.id}" aria-pressed="${S.items.includes(s.id)}">${s.photo ? `<img class="pic" src="${esc(s.photo)}" alt="" loading="lazy">` : `<span class="pic">${ic('scissors')}</span>`}<span><span class="nm">${esc(s.name)}</span>${s.apptOnly ? '<span class="tag">By appointment</span>' : ''}<small>${s.mins || 30} min</small></span><span class="pr">${peso(s.price)}</span><span class="ck" aria-hidden="true">${S.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('') || '<p class="mute">No services available.</p>'}</div>
+    return `${S.lock ? lockedBarber() : ''}${stepHead('Choose your services', 'Pick one or more. You pay at the shop after your haircut.')}<div class="services" role="group" aria-label="Services">${offered().map(s => `<button class="opt ${S.items.includes(s.id) ? 'on' : ''}" data-svc="${s.id}" aria-pressed="${S.items.includes(s.id)}">${s.photo ? `<img class="pic" src="${esc(s.photo)}" alt="" loading="lazy">` : `<span class="pic">${ic('scissors')}</span>`}<span><span class="nm">${esc(s.name)}</span>${s.apptOnly ? '<span class="tag">By appointment</span>' : ''}<small>${s.mins || 30} min</small></span><span class="pr">${peso(s.price)}</span><span class="ck" aria-hidden="true">${S.items.includes(s.id) ? ic('check') : ''}</span></button>`).join('') || '<p class="mute">No services available.</p>'}</div>
       ${w.length ? `<div class="walkin"><b>Walk-in only</b> (no booking needed)${w.map(s => `<div class="mi"><span>${esc(s.name)}</span><span>${peso(s.price)}</span></div>`).join('')}</div>` : ''}`; }
   if (n === 3) return stepHead('Choose your barber', 'Any barber gets you the earliest time.') + `<div class="team" role="group" aria-label="Barbers">
       <button class="mate ${S.staff === 'any' ? 'on' : ''}" data-staff="any" aria-pressed="${S.staff === 'any'}"><span class="av">${ic('scissors')}</span><b>Any barber</b><small>Fastest</small></button>

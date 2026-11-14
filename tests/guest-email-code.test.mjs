@@ -42,7 +42,8 @@ try {
   await call('PUT', '/api/settings', { mvpBranches: [A.id] }, owner);
   const D = ymd(new Date(Date.now() + 3 * 864e5));
   let n = 0;
-  const guest = (time, email, o = {}) => call('POST', '/api/public/book', { branchId: A.id, staffId: kev.id, itemIds: [trim.id], date: D, time, name: 'Gina Guest', phone: '0917 555 0000', ...(email === undefined ? {} : { email }), ...o }, null, { 'Idempotency-Key': 'guest-code-test-' + String(++n).padStart(6, '0') });
+  // each hold comes from its own number: one booking a day per person would otherwise stop the later holds
+  const guest = (time, email, o = {}) => call('POST', '/api/public/book', { branchId: A.id, staffId: kev.id, itemIds: [trim.id], date: D, time, name: 'Gina Guest', phone: '0917 555 ' + String(n).padStart(4, '0'), ...(email === undefined ? {} : { email }), ...o }, null, { 'Idempotency-Key': 'guest-code-test-' + String(++n).padStart(6, '0') });
   const confirm = (hold, code) => call('POST', '/api/public/book/confirm', { hold, code });
   const slots = async () => (await call('GET', `/api/public/slots?branch=${A.id}&date=${D}&staff=${kev.id}&items=${trim.id}`)).j.slots;
   const db = new DatabaseSync(S.dbFile, { timeout: 5000 });
@@ -72,6 +73,13 @@ try {
   ok('it is now a normal booking, with the customer saved', row.status === 'booked' && !!row.customerId && !!db.prepare("select 1 from customers where email='gina@example.com'").get(), row);
   ok('confirming again is harmless', (await confirm(hold, code)).s === 200);
   ok('its history shows the hold and the confirmation', JSON.stringify(db.prepare('select fromStatus, toStatus from booking_events where bookingId=? order by rowid').all(row.id)) === JSON.stringify([{ fromStatus: '', toStatus: 'pending' }, { fromStatus: 'pending', toStatus: 'booked' }]));
+
+  // ---------- one booking a day: two holds from one number, only the first one confirmed counts ----------
+  const tw1 = await guest('19:00', 'twin1@example.com', { phone: '0917 444 0000', name: 'Twin' }), tw2 = await guest('19:30', 'twin2@example.com', { phone: '0917 444 0000', name: 'Twin' });
+  ok('a second hold from the same number is allowed while the first waits for its code (a mistyped email can be fixed)', tw1.s === 202 && tw2.s === 202, [tw1.j, tw2.j]);
+  r = await confirm(tw1.j.hold, await codeFor('twin1@example.com')); ok('the first one is confirmed', r.s === 200, r.j);
+  r = await confirm(tw2.j.hold, await codeFor('twin2@example.com')); ok('the second one is refused: one booking a day', r.s === 409 && /One booking per day/.test(r.j.error), r.j);
+  ok('and its time is released', db.prepare("select status from bookings where time='19:30' and date=?").get(D)?.status === 'expired', db.prepare("select status from bookings where time='19:30' and date=?").get(D));
 
   // ---------- guessing: 5 wrong codes release the time ----------
   r = await guest('11:00', 'guess@example.com'); const h2 = r.j.hold, c2 = await codeFor('guess@example.com');

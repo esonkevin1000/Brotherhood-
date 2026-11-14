@@ -1,5 +1,6 @@
-// T14: which barber can do which service. In branches using the new booking system, a service is offered only with barbers
-// who can do it, including "Any barber". A barber with an empty list does every service (today's behaviour).
+// T14: which barber can do which service. A service is offered only with barbers who can do it, including "Any barber".
+// A barber with an empty list does every service. Changed 2026-11-14 at the owner's request: the list applies in every branch
+// (it used to apply only to branches on the new booking system), and only the owner (or an admin) may change it, not a manager.
 import { startServer, checker, ymd } from './helper.mjs';
 const { ok, done, fail } = checker();
 const S = await startServer(3167);
@@ -37,10 +38,12 @@ try {
   r = await book('any', [trim], '10:00', 3);
   ok('booking a Trim with "Any barber" goes to Kev', r.s === 201 && r.j.booking.staff === 'Kev', r.j);
 
-  // ---------- a branch without the new system keeps today's behaviour ----------
+  // ---------- the list applies in every branch, also one not on the new booking system ----------
   await call('PUT', `/api/staff/${bob.id}/services`, { itemIds: [trim.id] }, owner);
-  ok('in branch B (not switched on) Bob still offers Hair Color', (await slots(B, bob.id, [color])).length > 0);
-  ok('and the booking page is not told to hide him there', (await call('GET', '/api/public/info')).j.staff.find(s => s.id === bob.id).services === null);
+  ok('in branch B (not switched on) Bob no longer offers Hair Color', (await slots(B, bob.id, [color])).length === 0 && (await slots(B, bob.id, [trim])).length > 0);
+  ok('and the booking page is told what Bob does', JSON.stringify((await call('GET', '/api/public/info')).j.staff.find(s => s.id === bob.id).services) === JSON.stringify([trim.id]));
+  r = await call('GET', '/api/bh/discover'); const bobApp = (r.j.barbers || []).find(b => b.id === bob.id);
+  ok('the app is told too', bobApp && JSON.stringify(bobApp.services) === JSON.stringify([trim.id]), bobApp);
 
   // ---------- who may change it ----------
   ok('unknown or non-service items are refused', (await call('PUT', `/api/staff/${kev.id}/services`, { itemIds: ['nope'] }, owner)).s === 400
@@ -49,8 +52,8 @@ try {
   const mia = (await call('POST', '/api/login', { username: 'mia', password: 'miapass1' })).j.token;
   await call('POST', '/api/users', { name: 'Manager Max', username: 'max', password: 'maxpass1', role: 'manager', branchIds: [C.id] }, owner);
   const max = (await call('POST', '/api/login', { username: 'max', password: 'maxpass1' })).j.token;
-  ok("branch A's manager can set Leo's services", (await call('PUT', `/api/staff/${leo.id}/services`, { itemIds: [trim.id, color.id] }, mia)).s === 200);
-  ok("another branch's manager cannot", (await call('PUT', `/api/staff/${kev.id}/services`, { itemIds: [] }, max)).s === 403);
+  ok("a manager cannot change a barber's services, even in his own branch", (await call('PUT', `/api/staff/${leo.id}/services`, { itemIds: [trim.id, color.id] }, mia)).s === 403);
+  ok("nor can another branch's manager", (await call('PUT', `/api/staff/${kev.id}/services`, { itemIds: [] }, max)).s === 403);
   r = await call('GET', `/api/staff-services?branch=${A.id}`, null, mia);
   ok('the list per barber of the branch', r.s === 200 && r.j.find(x => x.staffId === kev.id)?.itemIds.join() === trim.id, r.j);
   r = await call('PUT', `/api/staff/${kev.id}/services`, { itemIds: [] }, owner);

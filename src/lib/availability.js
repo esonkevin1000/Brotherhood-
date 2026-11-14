@@ -32,8 +32,9 @@ export function createAvailability({ all, one, get, toMin, minsOfDay, todayStr, 
     return r ? [r.startMin, r.endMin] : null;
   }
   const inHours = (s, date, start, mins) => { const w = workWindow(s, date); return !w || (start >= w[0] && start + mins <= w[1]); };
+  // which services a barber does, set by the owner (Barber Hours & Services); an empty list = every service. Applies in every branch.
   const canDo = (s, itemIds) => {
-    if (!itemIds?.length || !mvpOn(s.branchId)) return true;
+    if (!itemIds?.length) return true;
     let mine = []; try { mine = all('select itemId from staff_services where staffId=?', s.id).map(r => r.itemId); } catch { }
     return !mine.length || itemIds.every(i => mine.includes(String(i)));
   };

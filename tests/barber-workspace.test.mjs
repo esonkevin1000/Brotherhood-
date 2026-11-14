@@ -24,10 +24,11 @@ try {
   const l2 = await walk('Leo Now', { barberId: leo.id });
   const anyone = await walk('Anyone'), leoLine = await walk('Leo Next'); await call('PUT', `/api/orders/${leoLine}`, { chairId: ch[1].id }, desk);
   const app = (await call('POST', '/api/bh/signup', { name: 'Ana Reyes', email: 'ana@example.com', phone: '0917 222 3333', password: 'password123', agree: true })).j.token;
-  const D = ymd(new Date(Date.now() + 2 * 864e5));
-  for (const [s, t, n] of [[kev, '10:00', 1], [leo, '11:00', 2]]) await call('POST', '/api/bh/book', { branchId: A.id, staffId: s.id, itemIds: [trim.id], date: D, time: t }, app, { 'Idempotency-Key': 'workspace-key-00000' + n });
+  // one booking a day per account: the two bookings are made on two days, then both are moved to today
+  const D = ymd(new Date(Date.now() + 2 * 864e5)), D2 = ymd(new Date(Date.now() + 3 * 864e5));
+  for (const [s, t, n, d] of [[kev, '10:00', 1, D], [leo, '11:00', 2, D2]]) await call('POST', '/api/bh/book', { branchId: A.id, staffId: s.id, itemIds: [trim.id], date: d, time: t }, app, { 'Idempotency-Key': 'workspace-key-00000' + n });
   const { DatabaseSync } = await import('node:sqlite'); const db = new DatabaseSync(S.dbFile, { timeout: 5000 });
-  db.prepare("update bookings set date=? where date=?").run(ymd(new Date()), D); db.close();   // both bookings are today
+  db.prepare("update bookings set date=? where date in (?,?)").run(ymd(new Date()), D, D2); db.close();   // both bookings are today
 
   const kd = (await call('GET', '/api/svc/today', null, kevTok)).j, ids = kd.tickets.map(t => t.id);
   ok("Kev's day: his finished cut and the unassigned line", ids.includes(k1) && ids.includes(anyone), kd.tickets.map(t => t.customerName));

@@ -243,11 +243,12 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
     const p = one('select * from bh_barber where staffId=?', s.id) || {}, r = rm.get(s.id) || { n: 0, a: 0, v: 0 }, spec = jp(p.specialties), photos = pc.get(s.id) || 0;
     let sl = []; try { sl = slotsFor(s.branchId, todayStr(), s.id, 30); } catch { } const slots = sl.length;
     const offers = all('select pkg,price from bh_offers where staffId=?', s.id).filter(o => PKG_IDS.includes(o.pkg)).sort((a, b) => PKG_IDS.indexOf(a.pkg) - PKG_IDS.indexOf(b.pkg));
+    let svl = []; try { svl = all('select itemId from staff_services where staffId=?', s.id).map(r => r.itemId); } catch { }   // the services the owner set for him (none = every service)
     const complete = [p.headline, p.bio, s.photo, p.years, spec.length, photos >= 3].filter(Boolean).length / 6;
     // ranking: verified-review quality (Bayesian), same-day availability, profile completeness, verification — never raw popularity
     const bayes = (r.a * r.n + 4.2 * 5) / (r.n + 5), score = bayes / 5 * 50 + Math.min(slots, 6) / 6 * 20 + complete * 20 + (p.verified ? 10 : 0);
     return { id: s.id, name: s.name, photo: s.photo || '', branchId: s.branchId, branchName: br.get(s.branchId)?.name || '', headline: p.headline || '', years: p.years || 0, specialties: spec,
-      rating: r.a, reviews: r.n, verifiedReviews: r.v, verified: !!p.verified, portfolio: photos, slotsToday: slots, nextSlot: sl[0] || '', offers, fromPrice: offers.length ? Math.min(...offers.map(o => o.price)) : 0, score: Math.round(score * 10) / 10,
+      rating: r.a, reviews: r.n, verifiedReviews: r.v, verified: !!p.verified, portfolio: photos, slotsToday: slots, nextSlot: sl[0] || '', offers, services: svl.length ? svl : null, fromPrice: offers.length ? Math.min(...offers.map(o => o.price)) : 0, score: Math.round(score * 10) / 10,
       ...(ex ? { cover: ex.cover.get(s.id) || '', weekCuts: ex.week.get(s.id) || 0, level: levelOf(ex.cuts.get(s.id) || 0), styles: [...(ex.styles.get(s.id) || [])] } : {}) };
   }
   const servicesList = () => all("select id,name,price,mins,photo,apptOnly from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) }));
@@ -461,7 +462,10 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
         if (ex) return send(res, 200, { ok: true, duplicate: true, booking: { id: ex.id, brand: org?.name || '', date: ex.date, time: ex.time, branch: org ? `${org.name} · ${ex.branchName}` : ex.branchName, staff: ex.staffName, items: ex.items, total: ex.total, promo: ex.promoCode ? { code: ex.promoCode, amt: ex.promoAmt } : null }, series: [] });
       }
       let pc = null; if (b.promo) pc = promoCheck(b.promo, b.itemIds, u.phone, u.email, u.id);   // checked first: a bad code stops the booking with a clear message
+      // one booking a day per account, across Brotherhood and partner shops (each shop also checks the mobile number)
+      const bookedThatDay = date => { const q = () => !!one("select 1 x from bookings where userId=? and date=? and status='booked'", u.id, date); return inMain(q) || activeOrgs().some(o => inOrg(o, q)); };
       const make = date => {
+        if (bookedThatDay(date)) bad(409, 'You already have a booking on this day. One booking per day: change or cancel that one first, or ask the shop.');
         const at = () => {
           const x = createBooking({ branchId: b.branchId, staffId: b.staffId, itemIds: b.itemIds, date, time: b.time, name: u.name, phone: u.phone, email: u.email, notes: clip(b.notes, 300), consent: !!b.consent, idemKey: keyFor(date) }, 'online', 'Customer (app)');
           if (x.duplicate) return x;
@@ -946,6 +950,7 @@ create index if not exists bh_notifs_user on bh_notifs(userId, createdAt);
       }
       // service packages a barber offers, with his own price for each (shown in the marketplace; the POS stays the source of truth for what is charged)
       if (sub === '/pro/offers' && method === 'PUT') {
+        if (!admin) bad(403, 'Only the owner can change the services and prices on a barber profile.');
         const b = await readBody(req), s = target(b.staffId), rows = Array.isArray(b.offers) ? b.offers : [], seen = new Set();
         for (const o of rows) {
           if (!PKG_IDS.includes(o.pkg)) bad(400, 'Unknown service'); if (seen.has(o.pkg)) bad(400, 'Each service can be listed once'); seen.add(o.pkg);

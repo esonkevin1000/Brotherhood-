@@ -52,13 +52,14 @@ try {
   ok('past date has no slots', (await call('GET', `/api/public/slots?branch=${br.id}&date=${ymd(-1)}&staff=any&items=${item}`)).j.slots.length === 0);
   const book = b => call('POST', '/api/public/book', { branchId: br.id, date: D, time: '10:00', itemIds: [item], name: 'Juan', phone: '0917 123 4567', ...b });
   const b1 = await book({ staffId: kev.id }); ok('online booking created with chosen barber', b1.s === 201 && b1.j.booking.staff === 'Kevin' && b1.j.booking.total === 150, JSON.stringify(b1));
-  ok('same barber same time rejected', (await book({ staffId: kev.id })).s === 409);
-  const b2 = await book({ staffId: 'any', name: 'Pedro' }); ok('"any barber" falls to the free barber', b2.s === 201 && b2.j.booking.staff === 'Marco', JSON.stringify(b2));
-  ok('both busy → 409', (await book({ staffId: 'any', name: 'Mark' })).s === 409);
+  // one booking a day per person: each further booking comes from its own number, so each check tests what it says
+  ok('same barber same time rejected', (await book({ staffId: kev.id, name: 'Again', phone: '0917 123 0007' })).s === 409);
+  const b2 = await book({ staffId: 'any', name: 'Pedro', phone: '0917 123 0002' }); ok('"any barber" falls to the free barber', b2.s === 201 && b2.j.booking.staff === 'Marco', JSON.stringify(b2));
+  ok('both busy → 409', (await book({ staffId: 'any', name: 'Mark', phone: '0917 123 0003' })).s === 409);
   const slAfter = (await call('GET', `/api/public/slots?branch=${br.id}&date=${D}&staff=any&items=${item}`)).j.slots; ok('10:00 no longer offered', !slAfter.includes('10:00') && slAfter.includes('10:30'));
-  const v = await book({ staffId: kev.id, time: '11:00', itemIds: [vip.id], name: 'Vip Guy' }); ok('45-min booking', v.s === 201);
-  ok('overlap with 45-min booking rejected (11:30 for same barber)', (await book({ staffId: kev.id, time: '11:30', name: 'X' })).s === 409);
-  ok('after it ends (12:00) is fine', (await book({ staffId: kev.id, time: '12:00', name: 'Y' })).s === 201);
+  const v = await book({ staffId: kev.id, time: '11:00', itemIds: [vip.id], name: 'Vip Guy', phone: '0917 123 0004' }); ok('45-min booking', v.s === 201);
+  ok('overlap with 45-min booking rejected (11:30 for same barber)', (await book({ staffId: kev.id, time: '11:30', name: 'X', phone: '0917 123 0005' })).s === 409);
+  ok('after it ends (12:00) is fine', (await book({ staffId: kev.id, time: '12:00', name: 'Y', phone: '0917 123 0006' })).s === 201);
   ok('bad phone rejected', (await book({ phone: '123', time: '14:00' })).s === 400);
   ok('missing name rejected', (await book({ name: '', time: '14:00' })).s === 400);
   ok('product cannot be booked', (await book({ itemIds: [powder.id], time: '14:00' })).s === 400);
@@ -91,7 +92,7 @@ try {
     const t2 = await call('POST', '/api/public/book', { branchId: br.id, staffId: mar.id, date: T, time: nowSlot, itemIds: [item], name: 'Second', phone: '0917 555 0001' });
     const tb2 = (await call('GET', `/api/bookings?date=${T}`, null, c1)).j.find(x => x.customerName === 'Second');
     const seated = await call('POST', `/api/bookings/${tb2.id}/arrive`, null, c1); ok('arrive with preferred barber on duty → seated automatically', seated.j.seated === true && seated.j.order.barberId === mar.id, JSON.stringify(seated.j));
-    ok('every booked phone number is one directory record (same phone = same person)', (await call('GET', '/api/customers?q=', null, c1)).j.total === 4);
+    ok('every booked phone number is one directory record (same phone = same person)', (await call('GET', '/api/customers?q=', null, c1)).j.total === 7);   // Juan, Pedro, Vip Guy, Y, Phone-in, Today Guy, Second
     const live = (await call('GET', '/api/live', null, c1)).j; ok('arrived customers show on the floor', live.queue.length === 2, JSON.stringify(live.queue.length));
   } else console.log('SKIP arrival tests (no slot available right now): ' + JSON.stringify(today.j));
   const dash = (await call('GET', '/api/pos/dashboard', null, c1)).j; ok('pos dashboard counts bookings', typeof dash.bookings === 'number');

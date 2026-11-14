@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { NEXT } from '../lib/http.js';
 import { createLimiter } from '../lib/throttle.js';
 
-export function createPublicRoutes({ bookingMessage, mvpOn, policyOf, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody }) {
+export function createPublicRoutes({ ONE_A_DAY, hasBookingOn, bookingMessage, mvpOn, policyOf, mailReady, findCustomer, upsertCustomer, bookingEvent, bookingView, ownerUser, SHOP, mainDb, curOrg, orgRow, inOrg, inMain, shopName, uid, todayStr, nowISO, all, one, run, get, insert, log, siteSvc, siteCover, normPhone, normEmail, validEmail, getTerms, TRIAL_DAYS, plansNow, contactEmail, addDaysStr, signupHits, SIGNUPS_OPEN, STARTER, KIND_LABEL, baseUrl, esc2, gInfo, googleData, bookHits, reviewHits, recent, hitRate, reviewBlocked, bookingBlocked, shopWelcomeEmail, sendEmail, makeToken, bookingMins, slotsFor, createBooking, hashPw, bad, send, readBody }) {
   // ----- guest booking confirmed by an email code (T16, D-5, D-14), only in branches on the new booking system -----
   const TRIES = 5, SENDS = 3, PER_EMAIL = 5, RESEND_WAIT = 60e3;
   // per branch, whatever the address or device: open holds at one time, and code emails a day (keeps the shop's email quota and the day's times safe from fake emails)
@@ -85,8 +85,8 @@ export function createPublicRoutes({ bookingMessage, mvpOn, policyOf, mailReady,
         services: all("select id,name,price,mins,photo,apptOnly,categoryId from items where active=1 and type='service' and bookable=1 order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name) })),
         menu: all("select id,name,price,mins,photo,apptOnly,bookable from items where active=1 and type='service' order by price").map(s => ({ ...s, photo: s.photo || siteSvc(s.name), bookable: !!s.bookable })),   // every service for the price menu; only bookable ones can be booked online
         categories: all("select id,name from categories where type='service'"),
-        // T14: in branches on the new booking system, the services each barber does (null = every service), so the page can hide the others
-        staff: all('select id,name,photo,branchId from staff where active=1 order by name').map(s => { const l = mvpOn(s.branchId) ? all('select itemId from staff_services where staffId=?', s.id).map(r => r.itemId) : []; return { ...s, services: l.length ? l : null }; })
+        // the services each barber does (null = every service), so the booking page offers only those with him
+        staff: all('select id,name,photo,branchId from staff where active=1 order by name').map(s => { const l = all('select itemId from staff_services where staffId=?', s.id).map(r => r.itemId); return { ...s, services: l.length ? l : null }; })
       });
     }
     if (p === '/api/public/slots' && method === 'GET') {
@@ -148,6 +148,8 @@ export function createPublicRoutes({ bookingMessage, mvpOn, policyOf, mailReady,
         if (tries >= TRIES) { expire(bk, 'too many wrong codes'); bad(429, 'Too many wrong codes. The time was released. Please book again.'); }
         return send(res, 400, { error: `Wrong code. ${TRIES - tries} ${TRIES - tries === 1 ? 'try' : 'tries'} left.`, triesLeft: TRIES - tries });
       }
+      // one booking a day: another booking confirmed for this number the same day (for example a second hold) releases this one
+      if (hasBookingOn(bk.phone, bk.date, bk.id)) { expire(bk, 'the customer already has a booking that day'); bad(409, ONE_A_DAY); }
       // the code proves the email, not the phone: a customer already known by this phone keeps their own email
       const g = JSON.parse(ec.guest || '{}'), known = findCustomer(g.phone, ''), keepEmail = known?.email && normEmail(known.email) !== g.email;
       const cust = upsertCustomer({ name: g.name, phone: g.phone, email: keepEmail ? known.email : g.email, preferredCut: g.preferredCut, consent: !!g.consent }, 'online', bk.branchId);

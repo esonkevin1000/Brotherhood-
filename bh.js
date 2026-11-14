@@ -54,6 +54,7 @@ const header = (title, back) => { const route = location.hash.slice(2).split('/'
 const barberRow = b => `<button class="bcard" data-go="/barber/${b.id}">${pic(b.photo, b.name)}<div class="sp"><div class="nm">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</div>
   <div class="sm mute">${esc(b.headline || b.specialties.join(' · ') || 'Barber')} · ${esc(b.branchName)}</div><div class="sm row" style="margin-top:3px;flex-wrap:wrap;gap:6px">${rate(b.rating, b.reviews)}${b.years ? `<span class="mute">· ${b.years} yrs</span>` : ''}${b.slotsToday ? `<span class="tag ok">${b.slotsToday} slots today</span>` : ''}</div></div></button>`;
 const svcFor = bid => (S.D && S.D.shopSvc && S.D.shopSvc[bid]) || (S.D && S.D.services) || [];   // a partner shop has its own menu
+const svcOfBarber = (bid, b) => svcFor(bid).filter(s => !b || !b.services || b.services.includes(s.id));   // only what the owner set for this barber
 const minPrice = bid => { const p = svcFor(bid).map(x => +x.price).filter(x => x > 0); return p.length ? Math.min(...p) : 0; };
 const brandTag = n => n ? `<span class="brandt">${esc(n)}</span>` : '';
 const shopCard = s => `<button class="shop" data-shop="${s.id}">${s.photo ? `<img src="${esc(s.photo)}" alt="${esc(s.name)}" loading="lazy">` : ''}<div class="in"><div class="nm">${esc(s.name)} ${brandTag(s.brand)}</div>
@@ -72,12 +73,16 @@ const untilTxt = b => {
 };
 const ticket = (b, extra = '') => { const d = new Date(b.date + 'T00:00:00'); return `<div class="tkt2 pop"><div class="tk-d"><span>${d.toLocaleDateString('en-PH', { month: 'short' })}</span><b>${d.getDate()}</b><span>${d.toLocaleDateString('en-PH', { weekday: 'short' })}</span></div><div class="tk-b"><div class="row"><span class="tk-pill">${esc(untilTxt(b))}</span><span class="sp"></span><b class="num" style="font-size:17px">${t12(b.time)}</b></div><div class="nm" style="margin-top:7px">${esc((b.items || []).map(i => i.name).join(' + ') || 'Haircut')}</div><div class="sm mute">${esc(b.staffName || 'Any barber')} · ${esc(b.branchName || '')}</div>${extra}</div></div>`; };
 const emptyBox = (icon, title, sub, cta = '') => `<div class="ebox pop"><span class="eic">${ic(icon)}</span><b>${title}</b><span class="sm mute">${sub}</span>${cta}</div>`;
+// Home without an account: under the hero, a note that the app is coming to the stores (not shown inside the installed app)
+const storeSoon = () => isStandalone() ? '' : `<div class="soon pop"><b>Brotherhood on your phone</b><span class="sm mute">Book in seconds, earn points on every visit and get a reminder before your cut.</span>
+  <div class="soon-b"><span class="sbadge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.2 16.5 12 9l2.8 7.5M10.1 14h3.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>Coming soon on the</small>App Store</span></span>
+  <span class="sbadge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.8v16.4c0 .6.7 1 1.2.7l13-8.2c.5-.3.5-1 0-1.3l-13-8.3C6.7 2.8 6 3.2 6 3.8z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg><span><small>Coming soon on</small>Google Play</span></span></div></div>`;
 function vHome() {
   const D = S.D, up = (S.mine || []).filter(b => b.status === 'booked' && b.date >= ymd(new Date())).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
   const first = S.user ? esc(S.user.name.split(' ')[0]) : '';
   const hero = `<div class="hero ph pop"><div class="hero-bg"></div><div class="hero-in"><h1>The art of<br>the proper cut.</h1><p>Choose your barber and your time. Settle at the shop.</p><button class="btn" data-go="/discover">Book a chair</button></div></div>`;
   const next = up ? `<div class="sec-h"><h2>Your next cut</h2><button class="link" data-go="/bookings">Manage</button></div>${ticket(up)}` : '';
-  return header() + (S.user ? `<div class="greet pop"><div class="sm mute">${greet()}, ${first}</div><h1>${up ? 'Your chair<br>is waiting.' : 'Welcome back.'}</h1></div>${next}${hero}${ptsStrip()}` : hero + next)
+  return header() + (S.user ? `<div class="greet pop"><div class="sm mute">${greet()}, ${first}</div><h1>${up ? 'Your chair<br>is waiting.' : 'Welcome back.'}</h1></div>${next}${hero}${ptsStrip()}` : hero + next + storeSoon())
   + installCard();
 }
 // ----- Discover: a marketplace of barbers and haircuts -----
@@ -286,7 +291,7 @@ function vBook() {
   ${ticket({ date: k.done.date, time: k.done.time, items: k.done.items, staffName: k.done.staff, branchName: k.done.branch }, `<div class="row" style="margin-top:10px"><span class="sm mute">Pay at the shop</span><span class="sp"></span><b class="num">${peso(k.done.total)}</b></div>${k.done.promo ? `<div class="sm" style="color:var(--ok);margin-top:4px">Promo ${esc(k.done.promo.code)}: you save ${peso(k.done.promo.amt)} · you pay ${peso(Math.max(0, k.done.total - k.done.promo.amt))}</div>` : ''}`)}
   <div class="sm mute" style="text-align:center;margin:12px 0">You can cancel up to 1 hour before.</div>${seriesHtml(k) ? `<div class="card sm">${seriesHtml(k)}</div>` : ''}${pushCard()}
   <div class="row" style="gap:10px;margin-top:14px"><button class="btn sec sp" data-ics>${ic('cal')} Add to calendar</button><button class="btn sp" data-go="/bookings">View bookings</button></div>`;
-  const SV = svcFor(k.branchId), total = SV.filter(s => k.items.includes(s.id)).reduce((t, s) => t + s.price, 0);
+  const SV = svcOfBarber(k.branchId, team.find(b => b.id === k.staffId)), total = SV.filter(s => k.items.includes(s.id)).reduce((t, s) => t + s.price, 0);
   const svcOk = !!(k.items.length || k.pkg), stepN = 1 + (svcOk ? 1 : 0) + 1 + (k.time ? 1 : 0);
   return header('Book a cut', k.staffId !== 'any' ? '/barber/' + k.staffId : '/discover') + `<div class="steps"><div class="stp"><i style="width:${stepN * 25}%"></i></div><span class="sm mute">${!svcOk ? 'Choose a service' : !k.time ? 'Pick a time' : 'Ready to confirm'} · ${stepN} of 4</span></div><div class="card row">${ic('pin')}<div class="sp"><b>${esc(br?.name || '')}</b>${brandTag(br?.brand)}<div class="sm mute">${esc(br?.address || '')}</div></div></div>
   ${k.pkg ? `<div class="card row" style="margin-top:10px"><div class="pa s">${pkgArt(k.pkg.key)}</div><div class="sp"><b>${esc(k.pkg.name)}</b><div class="sm mute">${peso(k.pkg.price)} · the barber's price, pay at the shop</div></div><button class="link" data-rmpkg>Remove</button></div>` : ''}<div class="sec-h"><h2>1 · Barber</h2></div><div class="chips"><button class="chip ${k.staffId === 'any' ? 'on' : ''}" data-bstaff="any">Any available</button>${team.map(b => `<button class="chip ${k.staffId === b.id ? 'on' : ''}" data-bstaff="${b.id}">${esc(b.name)}</button>`).join('')}</div>
@@ -418,7 +423,7 @@ function vPro() {
   if (!sel) return header('Pro tools', '/') + '<div class="empty">No barbers found.</div>';
   return header('Pro tools', '/') + `${S.pro.admin && !['shop', 'mod', 'ins'].includes(S.proTab) ? `<label class="f">Barber<select id="prosel">${S.pro.staff.map(s => `<option value="${s.id}" ${s.id === sel.id ? 'selected' : ''}>${esc(s.name)} · ${esc(s.branchName)}</option>`).join('')}</select></label>` : ''}
   <div class="tabs scroll"><button class="${S.proTab === 'today' ? 'on' : ''}" data-ptab="today">Today</button><button class="${S.proTab === 'tools' ? 'on' : ''}" data-ptab="tools">Tools</button>${S.pro.admin ? `<button class="${S.proTab === 'shop' ? 'on' : ''}" data-ptab="shop">Shop</button><button class="${S.proTab === 'ins' ? 'on' : ''}" data-ptab="ins">Insights</button>` : ''}<button class="${S.proTab === 'dash' ? 'on' : ''}" data-ptab="dash">${S.pro.admin ? 'Barber' : 'Dashboard'}</button><button class="${S.proTab === 'profile' ? 'on' : ''}" data-ptab="profile">Profile</button><button class="${S.proTab === 'port' ? 'on' : ''}" data-ptab="port">Portfolio</button>${S.pro.admin ? `<button class="${S.proTab === 'mod' ? 'on' : ''}" data-ptab="mod">Moderation</button>` : ''}</div>
-  ${S.proTab === 'today' ? vToday() : ''}${S.proTab === 'tools' ? vTools() : ''}${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'ins' && S.pro.admin ? vInsights() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}${linkCard(sel)}${offersEditor(sel)}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
+  ${S.proTab === 'today' ? vToday() : ''}${S.proTab === 'tools' ? vTools() : ''}${S.proTab === 'shop' && S.pro.admin ? vOwner() : ''}${S.proTab === 'ins' && S.pro.admin ? vInsights() : ''}${S.proTab === 'dash' ? vDash() : ''}${S.proTab === 'mod' ? vMod() : ''}<div ${S.proTab === 'profile' ? '' : 'hidden'}>${photosEditor(sel)}${linkCard(sel)}${S.pro.admin ? offersEditor(sel) : ''}<div class="sec-h"><h2>Professional profile</h2></div><form id="prof">${S.proMsg ? `<div class="${S.proMsg.ok ? 'ok' : 'err'}">${esc(S.proMsg.t)}</div>` : ''}
   <label class="f">Headline<input name="headline" maxlength="80" value="${esc(sel.headline)}" placeholder="e.g. Fade specialist"></label><label class="f">About<textarea name="bio" rows="3" maxlength="600">${esc(sel.bio)}</textarea></label>
   <label class="f">Years of experience<input name="years" type="number" min="0" max="60" value="${sel.years || ''}"></label><label class="f">Specialties (comma separated)<input name="specialties" value="${esc(sel.specialties.join(', '))}" placeholder="Skin Fade, Taper, Pompadour"></label>
   <label class="f">Instagram<input name="instagram" value="${esc(sel.instagram)}" placeholder="@handle or link"></label><label class="f">Facebook<input name="facebook" value="${esc(sel.facebook)}"></label><label class="f">TikTok<input name="tiktok" value="${esc(sel.tiktok)}"></label>
@@ -606,6 +611,13 @@ async function openPoints(cid) {
   });
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-tpts]'); if (b) openPoints(b.dataset.tpts); });
+// Points change at the front desk (a reward claimed there), so they are fetched again when Home, Profile or booking opens,
+// when the app comes back to the screen, and right before the rewards sheet opens. The screen redraws only if they changed.
+const LOYAL_SCREENS = ['home', 'me', 'book', 'profile'];
+async function loadLoyal(draw = true) {
+  try { const j = await api('/loyalty'), changed = JSON.stringify(j) !== JSON.stringify(S.loyal); S.loyal = j; S.loyalAt = Date.now(); if (changed && draw) render(); } catch { }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token && LOYAL_SCREENS.includes(route().a)) loadLoyal(); });
 function openRewards() {
   const l = S.loyal; if (!l) return;
   const vs = l.vouchers || [], sTag = v => v.status === 'active' ? '<span class="tag ok">Ready</span>' : v.status === 'used' ? '<span class="tag">Used</span>' : '<span class="tag bad">Expired</span>';
@@ -615,7 +627,7 @@ function openRewards() {
     <div id="rwerr"></div><div class="row" style="margin-top:14px"><button class="btn ghost sp" data-x>Close</button></div>`);
   o.addEventListener('click', async e => {
     const b = e.target.closest('[data-redeem]'); if (!b) return; b.disabled = true;
-    try { const j = await api(`/rewards/${b.dataset.redeem}/redeem`, { method: 'POST' }); S.loyal = await api('/loyalty'); o.remove(); toast('Voucher ' + j.code + ' is ready'); render(); openRewards(); }
+    try { const j = await api(`/rewards/${b.dataset.redeem}/redeem`, { method: 'POST' }); await loadLoyal(false); o.remove(); toast('Voucher ' + j.code + ' is ready'); render(); openRewards(); }
     catch (x) { o.querySelector('#rwerr').innerHTML = `<div class="err">${esc(x.message)}</div>`; b.disabled = false; }
   });
 }
@@ -793,7 +805,7 @@ function pkgArt(k) {
 // premium touches: skeletons while loading, and real shop prices when a barber has not set their own
 const skelList = () => '<div class="skel"><div class="sk h1"></div><div class="sk h2"></div><div class="sk h3"></div></div>';
 const shopFrom = () => { const p = ((S.D && S.D.services) || []).map(x => +x.price).filter(x => x > 0); return p.length ? Math.min(...p) : 0; };
-const shopMenuRows = b => { const sv = svcFor(b.branchId).slice(0, 4); return sv.length ? sv.map(x => `<div class="card row">${x.photo ? `<img src="${esc(x.photo)}" alt="" style="width:48px;height:48px;border-radius:12px;object-fit:cover;flex:none">` : ''}<div class="sp"><div class="nm">${esc(x.name)}</div><div class="sm mute">${x.mins || 30} min · shop menu</div></div><div style="text-align:right"><b class="num" style="font-size:19px">${peso(x.price)}</b><div><button class="btn sec sm" style="margin-top:4px" data-book="${b.id}">Book</button></div></div></div>`).join('') : '<div class="card empty sm">Prices are set by the shop. Book and pay at the counter.</div>'; };
+const shopMenuRows = b => { const sv = svcOfBarber(b.branchId, b).slice(0, b.services ? 12 : 4); return sv.length ? sv.map(x => `<div class="card row">${x.photo ? `<img src="${esc(x.photo)}" alt="" style="width:48px;height:48px;border-radius:12px;object-fit:cover;flex:none">` : ''}<div class="sp"><div class="nm">${esc(x.name)}</div><div class="sm mute">${x.mins || 30} min · shop menu</div></div><div style="text-align:right"><b class="num" style="font-size:19px">${peso(x.price)}</b><div><button class="btn sec sm" style="margin-top:4px" data-book="${b.id}">Book</button></div></div></div>`).join('') : '<div class="card empty sm">Prices are set by the shop. Book and pay at the counter.</div>'; };
 function offersBlock(b) {
   const o = b.offers || [];
   return `<div class="sec-h" style="margin-top:14px"><h2>Services & prices</h2></div><div class="list">${o.length ? o.map(x => `<div class="card row"><div class="pa s">${pkgArt(x.pkg)}</div><div class="sp"><div class="nm">${esc(PK[x.pkg].name)}</div><div class="sm mute">${esc(PK[x.pkg].desc)}</div></div><div style="text-align:right"><b class="num" style="font-size:20px">${peso(x.price)}</b><div><button class="btn sec sm" style="margin-top:4px" data-bookpkg="${x.pkg}">Book</button></div></div></div>`).join('') : shopMenuRows(b)}</div>`;
@@ -1148,7 +1160,7 @@ async function onRoute() {
   if (r.a === 'discover') { if (!S.fresh) loadFresh().then(() => { if (route().a === 'discover') render(); }); if (discoverActive() && !S.R) loadResults().then(render); }
   if (['discover', 'home', 'book', 'barber', 'shop', 'map', 'community', 'me', 'member'].includes(r.a) && !S.D) { render(); await loadDiscover().catch(() => { }); }
   if (['bookings', 'home'].includes(r.a) && S.token && !S.mine) await loadBookings();
-  if (['home', 'me', 'book', 'profile'].includes(r.a) && S.token && !S.loyal) api('/loyalty').then(j => { S.loyal = j; render(); }).catch(() => { });
+  if (LOYAL_SCREENS.includes(r.a) && S.token && (!S.loyal || Date.now() - (S.loyalAt || 0) > 15e3)) loadLoyal();
   if (['me', 'book'].includes(r.a) && S.token && !S.push) loadPush();
   if (r.a === 'pro' && S.proToken && !S.pro) { await loadPro(); S.proSel = S.pro?.staff[0]?.id; if (S.pro?.admin) { S.proTab = 'shop'; loadShopOwner(); } else { S.proTab = 'today'; loadToday(true); } loadDash(); }
   if (r.a === 'bookings' && S.token) { loadBookings().then(render); api('/waitlist').then(j => { S.wait = j.items; render(); }).catch(() => { }); }
@@ -1262,7 +1274,7 @@ app.addEventListener('click', async e => {
     try { await api('/favorites/' + D.fav, { method: on ? 'DELETE' : 'PUT' }); S.favs = on ? S.favs.filter(x => x !== D.fav) : [...S.favs, D.fav]; if (S.cur?.barber?.id === D.fav) S.cur.stats.followers += on ? -1 : 1; render(); } catch (x) { toast(x.message); } return;
   }
   if (D.book) { const b = S.cur?.barber; startBooking(b.branchId, b.id); if (!S.token) nav('/auth'); return; }
-  if (D.bstaff) { S.bk.staffId = D.bstaff; return loadSlots(); }
+  if (D.bstaff) { const k = S.bk, b = (S.D?.barbers || []).find(x => x.id === D.bstaff); k.staffId = D.bstaff; if (b?.services) k.items = k.items.filter(i => b.services.includes(i)); return loadSlots(); }
   if (D.bsvc) { const k = S.bk; k.promo = null; k.promoErr = ''; k.items = k.items.includes(D.bsvc) ? k.items.filter(x => x !== D.bsvc) : [...k.items, D.bsvc]; return loadSlots(); }
   if (D.bday) { S.bk.date = D.bday; return loadSlots(); }
   if (D.btime) { S.bk.time = D.btime; return render(); }
@@ -1381,7 +1393,7 @@ app.addEventListener('click', async e => {
   if (D.pushtest != null) { try { const j = await api('/push/test', { method: 'POST' }); toast(j.sent ? 'Test sent. It should show up in a moment.' : j.gone ? 'This phone is no longer registered. Turn notifications off and on again.' : 'Could not reach this phone. Try again.'); } catch (x) { toast(x.message); } if (S.push) loadPush(); return; }
   if (D.vcheck != null) { S.vcode = (document.getElementById('vcode')?.value || '').trim(); S.vchk = null; S.verr = ''; if (!S.vcode) { S.verr = 'Enter the voucher code'; return render(); } try { S.vchk = await api('/pro/voucher?code=' + encodeURIComponent(S.vcode), {}, S.proToken); } catch (x) { S.verr = x.message; } return render(); }
   if (D.vclaim) { try { await api('/pro/voucher/claim', { method: 'POST', body: { code: D.vclaim } }, S.proToken); toast('Marked as claimed'); S.vchk = await api('/pro/voucher?code=' + encodeURIComponent(D.vclaim), {}, S.proToken); } catch (x) { toast(x.message); } return render(); }
-  if (D.rewards != null) return openRewards();
+  if (D.rewards != null) { if (S.token) await loadLoyal(false); return openRewards(); }
   if (D.rewardadd != null) return openReward();
   if (D.usevoucher) { const i = document.getElementById('bpromo'); if (i) i.value = D.usevoucher; return applyPromo(); }
   if (D.rewardtoggle) { try { await api('/pro/rewards/' + D.rewardtoggle, { method: 'PUT', body: { active: D.on === '1' } }, S.proToken); toast(D.on === '1' ? 'Reward is on' : 'Reward paused'); await loadRules(); } catch (x) { toast(x.message); } return render(); }

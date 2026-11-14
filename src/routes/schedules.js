@@ -40,7 +40,7 @@ export function createScheduleRoutes({ all, run, get, log, tx, bad, send, readBo
       log(me, 'schedule', 'staff', s.id, `${s.name}: ${text}`);
       return send(res, 200, { staffId: s.id, days: weekOf(s.id) });
     }
-    // ----- which services each barber does (T14): an empty list = every service -----
+    // ----- which services each barber does (T14): an empty list = every service. Only the owner (or an admin) changes it. -----
     if (p === '/api/staff-services' && method === 'GET') {
       const br = get('branches', String(q.branch || '')); if (!br) bad(400, 'Pick a branch');
       manageIn(br.id);
@@ -49,7 +49,7 @@ export function createScheduleRoutes({ all, run, get, log, tx, bad, send, readBo
     const svm = p.match(/^\/api\/staff\/(\w+)\/services$/);
     if (svm && method === 'PUT') {
       const s = get('staff', svm[1]); if (!s) bad(404, 'Barber not found');
-      manageIn(s.branchId);
+      if (me.role !== 'owner' && me.role !== 'admin') bad(403, 'Only the owner can change which services a barber does.');
       const b = await readBody(req), ids = [...new Set((Array.isArray(b.itemIds) ? b.itemIds : []).map(String))];
       for (const id of ids) { const it = get('items', id); if (!it || it.type !== 'service') bad(400, 'Pick services only'); }
       tx(() => { run('delete from staff_services where staffId=?', s.id); for (const id of ids) run('insert into staff_services(staffId, itemId) values(?,?)', s.id, id); });

@@ -14,7 +14,8 @@ try {
   await call('POST', '/api/staff', { name: 'Leo', branchId: br.id, chairId: ch[1].id, pct: 40, allowance: 0 }, owner);
   let r = await call('POST', '/api/bh/signup', { name: 'Ana Reyes', email: 'ana@example.com', phone: '0917 222 3333', password: 'password123', agree: true });
   ok('a customer signs up in the app', r.s === 200 || r.s === 201, r); const ana = r.j.token;
-  const D = ymd(new Date(Date.now() + 3 * 864e5)), key = n => ({ 'Idempotency-Key': 'app-key-' + String(n).padStart(12, '0') });
+  // one booking a day per account: each part below uses its own day (D, E, F, ...)
+  const D = ymd(new Date(Date.now() + 3 * 864e5)), dayAfter = n => ymd(new Date(new Date(D + 'T00:00:00').getTime() + n * 864e5)), E = dayAfter(1), key = n => ({ 'Idempotency-Key': 'app-key-' + String(n).padStart(12, '0') });
   const body = (o = {}) => ({ branchId: br.id, staffId: 'any', itemIds: [vip.id], date: D, time: '10:00', ...o });
   const mine = async () => (await call('GET', '/api/bh/bookings', null, ana)).j;
 
@@ -25,12 +26,12 @@ try {
   const notifs = (await call('GET', '/api/bh/notifications', null, ana)).j; ok('the customer is told once, not twice', JSON.stringify(notifs).split('Booked:').length - 1 === 1, JSON.stringify(notifs).slice(0, 300));
 
   // repeat series: every 2 weeks, 3 cuts, sent twice
-  const rb = body({ time: '14:00', repeatEvery: 2, repeatCount: 3 });
+  const rb = body({ date: E, time: '14:00', repeatEvery: 2, repeatCount: 3 });
   r = await call('POST', '/api/bh/book', rb, ana, key(2)); ok('a repeat series books 3 cuts', r.s === 201 && r.j.series.filter(x => x.ok).length === 2, r.j);
   r = await call('POST', '/api/bh/book', rb, ana, key(2)); ok('sending the series again makes nothing new', r.s === 200, r.j);
-  const D14 = ymd(new Date(new Date(D + 'T00:00:00').getTime() + 14 * 864e5)), D28 = ymd(new Date(new Date(D + 'T00:00:00').getTime() + 28 * 864e5));
+  const D14 = dayAfter(15), D28 = dayAfter(29);
   const cnt = async d => (await call('GET', `/api/bookings?from=${d}&to=${d}`, null, owner)).j.filter(b => b.time === '14:00').length;
-  ok('exactly one booking on each of the 3 dates', await cnt(D) === 1 && await cnt(D14) === 1 && await cnt(D28) === 1, [await cnt(D), await cnt(D14), await cnt(D28)]);
+  ok('exactly one booking on each of the 3 dates', await cnt(E) === 1 && await cnt(D14) === 1 && await cnt(D28) === 1, [await cnt(E), await cnt(D14), await cnt(D28)]);
 
   // the customer cancels in the app, then books the same slot again
   r = await call('POST', `/api/bh/bookings/${first.id}/cancel`, null, ana); ok('the customer cancels in the app', r.s === 200, r);
@@ -38,7 +39,7 @@ try {
   ok('history shows booked by the customer, then cancelled by the customer', h.length === 2 && /app/i.test(h[0].actor) && h[1].toStatus === 'cancelled' && /app/i.test(h[1].actor), h);
   r = await call('POST', '/api/bh/book', body(), ana, key(1)); ok('the old key does not bring a cancelled booking back as a success', r.s === 409 && !r.j.booking, r);
   r = await call('POST', '/api/bh/book', body(), ana, key(11)); ok('booking the freed slot again with a fresh key works (the app renews its key after every success)', r.s === 201 && r.j.booking.id !== first.id, r);
-  r = await call('POST', '/api/bh/book', body({ time: '11:00' }), ana); ok('no key still works (older app versions)', r.s === 201, r);
+  r = await call('POST', '/api/bh/book', body({ date: dayAfter(2), time: '11:00' }), ana); ok('no key still works (older app versions)', r.s === 201, r);
 
   // ---------- a partner shop has its own database: same protection there ----------
   r = await call('POST', '/api/public/signup', { kind: 'suite', shopName: 'Solo Cuts', ownerName: 'Rico Solo', email: 'rico@solo.ph', phone: '0917 999 8888', city: 'Lipa', username: 'rico', password: 'secret123', agree: true });
@@ -52,8 +53,8 @@ try {
   const ph = (await call('GET', `/api/bookings/${r.j.id}/history`, null, ptk)).j; ok('partner shop: history is recorded', ph.length === 1 && ph[0].toStatus === 'booked', ph);
   r = await call('GET', `/api/bookings/${first.id}/history`, null, ptk); ok('a partner shop cannot read Brotherhood booking history', r.s === 404, r.s);
   // the app books at the partner shop
-  r = await call('POST', '/api/bh/book', { branchId: pbr.id, staffId: pbarber.id, itemIds: [pit.id], date: D, time: '13:00' }, ana, key(10));
-  const r2 = await call('POST', '/api/bh/book', { branchId: pbr.id, staffId: pbarber.id, itemIds: [pit.id], date: D, time: '13:00' }, ana, key(10));
+  r = await call('POST', '/api/bh/book', { branchId: pbr.id, staffId: pbarber.id, itemIds: [pit.id], date: dayAfter(3), time: '13:00' }, ana, key(10));
+  const r2 = await call('POST', '/api/bh/book', { branchId: pbr.id, staffId: pbarber.id, itemIds: [pit.id], date: dayAfter(3), time: '13:00' }, ana, key(10));
   ok('the app books at a partner shop once, even when sent twice', r.s === 201 && r2.s === 200 && r2.j.booking.id === r.j.booking.id, [r, r2]);
 
   await S.stop();
@@ -71,7 +72,7 @@ try {
   r = await c2('GET', '/api/orgs', null, owner2); ok('the owner sees the partner list with the broken shop marked', r.s === 200 && r.j.find(o => o.code === 'solo-cuts')?.status.state === 'error', r);
   r = await c2('GET', '/api/bh/bookings', null, ana); ok('the customer app still shows the customer their Brotherhood bookings', r.s === 200 && JSON.stringify(r.j).includes(D), r.s);
   r = await c2('GET', '/api/bh/discover'); ok('Discover still loads', r.s === 200, r.s);
-  r = await c2('POST', '/api/bh/book', body({ time: '15:00' }), ana, key(20)); ok('booking at Brotherhood still works', r.s === 201, r);
+  r = await c2('POST', '/api/bh/book', body({ date: dayAfter(4), time: '15:00' }), ana, key(20)); ok('booking at Brotherhood still works', r.s === 201, r);
   r = await c2('POST', '/api/login', { username: 'rico', password: 'secret123' }, null, { 'x-org': 'solo-cuts' }); ok('the broken shop gets a clear "temporarily unavailable" answer, not a crash', r.s === 503 && /temporarily unavailable/.test(r.j.error), r);
   await S2.stop();
 } catch (e) { fail(e); }
