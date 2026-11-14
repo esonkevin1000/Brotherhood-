@@ -681,6 +681,10 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
 #app .bigimg[style*="url("],#app .pcover[style*="url("],#app .ecover[style*="url("]{transition:opacity .35s ease}
 @media(prefers-reduced-motion:reduce){#app img{opacity:1!important}}
 .ptstrip+*{margin-top:14px}
+.tabs{box-shadow:none;background-image:none}
+.card.empty .emh{display:block;font:600 24px var(--disp);color:var(--text);margin-bottom:4px}
+.card.empty:has(.emh){padding:34px 18px}
+.card.idle{background:transparent}
 .btn:not(.sec):not(.ghost):not(.danger):not(:disabled),.btn.white,.btn.gold,.day.on,.slot.on,.qa:first-child span{background:#2f7df5;border-color:#2f7df5}
 </style>
 </head>

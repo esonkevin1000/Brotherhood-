@@ -669,9 +669,10 @@ function openBlock() {
 function vOwner() {
   const d = S.shopData; if (!d) return skelList();
   const t = d.totals;
-  return `<div class="row" style="margin-bottom:14px"><a class="btn sec block" href="/backend">Open the back office</a></div>
+  return `
   <div class="grid2 kpis" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${kpi('Sales today', peso(t.today), `${t.transactions} transactions`, 'Finished visits today in all branches, after discounts and approved corrections. Voided records are left out.')}${kpi('Sales · 7 days', peso(t.week), '', 'The same, for today and the 6 days before.')}${kpi('Bookings today', t.bookings, '', 'Bookings for today that are still booked or have arrived. Cancelled and no-shows are left out.')}${kpi('Queue now', t.waiting + t.cutting, `${t.waiting} waiting · ${t.cutting} cutting`, 'Customers waiting plus customers in the chair right now.')}</div>
-  <div class="sec-h"><h2>Branches</h2><span class="mute sm">${t.onDuty} barbers on duty</span></div><div class="list">${d.branches.map(b => `<div class="card"><div class="row"><b>${esc(b.name)}</b><span class="sp"></span><b class="num" style="font-size:20px">${peso(b.today)}</b></div><div class="sm mute">${b.todayCount} transactions today · 7 days ${peso(b.week)}</div><div class="sm mute" style="margin-top:4px">${[b.onDuty ? b.onDuty + ' on duty' : '', b.waiting ? b.waiting + ' waiting' : '', b.cutting ? b.cutting + ' in the chair' : '', b.bookings ? b.bookings + ' booked' : ''].filter(Boolean).join(' · ') || 'No one in today'}</div></div>`).join('')}</div>
+  <div class="sec-h"><h2>Branches</h2><span class="mute sm">${t.onDuty} barbers on duty</span></div><div class="list">${(() => { const act = b => b.today || b.todayCount || b.onDuty || b.waiting || b.cutting || b.bookings, idle = d.branches.filter(b => !act(b)); return d.branches.filter(act).map(b => `<div class="card"><div class="row"><b>${esc(b.name)}</b><span class="sp"></span><b class="num" style="font-size:20px">${peso(b.today)}</b></div><div class="sm mute">${b.todayCount} transactions today · 7 days ${peso(b.week)}</div><div class="sm mute" style="margin-top:4px">${[b.onDuty ? b.onDuty + ' on duty' : '', b.waiting ? b.waiting + ' waiting' : '', b.cutting ? b.cutting + ' in the chair' : '', b.bookings ? b.bookings + ' booked' : ''].filter(Boolean).join(' · ') || 'No one in today'}</div></div>`).join('') + (idle.length ? `<div class="card idle"><div class="sm mute">No activity today</div><div class="sm" style="margin-top:4px">${idle.map(b => esc(b.name)).join(' · ')}</div></div>` : ''); })()}</div>
+  <a class="link" href="/backend" style="display:inline-block;margin:16px 2px 4px">Open the back office</a>
   ${carryCard()}
   <div class="sec-h"><h2>Map pins</h2><span class="mute sm">${d.branches.filter(b => b.lat != null).length}/${d.branches.length} set</span></div><div>${d.branches.map(locEditor).join('')}</div>
   <div class="sec-h"><h2>Brotherhood app</h2></div><div class="card sm"><b>${d.members}</b> app members${d.openReports ? ` · <button class="link" data-ptab="mod">${d.openReports} reported item${d.openReports === 1 ? '' : 's'} to review</button>` : ' · nothing to review'}</div>`;
@@ -690,7 +691,7 @@ async function loadShopOwner() { try { S.shopData = await api('/pro/shop', {}, S
 // T38: carry-over of past visits into points. The owner sees the count first (for stock planning), then decides.
 function carryCard() {
   const c = S.carry; if (!c) return '';
-  if (c.done) return `<div class="sec-h"><h2>Points carry-over</h2></div><div class="card sm mute">Done: ${c.carried} customers got their past visits as points.</div>`;
+  if (c.done) return `<div class="sec-h"><h2>Points carry-over</h2></div><div class="card sm mute">Done: ${c.carried} customer${c.carried === 1 ? '' : 's'} got their past visits as points.</div>`;
   const lvl = [[10, 'free haircut'], [15, 'Viro product'], [25, 'cap'], [40, 'shirt'], [50, 'VIP']];
   return `<div class="sec-h"><h2>Points carry-over</h2><span class="mute sm">not done yet</span></div><div class="card">
     <div class="sm">${c.customers} customers have ${c.visits} past paid visits. Each visit becomes 1 point, and rewards can be claimed right away (D-3a). Customers who would start at or above:</div>
@@ -963,7 +964,7 @@ function vCommunity() {
   if (tab === 'feed' || tab === 'saved' || tab === 'me') {
     if (!f) list = skelList();
     else if (f.needLogin) list = tab === 'me' ? '' : loginCard(tab === 'saved' ? 'Log in to see the posts you saved.' : 'Log in to see posts from the members and barbers you follow.');
-    else list = f.posts.length ? f.posts.map(postCard).join('') : `<div class="card empty">${tab === 'saved' ? `<div style="font-size:30px">${ic('bookmark')}</div><b>No saved items yet</b><div class="sm">Tap the bookmark on any post to save it here.</div>` : tab === 'me' ? 'You have not posted yet. Share your first cut.' : S.feedScope === 'following' ? 'Follow members or barbers to see their posts here.' : S.cstyle || S.cq ? 'No posts match. Try another style or search.' : 'No posts yet. Be the first!'}</div>`;
+    else list = f.posts.length ? f.posts.map(postCard).join('') : `<div class="card empty">${tab === 'saved' ? `<div style="font-size:30px">${ic('bookmark')}</div><b>No saved items yet</b><div class="sm">Tap the bookmark on any post to save it here.</div>` : tab === 'me' ? 'You have not posted yet. Share your first cut.' : S.feedScope === 'following' ? 'Follow members or barbers to see their posts here.' : S.cstyle || S.cq ? 'No posts match. Try another style or search.' : '<b class="emh">No posts yet</b><div class="sm">Be the first to share a fresh cut.</div>'}</div>`;
   }
   return header('Community') + `<div class="mute sm" style="margin:14px 0 10px">Cuts and wins from the brotherhood.</div>
   <div class="chero"><div class="sp"><h2>Show your best cut</h2><p>Post a fresh cut, tag your barber, and inspire the brotherhood.</p><button class="btn white" data-compose>Post a cut</button></div></div>
@@ -1419,7 +1420,7 @@ const NOT_RECEIPT = 'Tracking only. This is not an official receipt: issue your 
 const minsAgo = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; };
 const svcLine = x => x.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ');
 function tdCard(x, sub, acts) {
-  return `<div class="card tk"><div class="row" style="gap:12px;align-items:flex-start"><span class="tkno">#${x.no}</span><div class="sp" style="min-width:0"><div class="nm">${esc(x.customerName)}</div><div class="sm mute">${svcLine(x)}</div>${sub ? `<div class="sm mute">${sub}</div>` : ''}</div><b class="num" style="font-size:19px;white-space:nowrap">${peso(x.total)}</b></div>${acts ? `<div class="row" style="gap:8px;margin-top:12px">${acts}</div>` : ''}</div>`;
+  return `<div class="card tk"><div class="row" style="gap:12px;align-items:flex-start"><span class="tkno">${x.no}</span><div class="sp" style="min-width:0"><div class="nm">${esc(x.customerName)}</div><div class="sm mute">${svcLine(x)}</div>${sub ? `<div class="sm mute">${sub}</div>` : ''}</div><b class="num" style="font-size:19px;white-space:nowrap">${peso(x.total)}</b></div>${acts ? `<div class="row" style="gap:8px;margin-top:12px">${acts}</div>` : ''}</div>`;
 }
 function vToday() {
   const d = S.td; if (!d) return `<div data-today>${S.tdErr ? `<div class="card sm">${esc(S.tdErr)}</div>` : skelList()}</div>`;
