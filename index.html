@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#f2f5f9">
 <link rel="icon" type="image/png" href="/icon-192.png?v=b"><link rel="apple-touch-icon" href="/apple-touch-icon.png?v=b">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet"><noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet"></noscript>
-<title>Brotherhood</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet"><noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet"></noscript>
+<title>Brotherhood · Back office</title>
 <style>
 :root{--bg:#f5f5f6;--s1:#ffffff;--s2:#f7f7f8;--s3:#ececef;--line:#e1e1e6;--text:#0d0d0f;--mute:#6b6b76;--gold:#0d0d0f;--gold2:#000000;--grad:linear-gradient(135deg,#2c2c31,#000);--ok:#16a870;--bad:#e5384a;--info:#2b7de9;--vio:#7c4dff;--r:18px}
 html{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
@@ -105,10 +105,157 @@ nav{overflow-y:auto}button:disabled{opacity:.4;cursor:default}
   dialog{width:96vw;padding:18px}
 }
 @media(max-width:420px){.grid{grid-template-columns:1fr}}
+
+/* ================= Back office design system (overrides everything above) =================
+   Light grey page, white rounded cards, the Brotherhood blue as the one accent, Plus Jakarta Sans for headings and figures,
+   Inter for text. Sentence case everywhere; no black gradients. */
+:root{--bg:#f2f5f9;--s1:#ffffff;--s2:#f7f9fc;--s3:#eef2f7;--line:#e4e9f0;--line2:#d6dde7;--text:#111827;--mute:#5f6b7a;--dim:#8a95a3;
+  --blue:#2f7df5;--blue2:#1f66d6;--bluebg:#eaf2ff;--gold:#2f7df5;--gold2:#1f66d6;--grad:#2f7df5;--ok:#159a68;--okbg:#e6f6ef;--bad:#d93848;--badbg:#fdecee;--warn:#b26a00;--warnbg:#fff4e0;--r:16px;
+  --disp:'Plus Jakarta Sans','Inter',system-ui,sans-serif}
+body{font:14px/1.5 'Inter',system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+h1,h2,h3,.num,.stat b{font-family:var(--disp);letter-spacing:-.01em;font-weight:700}
+svg.i{stroke-width:1.7}
+::selection{background:rgba(47,125,245,.22)}
+
+/* sidebar */
+nav{width:252px;background:#fff;border-right:1px solid var(--line);padding:20px 14px 16px;gap:1px}
+nav .brand{padding:2px 8px 18px;gap:10px}
+nav .brand img{width:34px;height:34px;box-shadow:none}
+nav .brand h1{font:800 16px var(--disp);letter-spacing:.12em;text-transform:uppercase}
+nav .brand small{font-size:12px}
+.navh{font-size:11.5px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--dim);margin:14px 0 2px;padding:6px 12px}
+.navh:hover{background:none;color:var(--text)}
+.navh .car{font-size:10px;width:10px;opacity:.7}
+nav button{gap:11px;padding:9px 12px;border-radius:10px;color:#4b5563;font-weight:500;font-size:14px}
+nav button svg.i{width:18px;height:18px;color:#7b8794}
+nav button:hover{background:var(--s3);color:var(--text)}
+nav button.on{background:var(--blue);color:#fff;font-weight:600;box-shadow:0 6px 14px -8px rgba(47,125,245,.7)}
+nav button.on svg.i{color:#fff}
+nav button[data-act="logout"]{color:var(--bad);margin-top:auto}
+
+/* main column and top bar */
+main{padding:0 28px 40px;max-width:none}
+.topbar{position:sticky;top:0;z-index:25;display:flex;align-items:center;gap:12px;margin:0 -28px 18px;padding:14px 28px;background:rgba(242,245,249,.9);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topbar .crumb{font-size:13px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.topbar .crumb b{color:var(--text);font-weight:600}
+.topbar .sp{flex:1}
+.topbar #navq{width:300px;max-width:34vw;margin:0;height:40px;padding:0 14px 0 38px;border-radius:999px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238a95a3' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='5.5'/%3E%3Cpath d='M11.5 11.5l3 3'/%3E%3C/svg%3E") no-repeat 14px center;border:1px solid var(--line)}
+.tbtn{position:relative;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:#fff;display:grid;place-items:center;cursor:pointer;color:#4b5563;padding:0}
+.tbtn:hover{background:var(--s3)}
+.tbtn svg{width:18px;height:18px}
+.tbtn .dot{position:absolute;top:8px;right:9px;width:8px;height:8px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 2px #fff}
+.uchip{display:flex;align-items:center;gap:10px;padding:4px 12px 4px 4px;border-radius:999px;background:#fff;border:1px solid var(--line)}
+.uchip .uav{width:32px;height:32px;border-radius:50%;background:var(--bluebg);color:var(--blue2);display:grid;place-items:center;font:700 12px var(--disp)}
+.uchip b{display:block;font-size:13px;line-height:1.2}.uchip small{display:block;font-size:11.5px;color:var(--dim);line-height:1.2}
+
+/* page title, filters */
+h2{font-size:24px;margin:0 0 16px;text-transform:none;letter-spacing:-.015em;align-items:center}
+h2::after{display:none}
+h2 .mute,h2 span.mute{font:500 14px 'Inter',system-ui!important;color:var(--dim)}
+h3{font:700 15px var(--disp);color:var(--text);text-transform:none;letter-spacing:-.005em;margin:0 0 12px}
+.pagebar{position:static;background:none;padding:0;margin:0 0 16px;gap:8px}
+.pagebar label{font-size:12.5px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--mute);margin:0 2px 0 6px}
+.pagebar label:first-child{margin-left:0}
+.pagebar select{min-width:150px;height:38px;padding:0 34px 0 14px;border-radius:999px;background-color:#fff;font-weight:500}
+.pagebar input[type=date]{height:38px;border-radius:999px;background:#fff}
+
+/* cards and stats */
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:20px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.grid{gap:14px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.stat span{font-size:13px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--mute)}
+.stat b{font-size:28px;margin-top:8px;letter-spacing:-.02em}
+.stat small{font-size:12.5px;color:var(--dim)}
+.stat:first-child{background:#fff;border:1px solid var(--line)}
+.stat:first-child span,.stat:first-child small{color:var(--mute)}
+.stat:first-child b{color:var(--text)}
+.stat:first-child::before{display:none}
+.topbar .pagebar{margin:0 0 0 14px;padding:0 0 0 14px;border-left:1px solid var(--line);flex-wrap:nowrap}
+.topbar .pagebar label{display:none}
+.topbar .pagebar select{height:36px;min-width:0;font-size:13px}
+.topbar .pagebar .mute{font-size:12.5px;white-space:nowrap}
+@media(max-width:1180px){.topbar{flex-wrap:wrap}.topbar .pagebar{order:9;width:100%;margin:6px 0 0;padding:0;border:0}}
+/* dashboard */
+.dgrid{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px;align-items:start}
+.dgrid>.card{margin:0}
+.ch{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.ch h3{margin:0;display:flex;align-items:center;gap:8px}
+.pill{font-size:12px;font-weight:500;color:var(--mute);background:var(--s3);border-radius:999px;padding:4px 10px;white-space:nowrap}
+.chart{width:100%;height:220px;display:block}.chart .cg{stroke:var(--line);stroke-dasharray:3 4}.chart .cl{font:500 12px Inter,sans-serif;fill:var(--dim)}.chart .cv{font:700 12px var(--disp);fill:var(--text)}
+.donut{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.donut .dv{font:800 26px var(--disp);fill:var(--text)}.donut .dl{font:500 11px Inter,sans-serif;fill:var(--dim)}
+.legend{display:grid;gap:8px;flex:1;min-width:140px}.legend div{display:flex;align-items:center;gap:8px;font-size:13px}.legend i{width:10px;height:10px;border-radius:3px;flex:none}.legend span{flex:1;color:var(--mute)}
+.livecard{margin-bottom:14px}.ldot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px var(--okbg)}
+.lstats{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:2px 0 14px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.lstats>div{padding:14px 16px}.lstats>div+div{border-left:1px solid var(--line)}.lstats span{display:block;font-size:12.5px;color:var(--mute)}.lstats b{display:block;font:800 26px var(--disp);margin:4px 0 2px}.lstats small{font-size:12px;color:var(--dim)}
+.tb{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line)}.tb:first-of-type{border-top:0}.tb b{font-size:13.5px}.tb .row span{font:700 13px var(--disp)}
+.pbar{height:6px;border-radius:99px;background:var(--s3);margin:6px 0 4px;overflow:hidden}.pbar i{display:block;height:100%;border-radius:99px;background:var(--blue)}
+.dgrid>.card.overflow h3,.dgrid .card h3{margin-bottom:12px}
+@media(max-width:1100px){.dgrid{grid-template-columns:1fr}}
+@media(max-width:860px){.topbar .sp{display:none}.topbar #navq{flex:1}.grid{grid-template-columns:1fr 1fr!important;gap:10px}.stat b{font-size:20px}.card{padding:16px}.chart{height:170px}}
+#mtop .mb{position:relative;color:var(--text)}#mtop .mbn{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:var(--bad);color:#fff;font:700 10.5px/18px Inter,sans-serif;padding:0 4px}
+@media(max-width:860px){.topbar .tbtn,.topbar .uchip{display:none}.lstats{grid-template-columns:1fr}.lstats>div+div{border-left:0;border-top:1px solid var(--line)}}
+
+/* buttons */
+button.btn,.btn{background:var(--blue);color:#fff;border-radius:10px;font-weight:600;padding:9px 16px;box-shadow:0 1px 2px rgba(16,24,40,.08)}
+.btn:hover{filter:none;background:var(--blue2)}
+.btn.ghost{background:#fff;color:var(--text);border:1px solid var(--line2);box-shadow:none}
+.btn.ghost:hover{background:var(--s3)}
+.btn.bad{background:var(--badbg);color:var(--bad);box-shadow:none}
+.btn.bad:hover{background:#fbdde1}
+.btn.sm{padding:6px 12px;font-size:12.5px;border-radius:9px}
+
+/* inputs */
+input,select,textarea{background:#fff;border:1px solid var(--line2);border-radius:10px;padding:9px 12px}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(47,125,245,.15)}
+label{font-size:12.5px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--mute)}
+
+/* tables */
+th,td{padding:12px 14px;border-bottom:1px solid var(--line)}
+th{font-size:12px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--mute);background:var(--s2)}
+tr:first-child th:first-child{border-top-left-radius:10px}tr:first-child th:last-child{border-top-right-radius:10px}
+tbody tr:hover td,table tr:hover td{background:#f8fafd}
+.th{font:700 12px var(--disp);background:var(--bluebg);color:var(--blue2)}
+.pager .pgb{font-weight:500}
+
+/* tags, chips, segmented presets */
+.tag{font-weight:600;font-size:11.5px;padding:3px 10px;background:var(--s3);color:var(--mute)}
+.tag.booked{color:var(--warn);background:var(--warnbg)}.tag.done{color:var(--ok);background:var(--okbg)}
+.chip{background:#fff;border:1px solid var(--line2);font-weight:500;padding:7px 14px}
+.chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.presets{background:#fff;border:1px solid var(--line);border-radius:999px;padding:3px}
+.presets button{border-radius:999px;font-weight:500;padding:6px 14px}
+.presets button.on{background:var(--blue);color:#fff}
+.tier.VIP{background:#111827;color:#fff}
+
+/* dialogs and login */
+dialog{border-radius:18px;border:1px solid var(--line);box-shadow:0 30px 80px -20px rgba(16,24,40,.35)}
+dialog::backdrop{background:rgba(15,23,42,.45)}
+dialog h2{font-size:20px}
+.online{max-width:400px;margin:12vh auto 0;padding:32px}
+.online .logo{width:64px;height:64px;box-shadow:none}
+.online h2{font-size:22px;margin-bottom:4px}
+
+/* phone */
+@media(max-width:860px){
+  .topbar{margin:0 -14px 14px;padding:10px 14px;top:62px}
+  .topbar .crumb,.uchip div{display:none}
+  .topbar #navq{width:auto;flex:1;max-width:none}
+  #mtop b{font:700 17px var(--disp);text-transform:none;letter-spacing:0}
+  nav button{padding:11px 12px}
+}
+/* inbox in the brand blue; links inside tables */
+body .ib-top button,body .ib-row .ib-send,body .ib-card .ib-row button{background:var(--blue)}
+body .ib-m.me .ib-b{background:var(--blue);border-color:var(--blue)}
+td a,.card p a{color:var(--blue2);font-weight:500;text-decoration:none}td a:hover,.card p a:hover{text-decoration:underline}
+/* round 5: quieter report note, denser tables, real disabled state, own select chevron, centred login */
+.replabel{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--dim);margin:-4px 0 16px}.replabel svg{width:15px;height:15px;flex:none}.replabel b{font-weight:600;color:var(--mute)}
+td{font-size:13.5px}th,td{padding:11px 12px}nav button{font-size:13.5px}
+.btn:disabled,button.btn:disabled{background:var(--s3)!important;color:var(--dim)!important;box-shadow:none;cursor:not-allowed;opacity:1}
+select{-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%235f6b7a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px}
+.online{margin-top:max(8vh,calc(50vh - 300px))}
+th{white-space:normal;line-height:1.3;vertical-align:bottom}
 </style>
 </head>
 <body>
-<header id="mtop" hidden><button class="mb" data-act="menu" aria-label="Open menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><img src="/logo.png" alt=""><b id="mtitle">Brotherhood</b><button class="mb" id="mbell" data-act="bell" aria-label="Notifications" style="font-size:18px">🔔</button></header>
+<header id="mtop" hidden><button class="mb" data-act="menu" aria-label="Open menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><img src="/logo.png" alt=""><b id="mtitle">Brotherhood</b><button class="mb" id="mbell" data-act="bell" aria-label="Notifications" style="font-size:13px;font-weight:700;color:var(--bad)">🔔</button></header>
 <div id="scrim" data-act="menu"></div>
 <nav id="nav"></nav>
 <main id="view"></main>

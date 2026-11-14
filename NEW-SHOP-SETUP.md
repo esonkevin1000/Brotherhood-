@@ -27,7 +27,7 @@ Opsyonal: `RESEND_API_KEY` at `EMAIL_FROM` (para sa mga email), `SITE_HOST` at `
 
 ## 3. Unang setup ng owner nila
 
-Sa `https://link-nila/backend`, mag-login gamit ang `OWNER_USERNAME_FORCE` at `ADMIN_PASSWORD`.
+Sa `https://link-nila/backoffice`, mag-login gamit ang `OWNER_USERNAME_FORCE` at `ADMIN_PASSWORD`.
 
 1. **Users:** gumawa ng sariling **admin** na account (role: admin, username, password). Doon na sila mag-login araw-araw. Ang admin ay kayang gawin ang lahat **maliban sa pag-download ng backup at sa mga owner setting**; para sa mga iyon, ang owner login (`OWNER_USERNAME_FORCE` at `ADMIN_PASSWORD`) ang kailangan.
 2. **Branches:** pangalan, oras ng bukas at sara, address, phone, Google Maps link.
@@ -53,7 +53,7 @@ Ang bawat barber, gamit ang PIN sa `/brotherhood#/pro`: profile, cover at profil
 ## 5. Ibigay sa owner nila (sa ligtas na paraan, hindi sa group chat)
 
 > Hi! Ito ang sarili ninyong Brotherhood: `https://link-nila`
-> Back office: `https://link-nila/backend` · Username: `...` · Password: `...`
+> Back office: `https://link-nila/backoffice` · Username: `...` · Password: `...`
 > Gumawa po kayo agad ng sarili ninyong admin account sa **Users**.
 > Para sa mga barber: `https://link-nila/brotherhood#/pro`, gamit ang 6-digit PIN nila.
 > Mag-download po kayo ng **backup** kada linggo sa Back office, gamit ang **owner login** (hindi ang admin account).

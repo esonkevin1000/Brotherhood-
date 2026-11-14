@@ -12,12 +12,15 @@ try {
   let r = await req('site.test', '/'); ok('site host / → promo page', r.s === 200 && r.b.includes('Brotherhood'), r.s);
   r = await req('www.site.test', '/book'); ok('site host /book works (www too)', r.s === 200);
   r = await req('site.test:443', '/api/public/info'); ok('site host public API works', r.s === 200);
-  r = await req('site.test', '/backend'); ok('site host /backend → staff domain', r.s === 302 && r.loc === 'https://app.test/backend', r.s + ' ' + r.loc);
+  r = await req('site.test', '/backoffice'); ok('site host /backoffice → staff domain', r.s === 302 && r.loc === 'https://app.test/backoffice', r.s + ' ' + r.loc);
   r = await req('site.test', '/pos'); ok('site host /pos → staff domain', r.s === 302 && r.loc === 'https://app.test/pos');
   r = await req('site.test', '/api/state'); ok('site host blocks staff API', r.s === 404);
   r = await req('site.test', '/api/login', 'POST'); ok('site host blocks login', r.s === 404);
-  r = await req('app.test', '/'); ok('staff host / → /backend', r.s === 302 && r.loc === '/backend');
-  r = await req('app.test', '/backend'); ok('staff host /backend works', r.s === 200 && r.b.includes('app.js'));
+  r = await req('app.test', '/'); ok('staff host / → /backoffice', r.s === 302 && r.loc === '/backoffice');
+  r = await req('app.test', '/backoffice'); ok('staff host /backoffice works', r.s === 200 && r.b.includes('app.js'));
+  r = await req('app.test', '/backoffice/'); ok('/backoffice/ goes to /backoffice', r.s === 302 && r.loc === '/backoffice');
+  r = await req('app.test', '/backend'); ok('the old /backend address is gone (owner: remove it)', r.s === 404, r.s);
+  r = await req('app.test', '/backend/'); ok('and /backend/ too', r.s === 404, r.s);
   r = await req('app.test', '/pos'); ok('old /pos link goes to the app', r.s === 302 && /member/.test(r.h?.location || r.loc || JSON.stringify(r)));
   r = await req('app.test', '/api/login', 'POST'); ok('staff host API works', r.s !== 404);
   r = await req('app.test', '/book?branch=x'); ok('staff host /book → site domain', r.s === 302 && r.loc === 'https://site.test/book?branch=x', r.loc);

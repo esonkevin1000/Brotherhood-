@@ -30,7 +30,7 @@ const qs = () => `from=${ui.from}&to=${ui.to}&branch=${ui.branch}`;
 async function loadView() {
   const v = ui.view;
   try {
-    if (v === 'dashboard') { api('GET', `/api/checklists?from=${today()}&to=${today()}&branch=${ui.branch}`).then(r => { ui.chkToday = r; if (ui.view === 'dashboard' && !modal.open) render(); }).catch(() => { }); [ui.live, ui.rep] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`)]); }
+    if (v === 'dashboard') { api('GET', `/api/checklists?from=${today()}&to=${today()}&branch=${ui.branch}`).then(r => { ui.chkToday = r; if (ui.view === 'dashboard' && !modal.open) render(); }).catch(() => { }); [ui.live, ui.rep, ui.dash7] = await Promise.all([api('GET', `/api/live?branch=${ui.branch}`), api('GET', `/api/reports/dashboard?branch=${ui.branch}`), api('GET', `/api/reports/records?branch=${ui.branch}&from=${addDays(today(), -6)}&to=${today()}`).catch(() => null)]); }
     else if (v.startsWith('rep:')) ui.rep = await api('GET', `/api/reports/${v.slice(4)}?${qs()}`);
     else if (v === 'mgmt:customers') { const c = ui.cust; Object.assign(c, await api('GET', `/api/customers?q=${encodeURIComponent(c.q)}&page=${c.page}&tier=${c.tier}&branch=${ui.branch}`)); }
     else if (v === 'leave') ui.leave = await api('GET', `/api/leaves?branch=${ui.branch}&status=${ui.lstatus || ''}`);
@@ -118,13 +118,20 @@ function renderBase() {
   nav.style.display = '';
   const on = k => ui.view === k ? 'on' : '';
   nav.innerHTML = `<div class="brand"><img src="/logo.png?v=b" alt=""><div><h1>${esc(S.shop)}</h1><small>Back office · ${esc(S.me.name)}</small></div></div>
-    <button data-act="bell" style="background:${ui.notif && ui.notif.total ? '#fff1f2' : ''};color:${ui.notif && ui.notif.total ? '#e5384a' : ''};font-weight:700">🔔 Notifications${ui.notif && ui.notif.total ? ` <span class="tag" style="color:#fff;background:#e5384a;margin-left:auto">${ui.notif.total}</span>` : ''}</button>
-    <input id="navq" type="search" placeholder="Search pages…" autocomplete="off" value="${esc(ui.navQ || '')}">
     <div id="navgroups">${navGroups(on)}</div>
     <button data-act="logout" style="margin-top:auto;color:var(--bad)">${ic('logout')}Logout</button>`;
-  document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { mb.textContent = ui.notif && ui.notif.total ? '🔔 ' + ui.notif.total : '🔔'; mb.style.color = ui.notif && ui.notif.total ? '#e5384a' : ''; }
-  view.innerHTML = secretBar() + orgBar() + branchBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'mkt' ? vMkt() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'sched' ? vSched() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
+  document.getElementById('mtop').hidden = false; document.getElementById('mtitle').textContent = (nav.querySelector('button.on')?.textContent || S.shop).replace(/\s+\d+$/, '').trim(); const mb = document.getElementById('mbell'); if (mb) { const nn = ui.notif && ui.notif.total; mb.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0"/></svg>' + (nn ? '<span class="mbn">' + nn + '</span>' : ''); mb.style.color = ''; }
+  view.innerHTML = topBar() + secretBar() + orgBar() + (ui.view === 'dashboard' ? vDashboard() : ui.view === 'bookings' ? vBookings() : ui.view === 'settings' ? vSettings() : ui.view === 'mkt' ? vMkt() : ui.view === 'reviews' ? vReviews() : ui.view === 'remit' ? vRemit() : ui.view === 'exp' ? vExp() : ui.view === 'adv' ? vAdv() : ui.view === 'sched' ? vSched() : ui.view === 'att' ? vAtt() : ui.view === 'prob' ? vProb() : ui.view === 'leave' ? vLeave() : ui.view === 'chk' ? vChk() : ui.view === 'slip' ? vSlip() : ui.view === 'inbox' ? vInbox() : ui.view === 'activity' ? vActivity() : ui.view.startsWith('rep:') ? vReport() : vMgmt(ui.view.slice(5)));
   paginateTables();
+}
+// The top bar: where you are, a search for any page, notifications and who is signed in
+function topBar() {
+  const grp = (NAVG.find(([, list]) => list.some(([v]) => v === ui.view)) || ['Overview'])[0], n = ui.notif && ui.notif.total, nm = (S.me && S.me.name) || 'Owner';
+  const ini = nm.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase(), role = { owner: 'Owner', admin: 'Admin', manager: 'Branch manager' }[S.me && S.me.role] || 'Staff';
+  return `<div class="topbar"><div class="crumb">${esc(grp)} / <b>${esc(title())}</b></div>${branchBar()}<span class="sp"></span>` +
+    `<input id="navq" type="search" placeholder="Search pages" aria-label="Search pages" autocomplete="off" value="${esc(ui.navQ || '')}">` +
+    `<button class="tbtn" data-act="bell" aria-label="Notifications${n ? ', ' + n + ' new' : ''}" title="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0"/></svg>${n ? '<span class="dot"></span>' : ''}</button>` +
+    `<div class="uchip"><span class="uav">${esc(ini)}</span><div><b>${esc(nm)}</b>${nm.toLowerCase() === role.toLowerCase() ? '' : `<small>${role}</small>`}</div></div></div>`;
 }
 // Branch picker shown at the top of every page (not only in the side menu), so it is one tap on phones too
 const DATE_VIEWS = ['bookings', 'chk', 'slip', 'att', 'exp', 'remit'];
@@ -176,7 +183,7 @@ function presetRange(p) {
 // The date range now lives in the bar at the top of the page (see pageBar); pages only keep their own extra buttons/filters here
 const filterBar = extra => extra ? `<div class="row" style="margin-bottom:14px;align-items:flex-end">${extra}</div>` : '';
 // T30: every report says it is an internal record, and which filters it shows
-const repLabel = r => r && r.label ? `<div class="mute" style="font-size:12.5px;margin:2px 0 12px;padding:8px 12px;border:1px dashed var(--line, #ccc);border-radius:10px"><b>${esc(r.label)}</b><br>${esc(r.filters.branch)} · ${esc(r.filters.from)}${r.filters.to !== r.filters.from ? " → " + esc(r.filters.to) : ""}</div>` : "";
+const repLabel = r => r && r.label ? `<div class="replabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg><span><b>${esc(r.label)}</b> · ${esc(r.filters.branch)} · ${esc(r.filters.from)}${r.filters.to !== r.filters.from ? " → " + esc(r.filters.to) : ""}</span></div>` : "";
 function vReport() {
   const name = ui.view.slice(4), r = ui.rep;
   const exp = `<button class="btn ghost sm" data-act="export" data-name="${name}">⬇ Export CSV</button>${name === 'records' ? '<button class="btn ghost sm" data-act="recexport" title="One row per record, with corrections and voids. The export is written in the activity log.">⬇ Reconciliation export</button>' : ''}`;
@@ -361,15 +368,43 @@ function vRemit() {
     <td><span class="tag" style="color:${c};background:${bg}">${x.status}</span></td><td><a href="#" data-act="viewfile" data-id="${x.proofId}">View photo</a></td>
     <td style="white-space:normal;min-width:190px"><button class="btn ghost sm" data-act="rmhist" data-id="${x.id}">History</button> ${x.status !== 'VERIFIED' ? `<button class="btn sm" data-act="rmreview" data-a="verify" data-id="${x.id}">Verify</button>` : ''} ${x.status === 'PENDING' || x.status === 'FLAGGED' ? `<button class="btn ghost sm" data-act="rmreview" data-a="flag" data-id="${x.id}">Flag</button> <button class="btn bad sm" data-act="rmreview" data-a="reject" data-id="${x.id}">Reject</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="15" class="mute">No remittances in this period.</td></tr>'}</table></div>` : '<p class="mute">Loading…</p>'}`;
 }
+// ----- dashboard charts (plain SVG, no library). Data: the service-records report for the last 7 days. -----
+const peso0 = n => '₱' + Math.round(Number(n) || 0).toLocaleString('en-PH');
+function barChart(rows) {   // rows: [date, visits, value] for each day that had sales; the 7 days are filled in
+  const days = [...Array(7)].map((_, i) => addDays(today(), i - 6)), by = Object.fromEntries((rows || []).map(r => [r[0], r]));
+  const vals = days.map(d => +(by[d] ? by[d][2] : 0)), max = Math.max(...vals, 1), W = 560, H = 190, bw = 44, gap = (W - 7 * bw) / 6;
+  const nice = Math.ceil(max / 4 / 50) * 50 * 4 || 4, lines = [0, .25, .5, .75, 1];
+  const bars = days.map((d, i) => { const h = Math.max(3, vals[i] / nice * (H - 30)), x = i * (bw + gap), y = H - 22 - h, t = d === today();
+    return `<g><rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="8" fill="${t ? 'var(--blue)' : '#cfe0fb'}"><title>${esc(d)} · ${peso0(vals[i])}</title></rect>${t && vals[i] ? `<text x="${x + bw / 2}" y="${y - 8}" text-anchor="middle" class="cv">${peso0(vals[i])}</text>` : ''}<text x="${x + bw / 2}" y="${H - 4}" text-anchor="middle" class="cl">${new Date(d + 'T00:00').toLocaleDateString('en-PH', { weekday: 'short' })}</text></g>`; }).join('');
+  const grid = lines.map(f => { const y = H - 22 - f * (H - 30); return `<line x1="0" x2="${W}" y1="${y}" y2="${y}" class="cg"/>`; }).join('');
+  return `<svg class="chart" viewBox="0 -14 ${W} ${H + 14}" preserveAspectRatio="none" role="img" aria-label="Sales in the last 7 days">${grid}${bars}</svg>`;
+}
+function donut(rows) {   // rows: [method, visits, value, verified]
+  const list = (rows || []).filter(r => +r[2] > 0), total = list.reduce((a, r) => a + +r[2], 0), C = 2 * Math.PI * 52;
+  const cols = ['var(--blue)', '#7fb0fb', '#0f3d8a', '#b9d3fc', '#5b6b82', '#dbe7fb'];
+  let off = 0; const arcs = list.map((r, i) => { const len = total ? +r[2] / total * C : 0, a = `<circle r="52" cx="70" cy="70" fill="none" stroke="${cols[i % cols.length]}" stroke-width="16" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"/>`; off += len; return a; }).join('');
+  return `<div class="donut"><svg viewBox="0 0 140 140" width="140" height="140" role="img" aria-label="Sales by payment method"><circle r="52" cx="70" cy="70" fill="none" stroke="var(--s3)" stroke-width="16"/>${arcs}<text x="70" y="66" text-anchor="middle" class="dv">${list.length}</text><text x="70" y="86" text-anchor="middle" class="dl">methods</text></svg>
+    <div class="legend">${list.map((r, i) => `<div><i style="background:${cols[i % cols.length]}"></i><span>${esc(r[0])}</span><b>${total ? Math.round(+r[2] / total * 100) : 0}%</b></div>`).join('') || '<div class="mute">No sales yet this week.</div>'}</div></div>`;
+}
+function topBarbers(rows) {   // rows: [barber, visits, value]
+  const list = (rows || []).slice(0, 5), max = Math.max(1, ...list.map(r => +r[2]));
+  return list.map(r => `<div class="tb"><span class="th">${esc(String(r[0]).split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase())}</span><div class="sp"><div class="row" style="justify-content:space-between;gap:8px"><b>${esc(r[0])}</b><span>${peso0(r[2])}</span></div><div class="pbar"><i style="width:${Math.round(+r[2] / max * 100)}%"></i></div><small class="mute">${r[1]} visit${+r[1] === 1 ? '' : 's'}</small></div></div>`).join('') || '<p class="mute">No finished visits this week yet.</p>';
+}
 function vDashboard() {
-  const l = ui.live, r = ui.rep;
-  const live = l ? `<h3 style="margin:0 0 8px"><span style="color:var(--ok)">●</span> Live floor</h3><div class="grid">
-    <div class="card stat" title="Barbers timed in today and not timed out."><span>Barbers on duty</span><b>${l.onDuty}</b><small class="mute">${l.available} available · ${l.cutting} cutting</small></div>
-    <div class="card stat" title="Visits waiting today. Longest wait = minutes since the oldest waiting visit was opened."><span>Waiting in queue</span><b>${l.waiting}</b><small class="mute">${l.waiting ? 'Longest wait ' + l.longestWaitMin + ' min' : 'Nobody is waiting'}</small></div>
-    <div class="card stat" title="Visits in the chair right now."><span>In the chair</span><b>${l.cutting}</b><small class="mute">Walk-ins being served now</small></div></div>
-    <div class="card overflow" style="margin-bottom:14px"><h3>Live walk-in floor queue</h3><table><tr><th>Ticket</th><th>Customer</th><th>Branch</th><th>Services</th><th>Status</th><th>Barber</th><th>Time</th></tr>
-    ${l.queue.map(q => `<tr><td>#${String(q.no).padStart(3, '0')}</td><td>${esc(q.customer)}</td><td>${esc(q.branch)}</td><td>${esc(q.services)}</td><td><span class="tag ${q.status === 'in_chair' ? 'done' : 'booked'}">${q.status === 'in_chair' ? 'In Chair' : 'Waiting'}</span></td><td>${esc(q.barber)}</td><td>${ago(q.since)}</td></tr>`).join('') || '<tr><td colspan="7" class="mute">No customers on the floor right now.</td></tr>'}</table></div>` : '';
-  return `<h2>Dashboard <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${vChkToday()}${live}${r ? repLabel(r) + renderCards(r.cards) + r.tables.map(renderTable).join('') : ''}`;
+  const l = ui.live, r = ui.rep, w = ui.dash7, tbl = t => w && (w.tables || []).find(x => x.title === t);
+  const wk = w ? (w.cards || []).find(c => c.label === 'Recorded value') : null;
+  const kpis = r ? renderCards(r.cards) + repLabel(r) : '';
+  const charts = `<div class="dgrid">
+    <div class="card"><div class="ch"><h3>Sales · last 7 days</h3>${wk ? `<span class="pill">${peso0(wk.value)} this week</span>` : ''}</div>${w ? barChart(tbl('By day')?.rows) : '<p class="mute">Loading…</p>'}</div>
+    <div class="card"><div class="ch"><h3>Payment methods</h3><span class="pill">This week</span></div>${w ? donut(tbl('By payment method')?.rows) : '<p class="mute">Loading…</p>'}</div></div>`;
+  const live = l ? `<div class="card livecard"><div class="ch"><h3><span class="ldot"></span> Live floor</h3><span class="mute">updates when you open the page</span></div>
+    <div class="lstats"><div title="Barbers timed in today and not timed out."><span>Barbers on duty</span><b>${l.onDuty}</b><small>${l.available} available · ${l.cutting} cutting</small></div>
+    <div title="Visits waiting today. Longest wait = minutes since the oldest waiting visit was opened."><span>Waiting</span><b>${l.waiting}</b><small>${l.waiting ? 'Longest wait ' + l.longestWaitMin + ' min' : 'Nobody is waiting'}</small></div>
+    <div title="Visits in the chair right now."><span>In the chair</span><b>${l.cutting}</b><small>Being served now</small></div></div>
+    <div class="overflow"><table><tr><th>Ticket</th><th>Customer</th><th>Branch</th><th>Services</th><th>Status</th><th>Barber</th><th>Time</th></tr>
+    ${l.queue.map(q => `<tr><td>#${String(q.no).padStart(3, '0')}</td><td>${esc(q.customer)}</td><td>${esc(q.branch)}</td><td>${esc(q.services)}</td><td><span class="tag ${q.status === 'in_chair' ? 'done' : 'booked'}">${q.status === 'in_chair' ? 'In chair' : 'Waiting'}</span></td><td>${esc(q.barber)}</td><td>${ago(q.since)}</td></tr>`).join('') || '<tr><td colspan="7" class="mute">No customers on the floor right now.</td></tr>'}</table></div></div>` : '';
+  const lower = `<div class="dgrid">${w ? `<div class="card"><div class="ch"><h3>Top barbers</h3><span class="pill">This week</span></div>${topBarbers(tbl('By barber')?.rows)}</div>` : ''}${r ? r.tables.map(renderTable).join('') : ''}</div>`;
+  return `<h2>Dashboard <span class="mute" style="font-size:14px">· ${ui.branch === 'all' ? 'All branches' : esc(brName(ui.branch))}</span></h2>${vChkToday()}${kpis}${charts}${live}${lower}`;
 }
 const vActivity = () => `<div class="row" style="justify-content:space-between;margin-bottom:14px"><h2 style="margin:0">Activity</h2>${S.me.role === 'owner' ? '<button class="btn" data-act="backup">⬇ Download backup</button>' : ''}</div>
   <p class="mute">The server saves an automatic daily backup. Also download one now and then and keep it somewhere else (Google Drive, a flash drive).</p>
@@ -785,7 +820,7 @@ document.addEventListener('click', async e => {
   }
   if (act === 'neworg') {
     const v = k => document.getElementById('og-' + k).value.trim(), body = { name: v('name'), code: v('code').toLowerCase(), branch: v('branch'), ownerUser: v('user').toLowerCase() };
-    try { const r = await api('POST', '/api/orgs', body); await loadView(); render(); openModal(`<h3>Partner shop added</h3><p>Give these to the owner of <b>${esc(r.name)}</b> (privately):</p><table><tr><td>Back office</td><td><b>${esc(location.origin)}/backend</b></td></tr><tr><td>Shop code</td><td><b>${esc(r.code)}</b></td></tr><tr><td>Username</td><td><b>${esc(r.ownerUser)}</b></td></tr><tr><td>Temporary password</td><td><b style="font-family:monospace;font-size:16px">${esc(r.password)}</b></td></tr></table><p class="mute" style="font-size:12px">This password is shown only now. Ask them to change it in Settings after logging in.</p><button class="btn" data-act="close">Done</button>`); } catch (x) { alert(x.message); } return;
+    try { const r = await api('POST', '/api/orgs', body); await loadView(); render(); openModal(`<h3>Partner shop added</h3><p>Give these to the owner of <b>${esc(r.name)}</b> (privately):</p><table><tr><td>Back office</td><td><b>${esc(location.origin)}/backoffice</b></td></tr><tr><td>Shop code</td><td><b>${esc(r.code)}</b></td></tr><tr><td>Username</td><td><b>${esc(r.ownerUser)}</b></td></tr><tr><td>Temporary password</td><td><b style="font-family:monospace;font-size:16px">${esc(r.password)}</b></td></tr></table><p class="mute" style="font-size:12px">This password is shown only now. Ask them to change it in Settings after logging in.</p><button class="btn" data-act="close">Done</button>`); } catch (x) { alert(x.message); } return;
   }
   if (act === 'orgreset') {
     const o = (ui.orgs || []).find(x => x.id === d.id); if (!o || !confirm(`Make a new password for ${o.name}? Their old password stops working.`)) return;

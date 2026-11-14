@@ -63,7 +63,7 @@ footer{max-width:1080px;margin:0 auto;padding:0 16px 40px;color:var(--mute);font
 </style>
 </head>
 <body>
-<header class="top"><a class="logo" href="/"><img src="/bh-mark.png" alt=""><span>Brother<b>hood</b></span></a><span class="in">Have an account? <a href="/backend">Log in</a></span></header>
+<header class="top"><a class="logo" href="/"><img src="/bh-mark.png" alt=""><span>Brother<b>hood</b></span></a><span class="in">Have an account? <a href="/backoffice">Log in</a></span></header>
 
 <main class="wrap">
   <section>
@@ -115,7 +115,7 @@ footer{max-width:1080px;margin:0 auto;padding:0 16px 40px;color:var(--mute);font
       <div style="margin-top:18px;color:var(--mute);font-size:13px">Your shop code</div><div class="big" id="dcode"></div>
       <dl class="facts"><dt>Username</dt><dd id="duser"></dd><dt>Password</dt><dd style="font-weight:500;color:var(--mute)">the one you chose</dd></dl>
       <p style="color:var(--mute);font-size:14px;max-width:420px;margin:0 auto">We also emailed these to you. Your team logs in with the same shop code.</p>
-      <div class="cta"><a class="btn" id="goA" href="/backend">Open the back office</a><a class="btn ghost" id="goB" href="/member#/pro">Open the app</a></div>
+      <div class="cta"><a class="btn" id="goA" href="/backoffice">Open the back office</a><a class="btn ghost" id="goB" href="/member#/pro">Open the app</a></div>
     </div>
   </section>
 
@@ -167,7 +167,7 @@ footer{max-width:1080px;margin:0 auto;padding:0 16px 40px;color:var(--mute);font
       try { localStorage.setItem('bp.token', j.token); localStorage.setItem('bp.org', j.code); localStorage.setItem('bh_pro', j.token); localStorage.setItem('bh_org', j.code); } catch (x) { }
       $('#dname').textContent = j.name; $('#dtrial').textContent = new Date(j.trialEnds + 'T00:00').toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
       $('#dcode').textContent = j.code; $('#duser').textContent = j.username;
-      if (kind !== 'owner') { $('#goA').href = '/member#/pro'; $('#goA').textContent = 'Open the app'; $('#goB').href = '/backend'; $('#goB').textContent = 'Open the back office'; }
+      if (kind !== 'owner') { $('#goA').href = '/member#/pro'; $('#goA').textContent = 'Open the app'; $('#goB').href = '/backoffice'; $('#goB').textContent = 'Open the back office'; }
       step(3);
     } catch (x) { err.textContent = x.message; }
     go.disabled = false; go.textContent = 'Create my shop';

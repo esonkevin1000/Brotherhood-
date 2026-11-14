@@ -5,7 +5,7 @@ import { startServer, checker } from './helper.mjs';
 const { ok, done, fail } = checker();
 const S = await startServer(3155);
 try {
-  const pages = ['/', '/member', '/book', '/backend', '/barbershop', '/privacy', '/terms', '/signup', '/shop-terms', '/delete-account', '/unsubscribe?c=x&t=y'];
+  const pages = ['/', '/member', '/book', '/backoffice', '/barbershop', '/privacy', '/terms', '/signup', '/shop-terms', '/delete-account', '/unsubscribe?c=x&t=y'];
   for (const p of pages) {
     const r = await fetch(S.B + p), h = k => r.headers.get(k) || '', html = await r.text(), csp = h('content-security-policy');
     const scriptSrc = (csp.match(/script-src ([^;]*)/) || [])[1] || '';

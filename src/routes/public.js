@@ -65,7 +65,7 @@ export function createPublicRoutes({ bookingMessage, mvpOn, policyOf, mailReady,
         log({ name: ownerName }, 'signup', 'shop', id, `${shop} (${KIND_LABEL[kind]})`);
       });
       inMain(() => log({ name: ownerName }, 'signup', 'orgs', id, `${shop} (${code}, ${KIND_LABEL[kind]}, ${email})`));
-      const links = { backend: baseUrl() + '/backend', app: baseUrl() + '/member#/pro' };
+      const links = { backend: baseUrl() + '/backoffice', app: baseUrl() + '/member#/pro' };
       const w = shopWelcomeEmail({ shop, ownerName, code, user, trialEnds, kind, ...links });
       sendEmail({ to: email, ...w }).catch(() => { });
       if (contactEmail()) sendEmail({ to: contactEmail(), subject: `New shop sign-up: ${shop}`, html: `<p><b>${esc2(shop)}</b> signed up (${esc2(KIND_LABEL[kind])}).</p><p>${esc2(ownerName)} · ${esc2(email)} · ${esc2(phone)} · ${esc2(city)}</p><p>Shop code: <b>${esc2(code)}</b>. Free trial until ${trialEnds}.</p>`, text: `${shop} signed up (${KIND_LABEL[kind]}).\n${ownerName} · ${email} · ${phone} · ${city}\nShop code: ${code}. Free trial until ${trialEnds}.` }).catch(() => { });

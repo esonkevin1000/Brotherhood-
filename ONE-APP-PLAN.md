@@ -1,6 +1,6 @@
 # Brotherhood: one app, no POS
 
-Goal: one Brotherhood app for everyone (customers, barbers, shop owners), built around booking, that can still track services and earnings, without breaking BIR rules. The back office (/backend) stays.
+Goal: one Brotherhood app for everyone (customers, barbers, shop owners), built around booking, that can still track services and earnings, without breaking BIR rules. The back office (/backoffice) stays.
 
 The full system with the POS was saved before any change:
 - git tag `pos-archive-2026-11-08`
