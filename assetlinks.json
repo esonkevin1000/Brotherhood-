@@ -15,7 +15,8 @@
         "namespace": "android_app",
         "package_name": "com.brotherhood.app",
         "sha256_cert_fingerprints": [
-          "5B:7E:A9:24:5B:B7:1E:B4:BC:8F:02:6B:90:86:80:C4:83:CE:95:B1:5F:3F:A7:72:60:FF:8D:6D:5C:57:22:0A"
+          "5B:7E:A9:24:5B:B7:1E:B4:BC:8F:02:6B:90:86:80:C4:83:CE:95:B1:5F:3F:A7:72:60:FF:8D:6D:5C:57:22:0A",
+          "08:CD:F0:29:8C:AA:66:3A:2A:C1:42:6E:CE:A2:C9:ED:0F:94:43:CC:7F:A4:08:62:D6:9E:DE:F5:5A:CD:AF:D0"
         ]
       }
     }]
