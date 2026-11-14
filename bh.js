@@ -227,7 +227,7 @@ async function vBarber(id) {
   const soc = [['instagram', 'Instagram'], ['facebook', 'Facebook'], ['tiktok', 'TikTok']].filter(([k]) => b[k]).map(([k, n]) => { const v = b[k], href = /^https?:/i.test(v) ? v : (k === 'instagram' ? 'https://instagram.com/' : k === 'tiktok' ? 'https://tiktok.com/@' : 'https://facebook.com/') + v.replace(/^@/, ''); return `<a class="tag" href="${esc(href)}" target="_blank" rel="noopener">${n}</a>`; }).join('');
   const stat = (v, l) => `<div><b class="num">${v}</b><span>${l}</span></div>`;
   const nf = j.nextFree, nfTxt = nf ? `${nf.date === today ? 'Today' : nf.date === ymd(new Date(Date.now() + 864e5)) ? 'Tomorrow' : fmtDate(nf.date)} · ${t12(nf.time)}` : '';
-  const tabs = [['cuts', 'Cuts', 'grid', j.portfolio.length], ['posts', 'Posts', 'chat', j.posts.length], ['reviews', 'Reviews', 'star', b.reviews], ['about', 'About', 'info', j.certs.length]];
+  const tabs = [['cuts', 'Portfolio', 'grid', j.portfolio.length], ['posts', 'Posts', 'chat', j.posts.length], ['reviews', 'Reviews', 'star', b.reviews], ['about', 'About', 'info', j.certs.length]];
   let body = '';
   if (tab === 'cuts') {
     const styles = [...new Set(j.portfolio.map(p => p.style).filter(Boolean))], shown = S.bStyle ? j.portfolio.filter(p => p.style === S.bStyle) : j.portfolio;
@@ -250,7 +250,7 @@ async function vBarber(id) {
   <h1 style="font-size:34px;margin-top:12px" class="row">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</h1>
   <div class="pill-row" style="margin:6px 0"><span class="gold">${esc(b.level)}</span>${j.certs.length ? `<span class="rankc">🎓 ${j.certs.length} seminar${j.certs.length === 1 ? '' : 's'}</span>` : ''}${j.rankWeek ? `<span class="rankc">Top #${j.rankWeek.rank} this week · ${j.rankWeek.cuts} cut${j.rankWeek.cuts === 1 ? '' : 's'}</span>` : ''}</div>
   <div class="mute sm">${esc(b.headline || 'Barber')} · ${esc(b.branchName)}</div>
-  ${(() => { const xs = [[st.cuts, 'Cuts'], st.followers ? [st.followers, 'Followers'] : null, b.reviews ? [b.rating.toFixed(1) + '★', 'Rating'] : null, st.clients ? [st.clients, 'Clients'] : null, st.cuts && st.rebook ? [st.rebook + '%', 'Rebook'] : null].filter(Boolean); return '<div class="stats5" style="grid-template-columns:repeat(' + xs.length + ',1fr)">' + xs.map(([v, l]) => stat(v, l)).join('') + '</div>'; })()}
+  ${(() => { const xs = [[st.cuts, 'Haircuts'], st.followers ? [st.followers, 'Followers'] : null, b.reviews ? [b.rating.toFixed(1) + '★', 'Rating'] : null, st.clients ? [st.clients, 'Clients'] : null, st.cuts && st.rebook ? [st.rebook + '%', 'Rebook'] : null].filter(Boolean); return '<div class="stats5" style="grid-template-columns:repeat(' + xs.length + ',1fr)">' + xs.map(([v, l]) => stat(v, l)).join('') + '</div>'; })()}
   <div class="card row" style="margin-top:12px"><span class="dot ${nf ? '' : 'off'}"></span><div class="sp sm">${nf ? `<b>Next free:</b> ${nfTxt}` : '<b>Fully booked</b> for the next 7 days'}<div class="mute">${t12(j.branch.openTime)}–${t12(j.branch.closeTime)} · ${esc(j.branch.name)}</div></div></div>
   ${offersBlock(b)}
   <div class="ptabs">${tabs.map(([k, n, i, c]) => `<button class="${tab === k ? 'on' : ''}" data-btab="${k}">${ic(i)}<span>${n}${c ? ' ' + c : ''}</span></button>`).join('')}</div>
