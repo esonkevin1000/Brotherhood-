@@ -614,18 +614,19 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
 .sstats b.word{font-size:22px}
 .kpi .sm span{opacity:.45;font-size:.85em}
 .ptag{background:rgba(8,9,11,.7);letter-spacing:.04em}
-/* ================= motion: springy, quick, never in the way ================= */
+/* ================= motion: springy, quick, plays once per screen ================= */
+/* The page is drawn again when its data arrives. Every entrance animation starts at --el (minus the time already played),
+   so an element redrawn mid-animation carries on from where it was instead of bouncing again. --dl is the stagger. */
 :root{--spring:cubic-bezier(.34,1.56,.64,1);--glide:cubic-bezier(.2,.9,.25,1.05)}
 @media(prefers-reduced-motion:no-preference){
-  /* screens arrive: content rises in, one block after another */
-  #app.enter>*:not(.bar):not(.nav):not(.dhead):not(.fbar){animation:rise .52s var(--glide) both}
-  #app.enter>*:nth-child(2){animation-delay:.03s}#app.enter>*:nth-child(3){animation-delay:.07s}#app.enter>*:nth-child(4){animation-delay:.11s}
-  #app.enter>*:nth-child(5){animation-delay:.15s}#app.enter>*:nth-child(6){animation-delay:.19s}#app.enter>*:nth-child(7){animation-delay:.23s}
-  #app.enter>*:nth-child(8){animation-delay:.27s}#app.enter>*:nth-child(9){animation-delay:.3s}#app.enter>*:nth-child(n+10){animation-delay:.33s}
-  #app.enter .hscroll>*,#app.enter .banners>*,#app.enter .srow1>*{animation:slideIn .55s var(--glide) both}
-  #app.enter .hscroll>*:nth-child(2),#app.enter .srow1>*:nth-child(2){animation-delay:.06s}#app.enter .hscroll>*:nth-child(3),#app.enter .srow1>*:nth-child(3){animation-delay:.12s}
-  #app.enter .hscroll>*:nth-child(n+4),#app.enter .srow1>*:nth-child(n+4){animation-delay:.18s}
-  #app.enter .list>*{animation:rise .5s var(--glide) both}#app.enter .list>*:nth-child(2){animation-delay:.05s}#app.enter .list>*:nth-child(3){animation-delay:.1s}#app.enter .list>*:nth-child(n+4){animation-delay:.14s}
+  #app .pop{animation:none}
+  #app.enter>*:not(.bar):not(.nav):not(.dhead):not(.fbar){animation:rise .52s var(--glide) both;animation-delay:calc(var(--dl,0s) + var(--el,0s))}
+  #app.enter>*:nth-child(2){--dl:.03s}#app.enter>*:nth-child(3){--dl:.07s}#app.enter>*:nth-child(4){--dl:.11s}#app.enter>*:nth-child(5){--dl:.15s}
+  #app.enter>*:nth-child(6){--dl:.19s}#app.enter>*:nth-child(7){--dl:.23s}#app.enter>*:nth-child(8){--dl:.27s}#app.enter>*:nth-child(9){--dl:.3s}#app.enter>*:nth-child(n+10){--dl:.33s}
+  #app.enter .hscroll>*,#app.enter .banners>*,#app.enter .srow1>*{animation:slideIn .55s var(--glide) both;animation-delay:calc(var(--dl,0s) + var(--el,0s))}
+  #app.enter .hscroll>*:nth-child(2),#app.enter .srow1>*:nth-child(2),#app.enter .banners>*:nth-child(2){--dl:.06s}
+  #app.enter .hscroll>*:nth-child(3),#app.enter .srow1>*:nth-child(3),#app.enter .banners>*:nth-child(3){--dl:.12s}
+  #app.enter .hscroll>*:nth-child(n+4),#app.enter .srow1>*:nth-child(n+4){--dl:.18s}
   @keyframes rise{from{opacity:0;transform:translateY(16px)}}
   @keyframes slideIn{from{opacity:0;transform:translateX(28px)}}
   /* taps: a quick squeeze and a springy release */
@@ -633,27 +634,27 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
   button:active,.btn:active,.tile:active,.bcard:active,.svc:active,.chip:active,.day:active,.slot:active,.shop:active,.stile:active,.ptstrip:active,.ctile:active{transform:scale(.955);transition-duration:.08s}
   .qa:active span{transform:scale(.9);transition-duration:.08s}
   .srow:active{transform:scale(.985)}
-  /* bottom sheets spring up over a fading backdrop */
+  /* bottom sheets spring up over a fading backdrop (a sheet is drawn once) */
   .lb{animation:fadeIn .22s ease both}
   .lb .sheet{animation:sheetUp .5s cubic-bezier(.17,1.12,.3,1) both}
   @keyframes fadeIn{from{opacity:0}}
   @keyframes sheetUp{from{transform:translateY(105%)}}
-  /* the active tab pops; its dot slides in */
-  .nav button.on svg{animation:navPop .5s var(--spring)}
-  .nav button.on:after{animation:dotIn .4s var(--spring) both}
+  /* when a screen opens: the active tab pops, bars fill, rings and the badge pop, the hero settles */
+  #app.enter .nav button.on svg{animation:navPop .5s var(--spring) both;animation-delay:var(--el,0s)}
+  #app.enter .nav button.on:after{animation:dotIn .4s var(--spring) both;animation-delay:var(--el,0s)}
   @keyframes navPop{0%{transform:scale(.78)}55%{transform:scale(1.16)}100%{transform:scale(1)}}
   @keyframes dotIn{from{transform:scale(0)}}
-  /* progress fills, ticks and toasts */
-  .pts-bar i,.stp i,.bar2 i{transform-origin:left center;animation:fill 1s var(--glide) .15s both}
+  #app.enter .pts-bar i,#app.enter .stp i,#app.enter .bar2 i{transform-origin:left center;animation:fill 1s var(--glide) both;animation-delay:calc(.15s + var(--el,0s))}
+  .lb .pts-bar i{transform-origin:left center;animation:fill 1s var(--glide) .15s both}
   @keyframes fill{from{transform:scaleX(0)}}
+  #app.enter .pts-ring.on,#app.enter .pts-ok{animation:ringIn .6s var(--spring) both;animation-delay:calc(.35s + var(--el,0s))}
+  .lb .pts-ring.on,.lb .pts-ok{animation:ringIn .6s var(--spring) .35s both}
+  @keyframes ringIn{from{transform:scale(.6);opacity:0}}
+  #app.enter .badge.dotb{animation:ringIn .5s var(--spring) both;animation-delay:calc(.4s + var(--el,0s))}
+  #app.enter .hero .hero-bg{animation:settle 1.4s cubic-bezier(.2,.8,.2,1) both;animation-delay:var(--el,0s)}
+  @keyframes settle{from{transform:scale(1.12)}}
   .toast{animation:toastIn .45s var(--spring) both}
   @keyframes toastIn{from{opacity:0;transform:translate(-50%,16px) scale(.94)}}
-  .pts-ring.on,.pts-ok{animation:ringIn .6s var(--spring) .35s both}
-  @keyframes ringIn{from{transform:scale(.6);opacity:0}}
-  .badge.dotb{animation:ringIn .5s var(--spring) .4s both}
-  /* the photo hero settles */
-  #app.enter .hero .hero-bg{animation:settle 1.4s cubic-bezier(.2,.8,.2,1) both}
-  @keyframes settle{from{transform:scale(1.12)}}
 }
 /* round 11: delivery-app patterns, one hue, quieter queue */
 .spill{display:flex;align-items:center;gap:10px;width:100%;margin:14px 0 4px;padding:0 16px;height:50px;border-radius:999px;background:var(--s1);border:1px solid var(--line2);color:var(--mute);font-size:14.5px;text-align:left}

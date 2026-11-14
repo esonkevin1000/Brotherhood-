@@ -994,12 +994,17 @@ function countUp(root) {
     el.textContent = fmt(0); requestAnimationFrame(step);
   });
 }
-let lastScreen = '';
+let lastScreen = '', enterAt = 0;
 function motionAfter() {
-  const key = location.hash.split('?')[0];
-  if (key === lastScreen) return;   // a refresh of the same screen does not animate again
-  lastScreen = key; app.classList.remove('enter'); void app.offsetWidth; app.classList.add('enter');
-  clearTimeout(motionAfter.t); motionAfter.t = setTimeout(() => app.classList.remove('enter'), 1100);
+  const key = location.hash.split('?')[0], now = performance.now();
+  if (key === lastScreen) {
+    // the same screen drawn again (its data arrived): the new elements carry on from where the entrance was, no second bounce
+    if (app.classList.contains('enter')) app.style.setProperty('--el', -((now - enterAt) / 1000).toFixed(3) + 's');
+    return;
+  }
+  lastScreen = key; enterAt = now; app.style.setProperty('--el', '0s');
+  app.classList.remove('enter'); void app.offsetWidth; app.classList.add('enter');
+  clearTimeout(motionAfter.t); motionAfter.t = setTimeout(() => { app.classList.remove('enter'); app.style.removeProperty('--el'); }, 1500);
   countUp(app);
 }
 
