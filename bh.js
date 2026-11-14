@@ -50,7 +50,7 @@ async function loadMe() {
 async function loadBookings() { if (!S.token) { S.mine = null; return; } try { S.mine = (await api('/bookings')).bookings; } catch { S.mine = []; } }
 
 // ---------- views ----------
-const header = (title, back) => { const ra = location.hash.slice(2).split('/')[0] || 'home', uIni = S.user ? initials(S.user.name) : ''; return `<div class="bar">${back ? `<button class="btn sec sm round" data-go="${back}" aria-label="Back">${ic('back')}</button>` : ''}<div class="${title ? '' : 'logo'}">${title ? `<h2 style="font-size:20px">${esc(title)}</h2>` : logoText()}</div><span class="sp"></span>${S.user ? `<button class="btn sec sm round bellb" data-go="/notifications" aria-label="Notifications${S.unread ? ', ' + S.unread + ' unread' : ''}">${ic('bell')}${S.unread ? '<span class="badge dotb"></span>' : ''}</button><button class="btn sec sm round uav" data-go="/profile" aria-label="Profile">${esc(uIni)}</button>` : (['auth', 'pro'].includes(ra) ? '' : `<button class="btn sm" data-go="/auth">Log in</button>`)}</div>`; };
+const header = (title, back) => { const route = location.hash.slice(2).split('/')[0] || 'home', uIni = S.user ? initials(S.user.name) : ''; return `<div class="bar">${back ? `<button class="btn sec sm round" data-go="${back}" aria-label="Back">${ic('back')}</button>` : ''}<div class="${title ? '' : 'logo'}">${title ? `<h2 style="font-size:20px">${esc(title)}</h2>` : logoText()}</div><span class="sp"></span>${S.user ? `<button class="btn sec sm round bellb" data-go="/notifications" aria-label="Notifications${S.unread ? ', ' + S.unread + ' unread' : ''}">${ic('bell')}${S.unread ? '<span class="badge dotb"></span>' : ''}</button><button class="btn sec sm round uav" data-go="/profile" aria-label="Profile">${esc(uIni)}</button>` : (['auth', 'pro'].includes(route) ? '' : `<button class="btn sm" data-go="/auth">Log in</button>`)}</div>`; };
 const barberRow = b => `<button class="bcard" data-go="/barber/${b.id}">${pic(b.photo, b.name)}<div class="sp"><div class="nm">${esc(b.name)}${b.verified ? `<span class="ver" title="Verified professional">${ic('ver')}</span>` : ''}</div>
   <div class="sm mute">${esc(b.headline || b.specialties.join(' · ') || 'Barber')} · ${esc(b.branchName)}</div><div class="sm row" style="margin-top:3px;flex-wrap:wrap;gap:6px">${rate(b.rating, b.reviews)}${b.years ? `<span class="mute">· ${b.years} yrs</span>` : ''}${b.slotsToday ? `<span class="tag ok">${b.slotsToday} slots today</span>` : ''}</div></div></button>`;
 const svcFor = bid => (S.D && S.D.shopSvc && S.D.shopSvc[bid]) || (S.D && S.D.services) || [];   // a partner shop has its own menu
@@ -72,7 +72,6 @@ const untilTxt = b => {
 };
 const ticket = (b, extra = '') => { const d = new Date(b.date + 'T00:00:00'); return `<div class="tkt2 pop"><div class="tk-d"><span>${d.toLocaleDateString('en-PH', { month: 'short' })}</span><b>${d.getDate()}</b><span>${d.toLocaleDateString('en-PH', { weekday: 'short' })}</span></div><div class="tk-b"><div class="row"><span class="tk-pill">${esc(untilTxt(b))}</span><span class="sp"></span><b class="num" style="font-size:17px">${t12(b.time)}</b></div><div class="nm" style="margin-top:7px">${esc((b.items || []).map(i => i.name).join(' + ') || 'Haircut')}</div><div class="sm mute">${esc(b.staffName || 'Any barber')} · ${esc(b.branchName || '')}</div>${extra}</div></div>`; };
 const emptyBox = (icon, title, sub, cta = '') => `<div class="ebox pop"><span class="eic">${ic(icon)}</span><b>${title}</b><span class="sm mute">${sub}</span>${cta}</div>`;
-const quickActions = () => `<div class="quick pop">${[['search', 'Find a barber', 'data-go="/discover"'], ['cal', 'Bookings', 'data-go="/bookings"'], ['star', 'Rewards', S.token && S.loyal ? 'data-rewards' : 'data-go="/auth"'], ['scissors', 'Find your cut', 'data-go="/style"']].map(([i, l, a]) => `<button class="qa" ${a}><span>${ic(i)}</span><small>${l}</small></button>`).join('')}</div>`;
 function vHome() {
   const D = S.D, up = (S.mine || []).filter(b => b.status === 'booked' && b.date >= ymd(new Date())).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0];
   const first = S.user ? esc(S.user.name.split(' ')[0]) : '';
@@ -143,7 +142,7 @@ function vDiscover() {
     ${secRow('Browse by style', '')}<div class="srow1">${styleRow}</div>
     ${soon.length ? secRow('Free today', 'data-dsee="soonest"') + `<div class="hscroll">${soon.map(b => barberTile(b, 'Next ' + t12(b.nextSlot))).join('')}</div>` : ''}
     ${rated.length ? secRow('Top rated', 'data-dsee="rating"') + `<div class="hscroll">${rated.map(b => barberTile(b, '★ ' + b.rating.toFixed(1))).join('')}</div>` : ''}
-    ${hot.length ? secRow('Trending this week', 'data-dsee="trending"') + `<div class="hscroll">${hot.map(b => barberTile(b, '' + b.weekCuts + ' cut' + (b.weekCuts === 1 ? '' : 's'))).join('')}</div>` : ''}
+    ${hot.length ? secRow('Trending this week', 'data-dsee="trending"') + `<div class="hscroll">${hot.map(b => barberTile(b, `${b.weekCuts} cut${b.weekCuts === 1 ? '' : 's'}`)).join('')}</div>` : ''}
     ${S.fresh && S.fresh.length ? secRow('Fresh cuts', '') + `<div class="hscroll">${S.fresh.map((i, k) => `<button class="tile sq" data-fresh="${k}"><div class="tw"><img class="tp" src="${esc(i.image)}" alt="${esc(i.title)}" loading="lazy">${i.style ? `<span class="tbadge">${esc(i.style)}</span>` : ''}</div><div class="tb"><div class="sm tl"><b>${esc(i.title)}</b></div><div class="sm mute tl">${esc(i.barberName || i.author || '')}</div></div></button>`).join('')}</div>` : ''}
     ${secRow('Top shops', 'data-dsee="shops"')}<div class="hscroll">${D.shops.map(shopTile).join('')}</div>
     ${filterBar()}<div class="sec-h" style="margin-top:8px"><h2>Explore barbers nearby</h2><span class="mute sm">${all_.length}</span></div><div class="list">${all_.map(barberBig).join('') || emptyD('No barbers yet', 'Barbers will show up here once they join.')}</div>`;
@@ -573,7 +572,7 @@ async function applyPromo() {
 const ptsKind = { earn: 'Visit', reverse: 'Visit cancelled', redeem: 'Reward', carry_over: 'Points from past visits', adjust: 'Adjustment' };
 function pointsBlock(p) {
   if (!p) return '';
-  const next = p.rewards.find(r => !r.reachable), ready = p.rewards.filter(r => r.reachable).pop(), toVip = Math.max(0, p.vipAt - p.earned);
+  const ready = p.rewards.filter(r => r.reachable).pop(), toVip = Math.max(0, p.vipAt - p.earned);
   return `<div class="pts">
     <div class="sm mute">Brotherhood points</div>
     <div class="row" style="align-items:flex-end;margin-top:4px"><b class="pts-big num">${p.balance}</b><span class="sp"></span><div style="text-align:right">${ready ? `<span class="tag gold">${esc(ready.name)} ready</span>` : ''}<div class="sm mute" style="margin-top:8px">${p.vip ? 'VIP member' : `VIP at ${p.vipAt} points`}</div></div></div>
@@ -581,7 +580,7 @@ function pointsBlock(p) {
     <div class="sm mute">${p.vip ? 'Your VIP status stays' : `${toVip} point${toVip === 1 ? '' : 's'} to VIP`} · points never expire</div>
     ${p.blocked ? '<div class="err">Your points are below zero after a cancelled visit. Rewards open again once they are back above zero.</div>' : ''}
     <div class="pts-list">${p.rewards.map(r => `<div class="pts-rw"><span class="pts-ring num ${r.reachable ? 'on' : ''}">${r.points}</span><div class="sp"><div class="nm">${esc(r.name)}</div>${r.reachable ? '<div class="sm mute">Ready to claim at the front desk</div>' : `<div class="pts-bar"><i style="width:${Math.max(2, Math.min(100, Math.round(p.balance / r.points * 100)))}%"></i></div>`}</div>${r.reachable ? `<span class="pts-ok">${ic('check')}</span>` : `<span class="sm mute">${r.points - Math.max(0, p.balance)} to go</span>`}</div>`).join('')}</div>
-    <div class="sm mute" style="margin-top:14px">Show this screen at the front desk to claim. One finished visit earns one point.${next ? '' : ''}</div>
+    <div class="sm mute" style="margin-top:14px">Show this screen at the front desk to claim. One finished visit earns one point.</div>
     ${p.history.length ? `<details class="pts-hist"><summary class="sm">History</summary><div class="list" style="margin-top:8px;gap:0">${p.history.slice(0, 30).map(h => `<div class="row sm" style="padding:9px 0;border-top:1px solid var(--line)"><span class="sp">${esc(h.reward || ptsKind[h.kind] || h.kind)} <span class="mute">· ${esc(fmtDate(String(h.at).slice(0, 10)))}</span></span><b class="${h.delta > 0 ? '' : 'mute'}">${h.delta > 0 ? '+' : ''}${h.delta}</b></div>`).join('')}</div></details>` : ''}</div>`;
 }
 // home: the points at a glance; opens the rewards sheet

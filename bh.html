@@ -38,7 +38,6 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .tile .tp{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--s2)}.tile .tp.ph{display:grid;place-items:center;font:600 34px var(--disp);color:var(--mute)}
 .tile .tb{padding:8px 10px 10px}.tl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tile.wide{width:240px}.tile.wide .tp{aspect-ratio:16/10}
 .chero{display:flex;gap:10px;background:linear-gradient(135deg,#1c1e22,#121315);border:1px solid var(--line);border-radius:20px;padding:16px;margin:8px 0 12px}.chero h2{font-size:22px;line-height:1.15}.chero p{color:var(--mute);font-size:13px;margin:6px 0 12px}
-.mini{display:grid;gap:8px;width:40%;flex:none}.mini button{background:var(--s3);border:1px solid var(--line);border-radius:14px;padding:9px 10px;text-align:left;display:block;width:100%}.mini b{display:block;font-size:13px}.mini span{font-size:11px;color:var(--mute)}
 .ctiles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px}.ctile{background:var(--s1);border:1px solid var(--line);border-radius:18px;padding:12px;text-align:left;min-height:108px;display:flex;flex-direction:column;justify-content:space-between;width:100%}
 .ctabs{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--line);margin:14px 0 12px}.ctabs button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 0;color:var(--mute);font-size:12px;letter-spacing:1.2px;font-weight:600}.ctabs button.on{color:#fff;border-bottom-color:#fff}
 .post .media{width:100%;border-radius:14px;margin-top:10px;max-height:480px;object-fit:cover;display:block;cursor:zoom-in;background:var(--s2)}
@@ -66,7 +65,6 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .opt{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:13px 4px;color:var(--text)}.opt:last-child{border-bottom:0}.opt .sp b{display:block}.opt .ck{width:20px;color:var(--text)}
 .sbox{flex:0 0 auto;margin-left:auto;display:grid;grid-template-columns:auto 1fr;gap:1px 8px;align-items:baseline;background:var(--s1);border:1px solid var(--line);border-radius:14px;padding:8px 12px;font-size:13px;line-height:1.55}.sbox b{text-align:right;font:600 16px var(--disp)}.sbox span{color:var(--mute);white-space:nowrap}.sbox .one{grid-column:1/-1;color:var(--mute)}
 .stile .g{overflow:hidden}.stile .g .sa{width:100%;height:100%;display:block}.sart{height:170px;display:grid;place-items:center;background:var(--s3);border-radius:12px;overflow:hidden;margin-bottom:10px}.sart .sa{height:100%;width:auto;aspect-ratio:1;display:block}
-.pkgs{display:grid;gap:10px}.pkg{display:flex;gap:12px;align-items:center;text-align:left;background:var(--s1);border:1px solid var(--line);border-radius:16px;padding:10px;width:100%;color:var(--text)}.pkg:active{transform:scale(.99)}.pkg .pb{display:grid;gap:2px;min-width:0}
 .pa{width:84px;height:84px;border-radius:12px;overflow:hidden;flex:none}.pa.s{width:48px;height:48px;border-radius:10px}.pa svg{width:100%;height:100%;display:block}
 .tabs.scroll{overflow-x:auto;scrollbar-width:none}.tabs.scroll::-webkit-scrollbar{display:none}.tabs.scroll button{flex:none;padding:9px 16px;white-space:nowrap}
 .hs{display:inline-grid;place-items:center;min-width:40px;height:40px;padding:0 8px;border-radius:12px;font:700 19px var(--disp);background:var(--s3);border:1px solid var(--line);color:var(--mute);flex:none}.hs.s{min-width:30px;height:30px;font-size:14px;border-radius:9px}
@@ -155,14 +153,14 @@ h1,h2,h3,.num{font-family:var(--disp);font-weight:700;letter-spacing:-.022em}
 .bar h2{font-size:21px!important;letter-spacing:-.025em}
 .logo{font-family:var(--disp);letter-spacing:.14em}
 /* surfaces */
-.card,.bcard,.bigc,.svc,.pkg,.tile,.shop,.banner,.chero,.ctile,.sbox,.search,.tabs,.day,.slot,.mini button{background-image:linear-gradient(180deg,rgba(255,255,255,.028),rgba(255,255,255,0) 55%);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
-.card,.bcard,.bigc,.svc,.pkg,.shop,.banner,.chero,.ctile{border-color:rgba(255,255,255,.065)}
+.card,.bcard,.bigc,.svc,.tile,.shop,.banner,.chero,.ctile,.sbox,.search,.tabs,.day,.slot{background-image:linear-gradient(180deg,rgba(255,255,255,.028),rgba(255,255,255,0) 55%);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.card,.bcard,.bigc,.svc,.shop,.banner,.chero,.ctile{border-color:rgba(255,255,255,.065)}
 .card,.bcard{border-radius:var(--r)}.bigc,.banner,.chero{border-radius:22px}
 .card.empty,.empty{color:var(--mute)}
 .card.empty{border-style:dashed;border-color:rgba(255,255,255,.1);background:rgba(255,255,255,.015);box-shadow:none;padding:26px 18px;text-align:center;line-height:1.55}
 /* motion and touch */
-button,.btn,.chip,.tile,.bcard,.svc,.pkg,.slot,.day,.iconb,.shop,.stile{transition:transform .16s var(--ease),background-color .2s,border-color .2s,opacity .2s,box-shadow .2s}
-.btn:active,.chip:active,.slot:active,.day:active,.iconb:active,.bcard:active,.tile:active,.pkg:active,.svc:active,.shop:active,.stile:active{transform:scale(.97)}
+button,.btn,.chip,.tile,.bcard,.svc,.slot,.day,.iconb,.shop,.stile{transition:transform .16s var(--ease),background-color .2s,border-color .2s,opacity .2s,box-shadow .2s}
+.btn:active,.chip:active,.slot:active,.day:active,.iconb:active,.bcard:active,.tile:active,.svc:active,.shop:active,.stile:active{transform:scale(.97)}
 .pop{animation:fin .32s var(--ease)}
 @keyframes fin{from{opacity:0;transform:translateY(10px)}}
 /* buttons */
@@ -211,14 +209,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 
 .hero.ph:before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(6,6,7,.05) 10%,rgba(6,6,7,.55) 45%,rgba(6,6,7,.96) 92%);z-index:1}
 .hero .hero-in{position:relative;z-index:2;padding:24px 20px 22px}
 .hero.ph h1{font-size:34px}
-.kicker{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#d6e6ff;background:rgba(60,141,255,.2);border:1px solid rgba(110,170,255,.35);padding:5px 11px;border-radius:99px;margin-bottom:12px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
-.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:18px 0 6px}
-.qa{display:grid;justify-items:center;gap:8px;background:none;border:0;padding:0;color:var(--text)}
-.qa span{width:60px;height:60px;border-radius:20px;display:grid;place-items:center;background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
-.qa span svg{width:23px;height:23px}
-.qa:first-child span{background:linear-gradient(180deg,#4a97ff,#2f7df5);border-color:transparent;box-shadow:0 10px 24px rgba(47,125,245,.35),inset 0 1px 0 rgba(255,255,255,.25)}
-.qa small{font-size:11.5px;font-weight:500;color:#c9ccd3;text-align:center;line-height:1.2}
-.qa:active span{transform:scale(.94)}
 .tkt2{display:flex;border-radius:22px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.01)),var(--s1);box-shadow:0 14px 34px rgba(0,0,0,.35)}
 .tk-d{width:80px;flex:none;display:grid;place-items:center;align-content:center;padding:14px 0;background:linear-gradient(180deg,#4a97ff,#2f7df5);color:#fff;text-transform:uppercase;font-size:10.5px;font-weight:700;letter-spacing:.12em;border-right:2px dashed rgba(6,6,7,.5)}
 .tk-d b{font:800 34px/1 var(--disp);letter-spacing:-.04em;margin:3px 0}
@@ -339,11 +329,11 @@ svg.i{stroke-width:1.55}
 .sec-h{margin:32px 0 12px}.sec-h h2{font-family:var(--disp);text-transform:none;letter-spacing:-.004em;font-size:26px;font-weight:600}
 .sec-h .mute,.sec-h .link{font-size:13px}
 .glabel,.tg2{font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--text);margin:28px 2px 10px}
-.kicker,.kick{background:none;border:0;padding:0;margin-bottom:10px;border-radius:0;font-size:13px;font-weight:500;letter-spacing:0;text-transform:none;color:rgba(242,236,226,.72);-webkit-backdrop-filter:none;backdrop-filter:none}
+.kick{background:none;border:0;padding:0;margin-bottom:10px;border-radius:0;font-size:13px;font-weight:500;letter-spacing:0;text-transform:none;color:rgba(242,236,226,.72);-webkit-backdrop-filter:none;backdrop-filter:none}
 .ctabs button{letter-spacing:0;font-size:13px;font-weight:500}.ctabs button.on{color:var(--text);border-bottom-color:var(--gold)}
 
 /* surfaces: flat, warm, one hairline */
-.card,.bcard,.bigc,.svc,.pkg,.tile,.shop,.chero,.ctile,.sbox,.search,.day,.slot,.mini button,.sgroup,.sprof,.tkt2{background:var(--s1);background-image:none;border:1px solid var(--line);box-shadow:none}
+.card,.bcard,.bigc,.svc,.tile,.shop,.chero,.ctile,.sbox,.search,.day,.slot,.sgroup,.sprof,.tkt2{background:var(--s1);background-image:none;border:1px solid var(--line);box-shadow:none}
 .card,.bcard,.sgroup,.sprof{border-radius:var(--r)}
 .bigc,.chero,.tkt2{border-radius:20px}
 .card.empty,.ebox,.dempty{border:1px solid var(--line);border-style:solid;background:transparent;border-radius:20px}
@@ -415,11 +405,6 @@ input[type=range]{accent-color:var(--gold)}
 .hero.ph:before{background:linear-gradient(180deg,rgba(11,10,9,.05) 15%,rgba(11,10,9,.5) 50%,rgba(11,10,9,.95) 94%)}
 .hero h1,.hero.ph h1{font-family:var(--disp);font-size:36px;font-weight:600;letter-spacing:-.006em;line-height:1.03}
 .hero p{color:rgba(242,236,226,.72)}
-.quick{gap:6px;margin:22px 0 4px}
-.qa span{width:58px;height:58px;border-radius:50%;background:transparent;border:1px solid var(--line2);box-shadow:none}
-.qa:first-child span{background:var(--text);color:#0d0c0a;border-color:var(--text);box-shadow:none}
-.qa span svg{width:21px;height:21px;stroke-width:1.5}
-.qa small{color:var(--mute);font-size:12px}
 
 /* bookings: the ticket */
 .tk-d{background:transparent;color:var(--mute);border-right:1px dashed var(--line2);text-transform:none;letter-spacing:0;font-size:12px;font-weight:500}
@@ -582,7 +567,6 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
 .btn:disabled{background:transparent;color:var(--dim)}
 .bar>.btn:not(.sec):not(.ghost){background:transparent;color:var(--text)}
 .day.on,.slot.on{background:var(--blue);border-color:var(--blue);color:#fff}.day.on b{color:#fff}
-.qa:first-child span{background:var(--blue);border-color:var(--blue);color:#fff}
 .camb{background:var(--blue);color:#fff}
 .svc.on .chk{color:#fff}
 .probanner .btn{background:transparent;color:var(--gold2);border-color:rgba(60,141,255,.5)}
@@ -630,9 +614,8 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
   @keyframes rise{from{opacity:0;transform:translateY(16px)}}
   @keyframes slideIn{from{opacity:0;transform:translateX(28px)}}
   /* taps: a quick squeeze and a springy release */
-  button,.btn,.card,.tile,.bcard,.svc,.chip,.qa span,.day,.slot,.shop,.stile,.ptstrip,.srow,.ctile{transition:transform .42s var(--spring),background-color .2s,border-color .2s,color .2s,opacity .2s}
+  button,.btn,.card,.tile,.bcard,.svc,.chip,.day,.slot,.shop,.stile,.ptstrip,.srow,.ctile{transition:transform .42s var(--spring),background-color .2s,border-color .2s,color .2s,opacity .2s}
   button:active,.btn:active,.tile:active,.bcard:active,.svc:active,.chip:active,.day:active,.slot:active,.shop:active,.stile:active,.ptstrip:active,.ctile:active{transform:scale(.955);transition-duration:.08s}
-  .qa:active span{transform:scale(.9);transition-duration:.08s}
   .srow:active{transform:scale(.985)}
   /* bottom sheets spring up over a fading backdrop (a sheet is drawn once) */
   .lb{animation:fadeIn .22s ease both}
@@ -659,15 +642,13 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
 /* round 11: delivery-app patterns, one hue, quieter queue */
 .spill{display:flex;align-items:center;gap:10px;width:100%;margin:14px 0 4px;padding:0 16px;height:50px;border-radius:999px;background:var(--s1);border:1px solid var(--line2);color:var(--mute);font-size:14.5px;text-align:left}
 .spill svg{width:19px;height:19px;color:var(--text)}
-.quick{gap:10px}.qa span{width:64px;height:64px;border-radius:20px;background:var(--s1);border:1px solid var(--line)}.qa span svg{color:var(--blue);width:24px;height:24px}
-.qa:first-child span svg{color:#fff}
 .tfree,.opill.on,.nfree{color:var(--gold2)}.opill.on i,.dot,.ldot{background:var(--blue)}.nfree{border-color:rgba(60,141,255,.35)}
 .chip.on,.tag.on{background:var(--goldbg);border-color:rgba(60,141,255,.55);color:var(--text)}
 .card.tk .btn:not(.sec):not(.danger):not(.gold){background:var(--goldbg);color:var(--gold2);border:1px solid rgba(60,141,255,.4)}
 .hero:not(.ph)::before{content:none}
 #app>.bar+*{margin-top:14px}
 #app>.bar.overcover+.phead{margin-top:46px}
-.card,.bcard,.sgroup,.sprof,.tile,.svc,.pkg{border-radius:20px}
+.card,.bcard,.sgroup,.sprof,.tile,.svc{border-radius:20px}
 .btn{border-radius:14px}.btn.sm{border-radius:11px}
 .btn.round,.btn.sm.round{border-radius:50%}
 /* photos fade in once when they arrive; a photo already loaded shows at once after a redraw */
@@ -685,7 +666,7 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
 .card.empty .emh{display:block;font:600 24px var(--disp);color:var(--text);margin-bottom:4px}
 .card.empty:has(.emh){padding:34px 18px}
 .card.idle{background:transparent}
-.btn:not(.sec):not(.ghost):not(.danger):not(:disabled),.btn.white,.btn.gold,.day.on,.slot.on,.qa:first-child span{background:#2f7df5;border-color:#2f7df5}
+.btn:not(.sec):not(.ghost):not(.danger):not(:disabled),.btn.white,.btn.gold,.day.on,.slot.on{background:#2f7df5;border-color:#2f7df5}
 </style>
 </head>
 <body>
