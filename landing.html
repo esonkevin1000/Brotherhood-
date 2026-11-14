@@ -16,7 +16,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@125,800;125,900&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=Silkscreen&display=swap" rel="stylesheet">
 <link rel="preload" as="image" href="/site/hero.jpg">
 <style>
-:root{--k:#0a0a0a;--k2:#141414;--w:#fff;--g:#f2f2f2;--line:#e3e3e3;--lineb:#262626;--mute:#6e6e6e;--muteb:#9b9b9b;--ok:#2f7df5;--blue:#2f7df5;
+:root{--k:#0a0a0a;--w:#fff;--line:#e3e3e3;--lineb:#262626;--mute:#6e6e6e;--muteb:#9b9b9b;--blue:#2f7df5;
   --grade:contrast(1.08) saturate(1.16) brightness(1.03);--grade-hi:contrast(1.1) saturate(1.24) brightness(1.05);--serif:'Instrument Serif',Georgia,serif;--wide:'Archivo','Arial Black',system-ui,sans-serif;--px:'Silkscreen',ui-monospace,monospace;--pad:clamp(16px,3.4vw,48px)}
 *{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%;overflow-x:clip}
 body{margin:0;background:var(--k);color:var(--w);font:16px/1.55 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden}
@@ -27,7 +27,6 @@ a{color:inherit}img{max-width:100%;display:block}button{font:inherit;color:inher
 h1,h2,h3{margin:0;font-weight:400}
 /* small uppercase labels: nav, links, meta. Sans, never monospace. */
 .cap{font:600 11.5px/1.3 Inter,sans-serif;letter-spacing:.08em;text-transform:uppercase}
-.mono{filter:brightness(0) invert(1)}
 
 /* nav: white text with difference blending, so it reads on black and on white */
 .nav{position:fixed;inset:0 0 auto;z-index:60;mix-blend-mode:difference;color:#fff;pointer-events:none}
@@ -55,6 +54,7 @@ h1,h2,h3{margin:0;font-weight:400}
 .btn.fill{background:var(--w);color:var(--k);border-color:var(--w)}.light .btn.fill{background:var(--k);color:var(--w);border-color:var(--k)}
 .btn:hover{transform:translateY(-1px)}.btn .ar{transition:transform .3s}.btn:hover .ar{transform:translateX(4px)}
 .stage{position:relative;height:min(78vh,820px);overflow:hidden;background:#111}
+.stage canvas{image-rendering:pixelated}
 .stage canvas,.stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:var(--grade)}
 .stage img{opacity:0;transition:opacity .25s}.stage.sharp img{opacity:1}
 .stage .tag{position:absolute;left:var(--pad);bottom:22px;z-index:2;color:#fff;text-shadow:0 1px 12px rgba(0,0,0,.6)}
@@ -63,9 +63,9 @@ h1,h2,h3{margin:0;font-weight:400}
 .strip{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;padding:26px 0;border-bottom:1px solid var(--lineb)}
 .strip div{font:400 12px/1.5 var(--px);text-transform:uppercase;color:var(--muteb)}.strip b{display:block;font-weight:400;color:var(--w)}
 .strip div:nth-child(2){text-align:center}.strip div:nth-child(3){text-align:right}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#555;margin-right:7px;vertical-align:1px}.dot.on{background:var(--ok);box-shadow:0 0 0 3px rgba(47,125,245,.22)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#555;margin-right:7px;vertical-align:1px}.dot.on{background:var(--blue);box-shadow:0 0 0 3px rgba(47,125,245,.22)}
 .statement{padding:clamp(90px,14vw,190px) 0 clamp(70px,10vw,140px);text-align:center;font:400 clamp(18px,2.3vw,30px)/1.5 var(--px)}
-.statement span{display:block}.statement .dim{color:var(--blue)}
+.statement span{display:block}.statement .accent{color:var(--blue)}
 
 /* pixel band between black and white */
 .pxb{display:block;width:100%;height:clamp(90px,11vw,160px)}
@@ -180,7 +180,7 @@ footer .legal{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap
   <div class="stage" id="stage"><canvas id="hc" aria-hidden="true"></canvas><img id="hi" src="/site/hero.jpg" alt="A Brotherhood barber at work"><span class="tag cap" id="htag">Brotherhood Barber</span></div>
   <div class="wrap">
     <div class="strip" id="live"><div><b id="sn">Brotherhood</b>Laguna · Batangas · Quezon</div><div><b id="so">Checking shops</b>Open today</div><div><b>Walk-ins welcome</b>Or book online</div></div>
-    <p class="statement" id="story"><span class="rv">A haircut takes thirty minutes.</span><span class="rv">The confidence lasts all week.</span><span class="rv dim">That is the Brotherhood standard.</span></p>
+    <p class="statement" id="story"><span class="rv">A haircut takes thirty minutes.</span><span class="rv">The confidence lasts all week.</span><span class="rv accent">That is the Brotherhood standard.</span></p>
   </div>
 </div>
 <canvas class="pxb" data-a="#0a0a0a" data-b="#ffffff" aria-hidden="true"></canvas>
@@ -270,8 +270,7 @@ function drawHero(block) {
   const cols = Math.max(4, Math.ceil(w / block)), rows = Math.max(3, Math.ceil(h / block));
   if (hc.width !== cols || hc.height !== rows) { hc.width = cols; hc.height = rows; }
   const s = Math.max(cols / heroImg.naturalWidth, rows / heroImg.naturalHeight), iw = heroImg.naturalWidth * s, ih = heroImg.naturalHeight * s;
-  hx.imageSmoothingEnabled = true; hx.drawImage(heroImg, (cols - iw) / 2, (rows - ih) / 2, iw, ih);
-  hc.style.imageRendering = 'pixelated';
+  hx.drawImage(heroImg, (cols - iw) / 2, (rows - ih) / 2, iw, ih);
 }
 function heroBlock() {
   const t = born ? Math.min(1, (performance.now() - born) / 1300) : 0;
