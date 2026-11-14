@@ -620,10 +620,10 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
 :root{--spring:cubic-bezier(.34,1.56,.64,1);--glide:cubic-bezier(.2,.9,.25,1.05)}
 @media(prefers-reduced-motion:no-preference){
   #app .pop{animation:none}
-  #app.enter>*:not(.bar):not(.nav):not(.dhead):not(.fbar){animation:rise .52s var(--glide) both;animation-delay:calc(var(--dl,0s) + var(--el,0s))}
+  #app.enter>*:not(.bar):not(.nav):not(.dhead):not(.fbar):not(.hscroll):not(.banners):not(.srow1):not(.stiles){animation:rise .52s var(--glide) both;animation-delay:calc(var(--dl,0s) + var(--el,0s))}
   #app.enter>*:nth-child(2){--dl:.03s}#app.enter>*:nth-child(3){--dl:.07s}#app.enter>*:nth-child(4){--dl:.11s}#app.enter>*:nth-child(5){--dl:.15s}
   #app.enter>*:nth-child(6){--dl:.19s}#app.enter>*:nth-child(7){--dl:.23s}#app.enter>*:nth-child(8){--dl:.27s}#app.enter>*:nth-child(9){--dl:.3s}#app.enter>*:nth-child(n+10){--dl:.33s}
-  #app.enter .hscroll>*,#app.enter .banners>*,#app.enter .srow1>*{animation:slideIn .55s var(--glide) both;animation-delay:calc(var(--dl,0s) + var(--el,0s))}
+  #app.enter .hscroll>*,#app.enter .banners>*,#app.enter .srow1>*{animation:slideIn .55s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--dl,0s) + var(--el,0s))}
   #app.enter .hscroll>*:nth-child(2),#app.enter .srow1>*:nth-child(2),#app.enter .banners>*:nth-child(2){--dl:.06s}
   #app.enter .hscroll>*:nth-child(3),#app.enter .srow1>*:nth-child(3),#app.enter .banners>*:nth-child(3){--dl:.12s}
   #app.enter .hscroll>*:nth-child(n+4),#app.enter .srow1>*:nth-child(n+4){--dl:.18s}
@@ -670,6 +670,16 @@ body{background:radial-gradient(120% 46% at 50% -8%,#111724 0%,rgba(8,9,11,0) 62
 .card,.bcard,.sgroup,.sprof,.tile,.svc,.pkg{border-radius:20px}
 .btn{border-radius:14px}.btn.sm{border-radius:11px}
 .btn.round,.btn.sm.round{border-radius:50%}
+/* photos fade in once when they arrive; a photo already loaded shows at once after a redraw */
+#app img:not(.ld){opacity:0}
+#app img{transition:opacity .35s ease}
+#app img.now{transition:none}
+#app .bigimg.ld:not(.now),#app .pcover.ld:not(.now),#app .ecover.ld:not(.now){animation:photoIn .4s ease both}
+@keyframes photoIn{from{opacity:.3}}
+@media(prefers-reduced-motion:reduce){#app .bigimg,#app .pcover{animation:none!important}}
+#app .bigimg[style*="url("]:not(.ld),#app .pcover[style*="url("]:not(.ld),#app .ecover[style*="url("]:not(.ld){background-image:none!important}
+#app .bigimg[style*="url("],#app .pcover[style*="url("],#app .ecover[style*="url("]{transition:opacity .35s ease}
+@media(prefers-reduced-motion:reduce){#app img{opacity:1!important}}
 .ptstrip+*{margin-top:14px}
 .btn:not(.sec):not(.ghost):not(.danger):not(:disabled),.btn.white,.btn.gold,.day.on,.slot.on,.qa:first-child span{background:#2f7df5;border-color:#2f7df5}
 </style>

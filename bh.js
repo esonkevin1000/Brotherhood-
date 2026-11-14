@@ -991,7 +991,25 @@ function countUp(root) {
   });
 }
 let lastScreen = '', enterAt = 0;
+// photos: a photo seen before shows at once when the page is drawn again; a new one fades in once when it arrives
+const seenImg = new Set();
+const markImg = im => { if (im.complete && im.naturalWidth) { im.classList.add('ld'); seenImg.add(im.currentSrc || im.src); } };
+document.addEventListener('load', e => { if (e.target.tagName === 'IMG') markImg(e.target); }, true);
+document.addEventListener('error', e => { if (e.target.tagName === 'IMG') e.target.classList.add('ld'); }, true);
+function settlePhotos() {
+  app.querySelectorAll('img').forEach(im => { if (seenImg.has(im.currentSrc || im.src) || seenImg.has(im.src)) { im.loading = 'eager'; im.classList.add('ld', 'now'); } else markImg(im); });
+  // photos set as a background (barber covers): the same, using a hidden loader for each new address
+  app.querySelectorAll('.bigimg[style*="url("],.pcover[style*="url("],.ecover[style*="url("]').forEach(el => {
+    const m = (el.getAttribute('style') || '').match(/url\(['"]?([^'")]+)['"]?\)/); if (!m) return el.classList.add('ld');
+    const src = new URL(m[1], location.href).href;
+    if (seenImg.has(src)) return el.classList.add('ld', 'now');
+    const im = new Image(); im.onload = im.onerror = () => { seenImg.add(src); document.querySelectorAll('.bigimg,.pcover,.ecover').forEach(x => { if ((x.getAttribute('style') || '').includes(m[1])) x.classList.add('ld'); }); }; im.src = src;
+  });
+}
+// the fixed photos (Discover banners, Home hero) are fetched as soon as the app starts
+BANNERS.map(b => b.img).concat(['/site/home-work2.jpg']).forEach(src => { const im = new Image(); im.onload = () => seenImg.add(new URL(src, location.href).href); im.src = src; });
 function motionAfter() {
+  settlePhotos();
   const key = location.hash.split('?')[0], now = performance.now();
   if (key === lastScreen) {
     // the same screen drawn again (its data arrived): the new elements carry on from where the entrance was, no second bounce
