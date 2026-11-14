@@ -1419,7 +1419,7 @@ const NOT_RECEIPT = 'Tracking only. This is not an official receipt: issue your 
 const minsAgo = iso => { const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; };
 const svcLine = x => x.items.map(i => esc(i.name) + (i.qty > 1 ? ' ×' + i.qty : '')).join(', ');
 function tdCard(x, sub, acts) {
-  return `<div class="card tk"><div class="row" style="gap:12px;align-items:flex-start"><span class="tkno">${x.no}</span><div class="sp" style="min-width:0"><div class="nm">${esc(x.customerName)}</div><div class="sm mute">${svcLine(x)}</div>${sub ? `<div class="sm mute">${sub}</div>` : ''}</div><b class="num" style="font-size:19px;white-space:nowrap">${peso(x.total)}</b></div>${acts ? `<div class="row" style="gap:8px;margin-top:12px">${acts}</div>` : ''}</div>`;
+  return `<div class="card tk"><div class="row" style="gap:12px;align-items:flex-start"><span class="tkno">${x.no}</span><div class="sp" style="min-width:0"><div class="nm">${esc(x.customerName)}</div><div class="sm mute">${svcLine(x)}</div>${sub ? `<div class="sm mute">${sub}</div>` : ''}${x.idSkipped ? '<span class="tag" style="margin-top:6px;display:inline-block">No ID photo</span>' : ''}</div><b class="num" style="font-size:19px;white-space:nowrap">${peso(x.total)}</b></div>${acts ? `<div class="row" style="gap:8px;margin-top:12px">${acts}</div>` : ''}</div>`;
 }
 function vToday() {
   const d = S.td; if (!d) return `<div data-today>${S.tdErr ? `<div class="card sm">${esc(S.tdErr)}</div>` : skelList()}</div>`;
@@ -1469,10 +1469,13 @@ async function shrinkPhoto(file, max = 1100) {
 }
 const discAmt = (sub, dc) => !dc ? 0 : Math.min(sub, Math.max(0, dc.kind === 'percent' ? sub * dc.value / 100 : dc.value));
 function idBlock(W) {
-  return `<div class="card" style="margin-top:12px"><b>ID needed</b><div class="sm mute" style="margin-top:2px">This service is for Senior, PWD and Student customers. Take a clear photo of the ID.</div>
+  if (W.idSkip && !W.idPhotoId) return `<div class="card" style="margin-top:12px"><b>No ID photo</b><div class="sm mute" style="margin-top:2px">The ticket will be marked "No ID photo" so the owner can check it.</div>
+    <button class="btn sec sm" style="margin-top:10px" data-wnoid>Take a photo of the ID instead</button></div>`;
+  return `<div class="card" style="margin-top:12px"><b>ID photo</b><div class="sm mute" style="margin-top:2px">This service is for Senior, PWD and Student customers. Take a clear photo of the ID, or continue without it.</div>
     <div class="chips" style="margin-top:10px">${['Senior', 'PWD', 'Student'].map(t => `<button class="chip ${W.idType === t ? 'on' : ''}" data-wid="${t}">${t}</button>`).join('')}</div>
     ${W.idPreview ? `<img src="${W.idPreview}" alt="ID photo" style="width:100%;max-height:180px;object-fit:contain;border-radius:12px;margin-top:10px;background:#000">` : ''}
-    <label class="btn sec block" style="margin-top:10px;cursor:pointer">${W.idPhotoId ? 'Retake the ID photo' : 'Take a photo of the ID'}<input type="file" accept="image/*" capture="environment" data-wfile hidden></label></div>`;
+    <label class="btn sec block" style="margin-top:10px;cursor:pointer">${W.idPhotoId ? 'Retake the ID photo' : 'Take a photo of the ID'}<input type="file" accept="image/*" capture="environment" data-wfile hidden></label>
+    ${W.idPhotoId ? '' : '<button class="btn sec sm block" style="margin-top:8px" data-wnoid>Continue without photo</button>'}</div>`;
 }
 async function uploadId(W, file, redraw) {
   if (!W.idType) return toast('Choose the ID type first');
@@ -1481,7 +1484,7 @@ async function uploadId(W, file, redraw) {
   W.busy = false; redraw();
 }
 function openWalkin() {
-  const d = S.td, me = d.role === 'barber', W = { name: '', phone: '', items: [], barberId: '', idType: '', idPhotoId: '', idPreview: '', busy: false, err: '' };
+  const d = S.td, me = d.role === 'barber', W = { name: '', phone: '', items: [], barberId: '', idType: '', idPhotoId: '', idPreview: '', idSkip: false, busy: false, err: '' };
   const o = sheet('<div id="tw"></div>'), box = o.querySelector('#tw');
   const draw = () => {
     const pick = d.menu.filter(i => W.items.includes(i.id)), sub = pick.reduce((t, i) => t + i.price, 0), needId = pick.some(i => i.needId);
@@ -1499,14 +1502,15 @@ function openWalkin() {
   o.addEventListener('input', e => { if (e.target.id === 'tw-name') W.name = e.target.value; if (e.target.id === 'tw-phone') W.phone = e.target.value; });
   o.addEventListener('change', e => { if (e.target.id === 'tw-barber') { W.barberId = e.target.value; draw(); } if (e.target.matches('[data-wfile]') && e.target.files[0]) uploadId(W, e.target.files[0], draw); });
   o.addEventListener('click', async e => {
-    const t = e.target.closest('[data-witem],[data-wid],[data-wsave]'); if (!t) return;
+    const t = e.target.closest('[data-witem],[data-wid],[data-wnoid],[data-wsave]'); if (!t) return;
     if (t.dataset.witem) { const id = t.dataset.witem; W.items = W.items.includes(id) ? W.items.filter(x => x !== id) : [...W.items, id]; W.err = ''; return draw(); }
     if (t.dataset.wid) { W.idType = t.dataset.wid; return draw(); }
+    if (t.hasAttribute('data-wnoid')) { W.idSkip = !W.idSkip; W.err = ''; return draw(); }
     if (t.hasAttribute('data-wsave')) {
       if (!W.name.trim()) { W.err = "Enter the customer's name"; return draw(); }
       if (!W.items.length) { W.err = 'Choose at least one service'; return draw(); }
       W.busy = true; W.err = ''; draw();
-      try { await sapi('/svc/walkin', { method: 'POST', body: { branchId: d.branch.id, name: W.name, phone: W.phone, items: W.items.map(itemId => ({ itemId, qty: 1 })), barberId: W.barberId, idPhotoId: W.idPhotoId } }); o.remove(); toast('Walk-in added'); loadToday(); }
+      try { await sapi('/svc/walkin', { method: 'POST', body: { branchId: d.branch.id, name: W.name, phone: W.phone, items: W.items.map(itemId => ({ itemId, qty: 1 })), barberId: W.barberId, idPhotoId: W.idPhotoId, idSkipped: W.idSkip && !W.idPhotoId } }); o.remove(); toast('Walk-in added'); loadToday(); }
       catch (x) { W.busy = false; W.err = x.message; draw(); }
     }
   });
@@ -1514,7 +1518,7 @@ function openWalkin() {
 }
 function openFinish(id) {
   const d = S.td, x = d.tickets.find(t => t.id === id); if (!x) return;
-  const W = { items: x.items.map(i => i.itemId), discountId: x.discountId || '', method: '', invoiceNo: '', barberId: x.barberId, idType: '', idPhotoId: '', idPreview: '', busy: false, err: '' };
+  const W = { items: x.items.map(i => i.itemId), discountId: x.discountId || '', method: '', invoiceNo: '', barberId: x.barberId, idType: '', idPhotoId: '', idPreview: '', idSkip: !!x.idSkipped, busy: false, err: '' };
   const o = sheet('<div id="tf"></div>'), box = o.querySelector('#tf'), me = d.role === 'barber';
   const draw = () => {
     const pick = d.menu.filter(i => W.items.includes(i.id)), sub = pick.reduce((t, i) => t + i.price, 0), dc = d.discounts.find(z => z.id === W.discountId), less = discAmt(sub, dc), total = sub - less;
@@ -1534,15 +1538,16 @@ function openFinish(id) {
   o.addEventListener('input', e => { if (e.target.id === 'tf-inv') W.invoiceNo = e.target.value; });
   o.addEventListener('change', e => { if (e.target.id === 'tf-disc') { W.discountId = e.target.value; draw(); } if (e.target.id === 'tf-barber') W.barberId = e.target.value; if (e.target.matches('[data-wfile]') && e.target.files[0]) uploadId(W, e.target.files[0], draw); });
   o.addEventListener('click', async e => {
-    const t = e.target.closest('[data-fitem],[data-fpay],[data-wid],[data-fsave]'); if (!t) return;
+    const t = e.target.closest('[data-fitem],[data-fpay],[data-wid],[data-wnoid],[data-fsave]'); if (!t) return;
     if (t.dataset.fitem) { const id = t.dataset.fitem; W.items = W.items.includes(id) ? W.items.filter(z => z !== id) : [...W.items, id]; W.err = ''; return draw(); }
     if (t.dataset.fpay) { W.method = t.dataset.fpay; W.err = ''; return draw(); }
     if (t.dataset.wid) { W.idType = t.dataset.wid; return draw(); }
+    if (t.hasAttribute('data-wnoid')) { W.idSkip = !W.idSkip; W.err = ''; return draw(); }
     if (t.hasAttribute('data-fsave')) {
       if (!W.items.length) { W.err = 'Choose what was done'; return draw(); }
       if (!W.method) { W.err = 'Choose how the customer paid'; return draw(); }
       W.busy = true; W.err = ''; draw();
-      try { await sapi(`/svc/${x.id}/finish`, { method: 'POST', body: { items: W.items.map(itemId => ({ itemId, qty: 1 })), discountId: W.discountId, method: W.method, invoiceNo: W.invoiceNo, barberId: W.barberId, idPhotoId: W.idPhotoId } }); o.remove(); toast('Done. Nice cut!'); loadToday(); }
+      try { await sapi(`/svc/${x.id}/finish`, { method: 'POST', body: { items: W.items.map(itemId => ({ itemId, qty: 1 })), discountId: W.discountId, method: W.method, invoiceNo: W.invoiceNo, barberId: W.barberId, idPhotoId: W.idPhotoId, idSkipped: W.idSkip && !W.idPhotoId } }); o.remove(); toast('Done. Nice cut!'); loadToday(); }
       catch (z) { W.busy = false; W.err = z.message; draw(); }
     }
   });

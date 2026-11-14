@@ -211,14 +211,14 @@ export function createOperationsRoutes({ syncRecord, isAppt, walkinGuard, orderP
       { const zl = dayLocked(branchId, t); if (zl) bad(409, `Today's sales reading (Z-${zl.no}) is already done, so new tickets cannot be made until tomorrow.`); }
       const cust = resolveCustomer(b, 'pos', branchId), name = cust.name.slice(0, 200); if (!name) bad(400, 'Customer name required');
       const items = priceItems(b.items), tt = totals(items, null);
-      const need = idNeeded(items); if (need.length && !b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is required for ${need.join(', ')}.`);
-      if (need.length) { const p = get('id_photos', String(b.idPhotoId)); if (!p || p.orderId || p.branchId !== branchId) bad(400, 'ID photo not found. Please take the photo again.'); }
+      const need = idNeeded(items); if (need.length && !b.idPhotoId && !b.idSkipped) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is required for ${need.join(', ')}.`);
+      if (need.length && b.idPhotoId) { const p = get('id_photos', String(b.idPhotoId)); if (!p || p.orderId || p.branchId !== branchId) bad(400, 'ID photo not found. Please take the photo again.'); }
       const no = (one('select max(no) m from orders where branchId=? and date=?', branchId, t).m || 0) + 1, ord = (one('select max(ord) m from orders').m || 0) + 1, id = uid();
       const dsc = b.discountId && get('discounts', String(b.discountId))?.active ? String(b.discountId) : '';
       run(`insert into orders(id,ord,no,branchId,date,customerId,customerName,barberId,chairId,status,items,subtotal,discountName,discountAmt,total,tenders,cashierId,createdAt,discountId)
       values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, ord, no, branchId, t, cust.id, name, '', '', 'waiting', JSON.stringify(items), tt.subtotal, '', 0, tt.total, '[]', me.id, nowISO(), dsc);
       const o = { id, ord, no, branchId };
-      if (need.length) attachIdPhoto(id, branchId, b.idPhotoId);
+      if (need.length && b.idPhotoId) attachIdPhoto(id, branchId, b.idPhotoId); else if (need.length) run('update orders set idSkip=1 where id=?', id);
       if (b.barberId) { const a = checkAssign(o, b); run("update orders set barberId=?, chairId=?, status='in_chair', startedAt=? where id=?", a.barber.id, a.chairId, nowISO(), id); }
       log(me, 'ticket', 'orders', id, `#${no} ${name}`);
       return send(res, 201, parseOrder(get('orders', id)));
@@ -236,7 +236,8 @@ export function createOperationsRoutes({ syncRecord, isAppt, walkinGuard, orderP
         if (!admin && Object.keys(b).some(k => !['barberId', 'chairId'].includes(k))) needAny(me, 'pos');
         if ('items' in b) {
           const items = priceBooked(bookedSnap(o.id), b.items), tt = totals(items, null), need = idNeeded(items);
-          if (need.length && !o.idPhoto && !b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is required for ${need.join(', ')}.`);
+          if (need.length && !o.idPhoto && !o.idSkip && !b.idPhotoId && !b.idSkipped) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is required for ${need.join(', ')}.`);
+          if (need.length && !o.idPhoto && !b.idPhotoId) upd.idSkip = 1;
           upd.items = JSON.stringify(items); upd.subtotal = tt.subtotal; upd.total = tt.total;
         }
         if (b.idPhotoId) attachIdPhoto(o.id, o.branchId, b.idPhotoId);

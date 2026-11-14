@@ -11,7 +11,7 @@ export function createServiceRoutes({ syncRecord, isAppt, dayRows, queueEstimate
         return { id: x.id, no: x.no, customerId: x.customerId || '', status: x.status === 'paid' ? 'done' : x.status === 'void' ? 'cancelled' : x.status, customerName: x.customerName, phone: c?.phone || '',
           barberId: x.barberId || '', barberName: x.barberId ? get('staff', x.barberId)?.name || '' : '', items: x.items.map(i => ({ itemId: i.itemId, name: i.name, type: i.type, price: i.price, qty: i.qty, needId: !!i.needId })),
           subtotal: x.subtotal, discountId: x.discountId || '', discountName: x.discountName || '', discountAmt: x.discountAmt || 0, total: x.total, method: x.tenders[0]?.method || '', invoiceNo: x.invoiceNo || '',
-          hasId: !!x.idPhoto, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '', plan: orderPlan(row), source: row.source || '', payStatus: row.payStatus || '', verifiedBy: row.verifiedBy || '' };
+          hasId: !!x.idPhoto, idSkipped: !x.idPhoto && !!row.idSkip, createdAt: x.createdAt, startedAt: x.startedAt || '', doneAt: x.paidAt || '', plan: orderPlan(row), source: row.source || '', payStatus: row.payStatus || '', verifiedBy: row.verifiedBy || '' };
       };
       const ticket = id => { const o = get('orders', String(id)); if (!o) bad(404, 'Visit not found'); if (!inScope(me, o.branchId)) bad(403, 'Not your shop'); return parseOrder(o); };
       if (p === '/api/svc/today' && method === 'GET') {
@@ -48,12 +48,12 @@ export function createServiceRoutes({ syncRecord, isAppt, dayRows, queueEstimate
         if (me.role === 'barber' && !myStaffId) bad(409, 'Your login is not linked to your barber profile yet. Ask the owner.');
         const name = String(b.name || '').trim().slice(0, 100); if (!name) bad(400, "Enter the customer's name");
         const items = priceItems(b.items); if (!items.length) bad(400, 'Choose at least one service');
-        const need = idNeeded(items); if (need.length && !b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is needed for ${need.join(', ')}.`);
-        if (need.length) { const ph = get('id_photos', String(b.idPhotoId)); if (!ph || ph.orderId || ph.branchId !== bid) bad(400, 'ID photo not found. Please take the photo again.'); }
+        const need = idNeeded(items); if (need.length && !b.idPhotoId && !b.idSkipped) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is needed for ${need.join(', ')}. Take the photo, or choose "Continue without photo".`);
+        if (need.length && b.idPhotoId) { const ph = get('id_photos', String(b.idPhotoId)); if (!ph || ph.orderId || ph.branchId !== bid) bad(400, 'ID photo not found. Please take the photo again.'); }
         const cust = resolveCustomer({ customer: { name, phone: String(b.phone || '').trim().slice(0, 30) } }, 'pos', bid);
         const o = createTicket(me, bid, cust.id, cust.name || name, items, me.role === 'barber' ? myStaffId : String(b.barberId || ''));
         run("update orders set via='app' where id=?", o.id);
-        if (need.length) attachIdPhoto(o.id, bid, b.idPhotoId);
+        if (need.length && b.idPhotoId) attachIdPhoto(o.id, bid, b.idPhotoId); else if (need.length) run('update orders set idSkip=1 where id=?', o.id);
         log(me, 'walk-in', 'orders', o.id, `#${o.no} ${name}`);
         return send(res, 201, svcView(get('orders', o.id)));
       }
@@ -115,7 +115,11 @@ export function createServiceRoutes({ syncRecord, isAppt, dayRows, queueEstimate
         if (dayLocked(o.branchId, todayStr())) bad(409, 'Today is already closed for this shop.');
         let items = o.items;
         if (Array.isArray(b.items)) { items = priceBooked(bookedSnap(o.id), b.items); if (!items.length) bad(400, 'Choose at least one service'); }
-        if (idNeeded(items).length && !o.idPhoto) { if (!b.idPhotoId) bad(400, `A photo of the customer's ID (Senior / PWD / Student) is needed for ${idNeeded(items).join(', ')}.`); attachIdPhoto(o.id, o.branchId, b.idPhotoId); }
+        if (idNeeded(items).length && !o.idPhoto) {
+          if (b.idPhotoId) attachIdPhoto(o.id, o.branchId, b.idPhotoId);
+          else if (b.idSkipped || o.idSkip) run('update orders set idSkip=1 where id=?', o.id);
+          else bad(400, `A photo of the customer's ID (Senior / PWD / Student) is needed for ${idNeeded(items).join(', ')}. Take the photo, or choose "Continue without photo".`);
+        }
         let barberId = o.barberId || (me.role === 'barber' ? myStaffId : String(b.barberId || ''));
         if (barberId) { const s = get('staff', barberId); if (!s || s.branchId !== o.branchId) bad(409, 'That barber is not in this shop'); }
         if (!barberId && items.some(i => i.type === 'service')) bad(409, 'Choose the barber who did the cut');

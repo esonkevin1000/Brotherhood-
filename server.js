@@ -372,8 +372,10 @@ function priceItems(lines) {
   }
   return out;
 }
-// Items marked "requires ID" (Buddy: Senior / PWD / Student) can only be sold with a photo of the customer's ID attached to the ticket.
+// Items marked "requires ID" (Buddy: Senior / PWD / Student) ask for a photo of the customer's ID on the ticket. The cashier may
+// go on without it by choosing "Continue without photo" (idSkipped); the ticket is then marked idSkip=1 so the owner can check it.
 const idNeeded = items => items.filter(i => i.needId).map(i => i.name);
+addCol('orders', 'idSkip', 'integer');
 const ID_TYPES = ['Senior', 'PWD', 'Student'];
 function attachIdPhoto(orderId, branchId, photoId) {
   const p = get('id_photos', String(photoId || '')); if (!p || (p.orderId && p.orderId !== orderId) || p.branchId !== branchId) bad(400, 'ID photo not found. Please take the photo again.');
@@ -914,7 +916,7 @@ function scoreData(from, to, br, onlyStaff) {
 // ---------- http ----------
 // JSON answers, request bodies and static files are in src/lib/http.js
 const serveStatic = staticServer(DIR);
-const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/brotherhood': 'bh.html', '/member': 'bh.html', '/bh.js': 'bh.js', '/bh.webmanifest': 'bh.webmanifest', '/bh-icon-192.png': 'bh-icon-192.png', '/bh-icon-512.png': 'bh-icon-512.png', '/bh-apple-touch.png': 'bh-apple-touch.png', '/bh-mark.png': 'bh-mark.png', '/barbershop': 'landing.html', '/privacy': 'site/privacy.html', '/terms': 'site/terms.html', '/delete-account': 'site/delete-account.html', '/signup': 'site/signup.html', '/shop-terms': 'site/shop-terms.html', '/': 'home.html','/app.js': 'app.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/backoffice': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
+const STATIC = { '/book': 'book.html', '/book.js': 'book.js', '/brotherhood': 'bh.html', '/member': 'bh.html', '/bh.js': 'bh.js', '/bh.webmanifest': 'bh.webmanifest', '/bh-icon-192.png': 'bh-icon-192.png', '/bh-icon-512.png': 'bh-icon-512.png', '/bh-apple-touch.png': 'bh-apple-touch.png', '/bh-mark.png': 'bh-mark.png', '/barbershop': 'landing.html', '/privacy': 'site/privacy.html', '/terms': 'site/terms.html', '/delete-account': 'site/delete-account.html', '/signup': 'site/signup.html', '/shop-terms': 'site/shop-terms.html', '/': 'home.html','/app.js': 'app.js', '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon-192.png': 'icon-192.png', '/icon-512.png': 'icon-512.png', '/logo.png': 'logo.png', '/logo-sm.png': 'logo-sm.png', '/membership-card.jpg': 'membership-card.jpg', '/apple-touch-icon.png': 'apple-touch-icon.png', '/update.js': 'update.js', '/inbox.js': 'inbox.js', '/webcam.js': 'webcam.js', '/backoffice': 'index.html', '/.well-known/assetlinks.json': 'assetlinks.json' };
 const normHost = h => String(h || '').toLowerCase().split(',')[0].trim().replace(/:\d+$/, '').replace(/^www\./, '');
 const SITE_HOST = normHost(process.env.SITE_HOST), APP_HOST = normHost(process.env.APP_HOST), LANDING_HOST = normHost(process.env.LANDING_HOST);
 // LANDING_HOST = a separate domain (e.g. brotherhoodbarberph.com) whose home page is the BrotherhoodBarber shop website. The public domain's home page is the Brotherhood product site, and the app is at /member.

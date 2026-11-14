@@ -16,7 +16,7 @@ try {
     ok(`${p}: each of its own inline scripts (${inline.length}) is allowed by fingerprint`, inline.every(x => scriptSrc.includes(x)), inline);
     ok(`${p}: no inline event handlers (they would be blocked)`, !/<[^>]+\son[a-z]+\s*=/i.test(html.replace(/<script>[\s\S]*?<\/script>/g, '')));
   }
-  for (const js of ['/bh.js', '/app.js', '/book.js', '/inbox.js']) {
+  for (const js of ['/bh.js', '/app.js', '/book.js', '/inbox.js', '/webcam.js']) {
     const t = await (await fetch(S.B + js)).text();
     ok(`${js}: builds no inline event handlers`, !/\son(click|load|error|input|change|submit|focus)="/.test(t));
   }

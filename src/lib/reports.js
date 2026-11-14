@@ -149,7 +149,7 @@ export function createReports({ dOf, todayStr, r2, sum, all, one, get, commissio
         return [...m.entries()].sort(order || ((a, b) => b[1].a - a[1].a));
       };
       const pct = (v, n) => n ? Math.round(v / n * 100) + '%' : '—';
-      const appt = os.filter(o => o.source === 'appointment');
+      const appt = os.filter(o => o.source === 'appointment'), noId = os.filter(o => o.idSkip && !o.idPhoto);   // ID services sold with "Continue without photo"
       return {
         cards: [{ label: 'Recorded value', value: net, t: 'peso', how: 'Sum of finished visits in the dates chosen, after discounts and approved corrections. Voided records are left out.' }, { label: 'Visits', value: os.length, t: 'num', how: 'Finished visits in the dates chosen. Voided and unfinished visits are not counted.' },
           { label: 'From appointments', value: appt.length, t: 'num', sub: '₱' + sum(appt, o => o.total).toFixed(2), how: 'Finished visits that started as a booking.' }, { label: 'Walk-ins', value: os.length - appt.length, t: 'num', sub: '₱' + (net - sum(appt, o => o.total)).toFixed(2), how: 'All other finished visits.' },
@@ -159,7 +159,8 @@ export function createReports({ dOf, todayStr, r2, sum, all, one, get, commissio
           { title: 'By branch', cols: [['Branch'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.branchName || '—').map(([k, r]) => [k, r.n, r.a]) },
           { title: 'By barber', cols: [['Barber'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.barberName || 'Not assigned').map(([k, r]) => [k, r.n, r.a]) },
           { title: 'Appointment vs walk-in', cols: [['Source'], ['Visits', 'num'], ['Value', 'peso']], rows: group(o => o.source === 'appointment' ? 'Appointment' : 'Walk-in').map(([k, r]) => [k, r.n, r.a]) },
-          { title: 'By payment method', cols: [['Method'], ['Visits', 'num'], ['Value', 'peso'], ['Verified']], rows: group(methodOf).map(([k, r]) => [k, r.n, r.a, pct(r.v, r.n) + ' (' + r.v + ' of ' + r.n + ')']) }]
+          { title: 'By payment method', cols: [['Method'], ['Visits', 'num'], ['Value', 'peso'], ['Verified']], rows: group(methodOf).map(([k, r]) => [k, r.n, r.a, pct(r.v, r.n) + ' (' + r.v + ' of ' + r.n + ')']) },
+          ...(noId.length ? [{ title: 'Without an ID photo', cols: [['Date'], ['Ticket'], ['Customer'], ['Branch'], ['Barber'], ['Value', 'peso']], rows: noId.map(o => [o.date, '#' + o.no, o.customerName, o.branchName || '—', o.barberName || '—', o.total]) }] : [])]
       };
     },
     readings(f) {
